@@ -1,17 +1,17 @@
-# blender_mcp_server.py
+# overtli_blender_server.py
 from mcp.server.fastmcp import FastMCP, Image
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any
 
-from blender_mcp.connection import BlenderConnection
-from blender_mcp.server_config import DEFAULT_HOST, DEFAULT_PORT, get_default_config
-from blender_mcp.tools.registry import register_all_tools
+from overtli_blender.connection import BlenderConnection
+from overtli_blender.server_config import DEFAULT_HOST, DEFAULT_PORT, get_default_config
+from overtli_blender.tools.registry import register_all_tools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("BlenderMCPServer")
+logger = logging.getLogger("OvertliBlenderServer")
 
 @asynccontextmanager
 async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
@@ -21,7 +21,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     
     try:
         # Just log that we're starting up
-        logger.info("BlenderMCP server starting up")
+        logger.info("Overtli-Blender server starting up")
         
         # Try to connect to Blender on startup to verify it's available
         try:
@@ -41,11 +41,11 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
             logger.info("Disconnecting from Blender on shutdown")
             _blender_connection.disconnect()
             _blender_connection = None
-        logger.info("BlenderMCP server shut down")
+        logger.info("Overtli-Blender server shut down")
 
 # Create the MCP server with lifespan support
 mcp = FastMCP(
-    "BlenderMCP",
+    "Overtli-Blender",
     lifespan=server_lifespan
 )
 
@@ -169,3 +169,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

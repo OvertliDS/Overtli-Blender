@@ -9,7 +9,7 @@ from typing import Any
 from .transport import encode_command, receive_full_response
 
 
-logger = logging.getLogger("BlenderMCPServer")
+logger = logging.getLogger("OvertliBlenderServer")
 
 
 @dataclass
@@ -83,3 +83,4 @@ class BlenderConnection:
             logger.error("Error communicating with Blender: %s", exc)
             self.sock = None
             raise Exception(f"Communication error with Blender: {str(exc)}")
+

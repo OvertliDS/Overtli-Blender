@@ -13,19 +13,19 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
+SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
-CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
-OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
-SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
-SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
-CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
-REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
-PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
-POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
-SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
-HYPER3D_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/hyper3d_tools.py").read_text(encoding="utf-8")
-GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
+CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
+OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
+PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/provider_status_tools.py").read_text(encoding="utf-8")
+POLYHAVEN_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/polyhaven_tools.py").read_text(encoding="utf-8")
+SKETCHFAB_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/sketchfab_tools.py").read_text(encoding="utf-8")
+HYPER3D_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/hyper3d_tools.py").read_text(encoding="utf-8")
+GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
 
 
 def _has_def(source: str, name: str) -> bool:
@@ -34,19 +34,19 @@ def _has_def(source: str, name: str) -> bool:
 
 
 def test_server_config_imports_without_mcp_or_blender() -> None:
-    importlib.import_module("blender_mcp.server_config")
+    importlib.import_module("overtli_blender.server_config")
 
 
 def test_transport_imports_without_mcp_or_blender() -> None:
-    importlib.import_module("blender_mcp.transport")
+    importlib.import_module("overtli_blender.transport")
 
 
 def test_connection_imports_without_mcp_or_blender() -> None:
-    importlib.import_module("blender_mcp.connection")
+    importlib.import_module("overtli_blender.connection")
 
 
 def test_default_server_config_matches_baseline() -> None:
-    from blender_mcp.server_config import DEFAULT_HOST, DEFAULT_PORT, BlenderServerConfig, get_default_config
+    from overtli_blender.server_config import DEFAULT_HOST, DEFAULT_PORT, BlenderServerConfig, get_default_config
 
     config = get_default_config()
     assert DEFAULT_HOST == "localhost"
@@ -59,7 +59,7 @@ def test_default_server_config_matches_baseline() -> None:
 
 
 def test_encode_and_decode_round_trip_json_bytes() -> None:
-    from blender_mcp.transport import decode_response, encode_command
+    from overtli_blender.transport import decode_response, encode_command
 
     payload = {"type": "ping", "params": {"value": 1}}
     encoded = encode_command(payload)
@@ -69,7 +69,7 @@ def test_encode_and_decode_round_trip_json_bytes() -> None:
 
 
 def test_decode_response_rejects_invalid_json() -> None:
-    from blender_mcp.transport import decode_response
+    from overtli_blender.transport import decode_response
 
     try:
         decode_response(b"not json")
@@ -80,7 +80,7 @@ def test_decode_response_rejects_invalid_json() -> None:
 
 
 def test_blender_connection_can_be_instantiated_without_connecting() -> None:
-    from blender_mcp.connection import BlenderConnection
+    from overtli_blender.connection import BlenderConnection
 
     connection = BlenderConnection(host="localhost", port=9876)
     assert connection.host == "localhost"
@@ -204,3 +204,4 @@ def test_addon_py_contains_internal_service_extraction() -> None:
     assert "class ScriptRegistryService" in ADDON_TEXT
     assert "self.shared_context_service = SharedContextService(self.shared_context)" in ADDON_TEXT
     assert "self.script_registry_service = ScriptRegistryService()" in ADDON_TEXT
+

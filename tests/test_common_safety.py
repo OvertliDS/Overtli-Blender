@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.blender_mcp.common.permissions import RiskLevel, Reversibility
-from src.blender_mcp.common.safety import (
+from overtli_blender.common.permissions import RiskLevel, Reversibility
+from overtli_blender.common.safety import (
     AVAILABLE_SAFETY_MODES,
     DEFAULT_SAFETY_MODE,
     SAFETY_MODE_AUDIT,
@@ -57,3 +57,4 @@ def test_get_command_safety_returns_expected_spec() -> None:
     spec = get_command_safety("get_scene_info")
     assert spec is not None
     assert spec.risk_level == RiskLevel.LOW
+

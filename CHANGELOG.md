@@ -67,7 +67,7 @@ Added 7 new tools for better workflow composition:
 
 #### 📁 **Files Modified**
 - **`addon.py`**: Added shared context storage, new tool handlers, enhanced returns
-- **`src/blender_mcp/server.py`**: Added 7 new MCP tool endpoints, enhanced descriptions
+- **`src/overtli_blender/server.py`**: Added 7 new MCP tool endpoints, enhanced descriptions
 
 ### Technical Details
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
-SAFETY_TEXT = (ROOT / "src/blender_mcp/common/safety.py").read_text(encoding="utf-8")
+SAFETY_TEXT = (ROOT / "src/overtli_blender/common/safety.py").read_text(encoding="utf-8")
 SMOKE_TEXT = (ROOT / "scripts" / "smoke_blender_addon_socket.py").read_text(encoding="utf-8")
 
 
@@ -66,3 +66,4 @@ def test_smoke_script_exposes_safety_mode_flags() -> None:
         "get_safety_status",
     ]:
         assert text in SMOKE_TEXT
+

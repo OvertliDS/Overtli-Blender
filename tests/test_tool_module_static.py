@@ -4,24 +4,24 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
-OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
-SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
-SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
-CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
-REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
-SAFETY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/safety_tools.py").read_text(encoding="utf-8")
-PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
-POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
-SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
-HYPER3D_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/hyper3d_tools.py").read_text(encoding="utf-8")
-GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
-SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
+CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
+OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
+SAFETY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/safety_tools.py").read_text(encoding="utf-8")
+PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/provider_status_tools.py").read_text(encoding="utf-8")
+POLYHAVEN_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/polyhaven_tools.py").read_text(encoding="utf-8")
+SKETCHFAB_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/sketchfab_tools.py").read_text(encoding="utf-8")
+HYPER3D_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/hyper3d_tools.py").read_text(encoding="utf-8")
+GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
+SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
 
 
 def test_context_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/context_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/context_tools.py").exists()
     assert "def register_context_tools" in CONTEXT_TOOLS_TEXT
 
 
@@ -39,7 +39,7 @@ def test_context_tools_contains_expected_tool_names() -> None:
 
 
 def test_observation_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/observation_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/observation_tools.py").exists()
     assert "def register_observation_tools" in OBSERVATION_TOOLS_TEXT
 
 
@@ -52,7 +52,7 @@ def test_observation_tools_contains_expected_tool_names() -> None:
 
 
 def test_screenshot_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/screenshot_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/screenshot_tools.py").exists()
     assert "def register_screenshot_tools" in SCREENSHOT_TOOLS_TEXT
 
 
@@ -61,7 +61,7 @@ def test_screenshot_tools_contains_expected_tool_name() -> None:
 
 
 def test_script_registry_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/script_registry_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/script_registry_tools.py").exists()
     assert "def register_script_registry_tools" in SCRIPT_REGISTRY_TOOLS_TEXT
 
 
@@ -76,7 +76,7 @@ def test_script_registry_tools_contains_expected_tool_names() -> None:
 
 
 def test_code_execution_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/code_execution_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/code_execution_tools.py").exists()
     assert "def register_code_execution_tools" in CODE_EXECUTION_TOOLS_TEXT
 
 
@@ -86,7 +86,7 @@ def test_code_execution_tools_contains_expected_tool_name() -> None:
 
 
 def test_registry_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/registry.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/registry.py").exists()
     assert "def register_all_tools" in REGISTRY_TOOLS_TEXT
 
 
@@ -108,7 +108,7 @@ def test_registry_module_references_all_tool_registration_helpers() -> None:
 
 
 def test_provider_status_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/provider_status_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/provider_status_tools.py").exists()
     assert "def register_provider_status_tools" in PROVIDER_STATUS_TOOLS_TEXT
 
 
@@ -122,7 +122,7 @@ def test_provider_status_tools_contains_expected_tool_names() -> None:
 
 
 def test_safety_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/safety_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/safety_tools.py").exists()
     assert "def register_safety_tools" in SAFETY_TOOLS_TEXT
 
 
@@ -131,7 +131,7 @@ def test_safety_tools_contains_expected_tool_name() -> None:
 
 
 def test_polyhaven_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/polyhaven_tools.py").exists()
     assert "def register_polyhaven_tools" in POLYHAVEN_TOOLS_TEXT
 
 
@@ -146,7 +146,7 @@ def test_polyhaven_tools_contains_expected_tool_names() -> None:
 
 
 def test_sketchfab_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/sketchfab_tools.py").exists()
     assert "def register_sketchfab_tools" in SKETCHFAB_TOOLS_TEXT
 
 
@@ -159,7 +159,7 @@ def test_sketchfab_tools_contains_expected_tool_names() -> None:
 
 
 def test_hyper3d_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/hyper3d_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/hyper3d_tools.py").exists()
     assert "def register_hyper3d_tools" in HYPER3D_TOOLS_TEXT
 
 
@@ -174,7 +174,7 @@ def test_hyper3d_tools_contains_expected_tool_names() -> None:
 
 
 def test_geometry_nodes_tools_module_exists_and_registers_tools() -> None:
-    assert (ROOT / "src/blender_mcp/tools/geometry_nodes_tools.py").exists()
+    assert (ROOT / "src/overtli_blender/tools/geometry_nodes_tools.py").exists()
     assert "def register_geometry_nodes_tools" in GEOMETRY_NODES_TOOLS_TEXT
 
 
@@ -187,7 +187,7 @@ def test_geometry_nodes_tools_contains_expected_tool_names() -> None:
 
 
 def test_server_imports_and_registers_context_tools() -> None:
-    assert "from blender_mcp.tools.registry import register_all_tools" in SERVER_TEXT
+    assert "from overtli_blender.tools.registry import register_all_tools" in SERVER_TEXT
     assert "register_all_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
 
 
@@ -235,3 +235,4 @@ def test_addon_command_strings_are_still_present() -> None:
         "get_geometry_nodes_status",
     ]:
         assert f'"{name}":' in ADDON_TEXT or f"'{name}':" in ADDON_TEXT
+

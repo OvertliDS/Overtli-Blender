@@ -13,8 +13,8 @@ def test_required_repo_files_exist() -> None:
         "pyproject.toml",
         "addon.py",
         "main.py",
-        "src/blender_mcp/server.py",
-        "src/blender_mcp/__init__.py",
+        "src/overtli_blender/server.py",
+        "src/overtli_blender/__init__.py",
         "docs/README.md",
         "tests/test_repo_baseline.py",
         "tests/test_static_contract_inventory.py",
@@ -26,13 +26,23 @@ def test_required_repo_files_exist() -> None:
 
 def test_pyproject_parses_and_has_baseline_package_name() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert data["project"]["name"] == "blender-mcp-enhanced"  # baseline before rebrand
+    assert data["project"]["name"] == "overtli-blender"
+    assert "overtli-blender" in data["project"]["scripts"]
+    assert "blender-mcp-enhanced" not in data["project"]["scripts"]
+    assert data["project"]["scripts"]["overtli-blender"] == "overtli_blender.server:main"
 
 
-def test_readme_still_contains_inherited_identity_terms() -> None:
+def test_readme_contains_current_identity_and_upstream_credit() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "BlenderMCP" in readme
-    assert "blender-mcp-enhanced" in readme
+    assert "Overtli-Blender" in readme
+    assert "blender-mcp-enhanced" not in readme
+    assert "BlenderMCP" in readme  # upstream credit only
+    assert "Original Project" in readme or "Upstream Credit" in readme
+
+
+def test_old_package_path_is_removed_from_source_tree() -> None:
+    assert not (ROOT / "src/blender_mcp").exists()
+    assert (ROOT / "src/overtli_blender").exists()
 
 
 def test_private_planning_is_not_required_for_public_baseline() -> None:
@@ -40,3 +50,4 @@ def test_private_planning_is_not_required_for_public_baseline() -> None:
     assert "memory_bank/" in gitignore
     assert "tools/" in gitignore
     assert "docs/architecture_refactor_plan.md" in gitignore
+

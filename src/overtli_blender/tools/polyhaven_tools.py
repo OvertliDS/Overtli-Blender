@@ -13,7 +13,7 @@ logger = logging.getLogger("BlenderMCPServer")
 
 def _is_polyhaven_enabled() -> bool:
     try:
-        server_module = importlib.import_module("blender_mcp.server")
+        server_module = importlib.import_module("overtli_blender.server")
         return bool(getattr(server_module, "_polyhaven_enabled", False))
     except Exception:
         return False
@@ -222,3 +222,4 @@ def register_polyhaven_tools(mcp: Any, get_blender_connection: Callable[[], Any]
         except Exception as e:
             logger.error(f"Error applying texture: {str(e)}")
             return f"Error applying texture: {str(e)}"
+

@@ -12,14 +12,14 @@ if str(SRC) not in sys.path:
 
 
 def test_common_modules_import_without_blender() -> None:
-    import blender_mcp.common  # noqa: F401
-    from blender_mcp.common import contracts, errors, handles, operation_types, permissions  # noqa: F401
+    import overtli_blender.common  # noqa: F401
+    from overtli_blender.common import contracts, errors, handles, operation_types, permissions  # noqa: F401
 
     assert True
 
 
 def test_operation_type_values_cover_key_entries() -> None:
-    from blender_mcp.common.operation_types import OperationType, operation_type_values
+    from overtli_blender.common.operation_types import OperationType, operation_type_values
 
     values = operation_type_values()
     assert values == [item.value for item in OperationType]
@@ -28,7 +28,7 @@ def test_operation_type_values_cover_key_entries() -> None:
 
 
 def test_handle_helpers_round_trip() -> None:
-    from blender_mcp.common.handles import HandleType, make_handle, split_handle
+    from overtli_blender.common.handles import HandleType, make_handle, split_handle
 
     handle = make_handle(HandleType.OBJECT, "Cube")
     assert handle == "object:Cube"
@@ -36,7 +36,7 @@ def test_handle_helpers_round_trip() -> None:
 
 
 def test_empty_handle_name_raises_value_error() -> None:
-    from blender_mcp.common.handles import HandleType, make_handle
+    from overtli_blender.common.handles import HandleType, make_handle
 
     try:
         make_handle(HandleType.MATERIAL, "")
@@ -47,8 +47,8 @@ def test_empty_handle_name_raises_value_error() -> None:
 
 
 def test_success_result_serializes_to_expected_shape() -> None:
-    from blender_mcp.common.contracts import success_result
-    from blender_mcp.common.operation_types import OperationType
+    from overtli_blender.common.contracts import success_result
+    from overtli_blender.common.operation_types import OperationType
 
     result = success_result("demo_tool", OperationType.OBSERVE, {"ok": True})
     data = result.to_dict()
@@ -62,8 +62,8 @@ def test_success_result_serializes_to_expected_shape() -> None:
 
 
 def test_success_result_json_loads() -> None:
-    from blender_mcp.common.contracts import success_result
-    from blender_mcp.common.operation_types import OperationType
+    from overtli_blender.common.contracts import success_result
+    from overtli_blender.common.operation_types import OperationType
 
     payload = success_result("demo_tool", OperationType.CREATE, {"created": 1}).to_json()
     parsed = json.loads(payload)
@@ -72,8 +72,8 @@ def test_success_result_json_loads() -> None:
 
 
 def test_error_result_includes_error_information() -> None:
-    from blender_mcp.common.contracts import error_result
-    from blender_mcp.common.operation_types import OperationType
+    from overtli_blender.common.contracts import error_result
+    from overtli_blender.common.operation_types import OperationType
 
     result = error_result("demo_tool", OperationType.EDIT, "VALIDATION_ERROR", "Bad input")
     data = result.to_dict()
@@ -83,9 +83,10 @@ def test_error_result_includes_error_information() -> None:
 
 
 def test_overtli_blender_error_to_dict_is_json_serializable() -> None:
-    from blender_mcp.common.errors import ErrorCode, OvertliBlenderError
+    from overtli_blender.common.errors import ErrorCode, OvertliBlenderError
 
     error = OvertliBlenderError(ErrorCode.NOT_FOUND, "Missing thing", {"id": 7})
     payload = error.to_dict()
     assert json.loads(json.dumps(payload)) == payload
+
 

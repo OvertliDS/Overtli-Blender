@@ -6,7 +6,7 @@ import socket
 from typing import Any
 
 
-logger = logging.getLogger("BlenderMCPServer")
+logger = logging.getLogger("OvertliBlenderServer")
 DEFAULT_BUFFER_SIZE = 8192
 
 
@@ -61,4 +61,5 @@ def receive_full_response(sock: socket.socket, *, timeout_seconds: float) -> dic
             raise Exception("Incomplete JSON response received") from exc
 
     raise Exception("No data received")
+
 

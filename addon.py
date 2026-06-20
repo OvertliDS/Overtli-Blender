@@ -24,9 +24,12 @@ from typing import List, Dict, Union, Any, Optional, Tuple
 ADDON_ROOT = os.path.dirname(os.path.abspath(__file__))
 if ADDON_ROOT not in sys.path:
     sys.path.insert(0, ADDON_ROOT)
+SRC_ROOT = os.path.join(ADDON_ROOT, "src")
+if SRC_ROOT not in sys.path:
+    sys.path.insert(0, SRC_ROOT)
 
 try:
-    from src.blender_mcp.common.safety import (
+    from overtli_blender.common.safety import (
         AVAILABLE_SAFETY_MODES,
         DEFAULT_SAFETY_MODE,
         SAFETY_MODE_AUDIT,
@@ -35,7 +38,7 @@ try:
         SAFETY_POLICY_VERSION,
         build_command_safety_map,
     )
-    from src.blender_mcp.common.permissions import RiskLevel
+    from overtli_blender.common.permissions import RiskLevel
 except ModuleNotFoundError:
     class RiskLevel(str, Enum):
         LOW = "LOW"
@@ -110,12 +113,12 @@ except ModuleNotFoundError:
         }
 
 bl_info = {
-    "name": "Blender MCP",
-    "author": "BlenderMCP",
+    "name": "Overtli-Blender",
+    "author": "OvertliDS",
     "version": (1, 2),
     "blender": (3, 0, 0),
-    "location": "View3D > Sidebar > BlenderMCP",
-    "description": "Connect Blender to Claude via MCP",
+    "location": "View3D > Sidebar > Overtli-Blender",
+    "description": "Connect Blender to Overtli-Blender via MCP",
     "category": "Interface",
 }
 
@@ -123,7 +126,7 @@ RODIN_FREE_TRIAL_KEY = "k9TcfFoEhNd9cCPP2guHAHHHkctZHIRhZDywZ1euGUXwihbYLpOjQhof
 
 # Add User-Agent as required by Poly Haven API
 REQ_HEADERS = requests.utils.default_headers()
-REQ_HEADERS.update({"User-Agent": "blender-mcp"})
+REQ_HEADERS.update({"User-Agent": "overtli-blender"})
 
 # Check if this is Blender 4+
 IS_BLENDER_4 = bpy.app.version[0] >= 4
@@ -797,9 +800,9 @@ class ProviderStatusService:
         return {
             "enabled": False,
             "message": """PolyHaven integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use assets from Poly Haven' checkbox
-                            3. Restart the connection to Claude"""
+                            3. Restart the connection to the MCP server"""
         }
 
     def get_hyper3d_status(self):
@@ -809,10 +812,10 @@ class ProviderStatusService:
                 return {
                     "enabled": False,
                     "message": """Hyper3D Rodin integration is currently enabled, but API key is not given. To enable it:
-                                1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                                1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                                 2. Keep the 'Use Hyper3D Rodin 3D model generation' checkbox checked
                                 3. Choose the right plaform and fill in the API Key
-                                4. Restart the connection to Claude"""
+                                4. Restart the connection to the MCP server"""
                 }
             mode = bpy.context.scene.blendermcp_hyper3d_mode
             message = f"Hyper3D Rodin integration is enabled and ready to use. Mode: {mode}. " + \
@@ -821,9 +824,9 @@ class ProviderStatusService:
         return {
             "enabled": False,
             "message": """Hyper3D Rodin integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use Hyper3D Rodin 3D model generation' checkbox
-                            3. Restart the connection to Claude"""
+                            3. Restart the connection to the MCP server"""
         }
 
     def get_sketchfab_status(self):
@@ -865,18 +868,18 @@ class ProviderStatusService:
             return {
                 "enabled": False,
                 "message": """Sketchfab integration is currently enabled, but API key is not given. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Keep the 'Use Sketchfab' checkbox checked
                             3. Enter your Sketchfab API Key
-                            4. Restart the connection to Claude"""
+                            4. Restart the connection to the MCP server"""
             }
         return {
             "enabled": False,
             "message": """Sketchfab integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use assets from Sketchfab' checkbox
                             3. Enter your Sketchfab API Key
-                            4. Restart the connection to Claude"""
+                            4. Restart the connection to the MCP server"""
         }
 
 class PolyHavenService:
@@ -2105,7 +2108,7 @@ class BlenderMCPServer:
             self.server_thread.daemon = True
             self.server_thread.start()
 
-            print(f"BlenderMCP server started on {self.host}:{self.port}")
+            print(f"Overtli-Blender server started on {self.host}:{self.port}")
         except Exception as e:
             print(f"Failed to start server: {str(e)}")
             self.stop()
@@ -2130,7 +2133,7 @@ class BlenderMCPServer:
                 pass
             self.server_thread = None
 
-        print("BlenderMCP server stopped")
+        print("Overtli-Blender server stopped")
 
     def _server_loop(self):
         """Main server loop in a separate thread"""
@@ -3134,9 +3137,9 @@ class BlenderMCPServer:
             return {
                 "enabled": False,
                 "message": """PolyHaven integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use assets from Poly Haven' checkbox
-                            3. Restart the connection to Claude"""
+                            3. Restart the connection to the MCP server"""
         }
 
     #region Hyper3D
@@ -3148,10 +3151,10 @@ class BlenderMCPServer:
                 return {
                     "enabled": False,
                     "message": """Hyper3D Rodin integration is currently enabled, but API key is not given. To enable it:
-                                1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                                1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                                 2. Keep the 'Use Hyper3D Rodin 3D model generation' checkbox checked
                                 3. Choose the right plaform and fill in the API Key
-                                4. Restart the connection to Claude"""
+                                4. Restart the connection to the MCP server"""
                 }
             mode = bpy.context.scene.blendermcp_hyper3d_mode
             message = f"Hyper3D Rodin integration is enabled and ready to use. Mode: {mode}. " + \
@@ -3164,9 +3167,9 @@ class BlenderMCPServer:
             return {
                 "enabled": False,
                 "message": """Hyper3D Rodin integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use Hyper3D Rodin 3D model generation' checkbox
-                            3. Restart the connection to Claude"""
+                            3. Restart the connection to the MCP server"""
             }
 
     def create_rodin_job(self, *args, **kwargs):
@@ -3523,19 +3526,19 @@ class BlenderMCPServer:
             return {
                 "enabled": False,
                 "message": """Sketchfab integration is currently enabled, but API key is not given. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Keep the 'Use Sketchfab' checkbox checked
                             3. Enter your Sketchfab API Key
-                            4. Restart the connection to Claude"""
+                            4. Restart the connection to the MCP server"""
             }
         else:
             return {
                 "enabled": False,
                 "message": """Sketchfab integration is currently disabled. To enable it:
-                            1. In the 3D Viewport, find the BlenderMCP panel in the sidebar (press N if hidden)
+                            1. In the 3D Viewport, find the Overtli-Blender panel in the sidebar (press N if hidden)
                             2. Check the 'Use assets from Sketchfab' checkbox
                             3. Enter your Sketchfab API Key
-                            4. Restart the connection to Claude"""
+                            4. Restart the connection to the MCP server"""
             }
 
     def search_sketchfab_models(self, query, categories=None, count=20, downloadable=True):
@@ -3781,7 +3784,7 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
     bl_idname = "BLENDERMCP_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'BlenderMCP'
+    bl_category = 'Overtli-Blender'
 
     def draw(self, context):
         layout = self.layout
@@ -3820,8 +3823,8 @@ class BLENDERMCP_OT_SetFreeTrialHyper3DAPIKey(bpy.types.Operator):
 # Operator to start the server
 class BLENDERMCP_OT_StartServer(bpy.types.Operator):
     bl_idname = "blendermcp.start_server"
-    bl_label = "Connect to Claude"
-    bl_description = "Start the BlenderMCP server to connect with Claude"
+    bl_label = "Connect to MCP server"
+    bl_description = "Start the Overtli-Blender socket server"
 
     def execute(self, context):
         scene = context.scene
@@ -3839,8 +3842,8 @@ class BLENDERMCP_OT_StartServer(bpy.types.Operator):
 # Operator to stop the server
 class BLENDERMCP_OT_StopServer(bpy.types.Operator):
     bl_idname = "blendermcp.stop_server"
-    bl_label = "Stop the connection to Claude"
-    bl_description = "Stop the connection to Claude"
+    bl_label = "Stop the MCP connection"
+    bl_description = "Stop the MCP connection"
 
     def execute(self, context):
         scene = context.scene
@@ -3858,7 +3861,7 @@ class BLENDERMCP_OT_StopServer(bpy.types.Operator):
 def register():
     bpy.types.Scene.blendermcp_port = IntProperty(
         name="Port",
-        description="Port for the BlenderMCP server",
+        description="Port for the Overtli-Blender server",
         default=9876,
         min=1024,
         max=65535
@@ -3916,7 +3919,7 @@ def register():
     bpy.utils.register_class(BLENDERMCP_OT_StartServer)
     bpy.utils.register_class(BLENDERMCP_OT_StopServer)
 
-    print("BlenderMCP addon registered")
+    print("Overtli-Blender addon registered")
 
 def unregister():
     # Stop the server if it's running
@@ -3938,7 +3941,9 @@ def unregister():
     del bpy.types.Scene.blendermcp_use_sketchfab
     del bpy.types.Scene.blendermcp_sketchfab_api_key
 
-    print("BlenderMCP addon unregistered")
+    print("Overtli-Blender addon unregistered")
 
 if __name__ == "__main__":
     register()
+
+

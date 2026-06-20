@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
-SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
+SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
 
 
 def test_addon_entrypoint_symbols_remain_present() -> None:
@@ -78,3 +78,4 @@ def test_addon_and_server_mapping_differences_remain_documented() -> None:
     assert "execute_blender_code" not in ADDON_TEXT
     assert "def execute_blender_code(" not in ADDON_TEXT
     assert "def execute_blender_code(" not in SERVER_TEXT
+

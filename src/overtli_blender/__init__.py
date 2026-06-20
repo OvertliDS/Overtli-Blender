@@ -1,4 +1,4 @@
-"""Blender integration through the Model Context Protocol."""
+"""Overtli-Blender integration through the Model Context Protocol."""
 
 from __future__ import annotations
 

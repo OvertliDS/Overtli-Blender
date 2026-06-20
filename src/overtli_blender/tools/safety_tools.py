@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 
-logger = logging.getLogger("BlenderMCPServer")
+logger = logging.getLogger("OvertliBlenderServer")
 
 
 def register_safety_tools(mcp: Any, get_blender_connection: Callable[[], Any]) -> None:
@@ -34,3 +34,4 @@ def register_safety_tools(mcp: Any, get_blender_connection: Callable[[], Any]) -
         except Exception as e:
             logger.error(f"Error querying safety status: {str(e)}")
             return f"Error querying safety status: {str(e)}"
+

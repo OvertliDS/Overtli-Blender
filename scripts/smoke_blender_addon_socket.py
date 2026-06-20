@@ -86,7 +86,7 @@ def run_required_smoke(sock: socket.socket, timeout_seconds: float) -> None:
 def run_optional_screenshot_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     screenshot_path = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="blender_mcp_smoke_", suffix=".png", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(prefix="overtli_blender_smoke_", suffix=".png", delete=False) as temp_file:
             screenshot_path = temp_file.name
 
         response = send_command(
@@ -221,7 +221,7 @@ def run_optional_script_registry_smoke(sock: socket.socket, timeout_seconds: flo
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Smoke-test the Blender MCP addon socket directly.")
+    parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Addon socket port (default: 9876)")
     parser.add_argument("--timeout", type=float, default=15.0, help="Socket timeout in seconds (default: 15.0)")
@@ -303,3 +303,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -5,19 +5,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
+SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
-CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
-OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
-SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
-SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
-CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
-REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
-PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
-POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
-SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
-HYPER3D_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/hyper3d_tools.py").read_text(encoding="utf-8")
-GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
+CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
+OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
+PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/provider_status_tools.py").read_text(encoding="utf-8")
+POLYHAVEN_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/polyhaven_tools.py").read_text(encoding="utf-8")
+SKETCHFAB_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/sketchfab_tools.py").read_text(encoding="utf-8")
+HYPER3D_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/hyper3d_tools.py").read_text(encoding="utf-8")
+GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
 
 
 def _has_def(source: str, name: str) -> bool:
@@ -38,7 +38,7 @@ def test_server_no_longer_defines_execute_blender_code() -> None:
 
 
 def test_observation_tool_module_includes_extracted_wrappers() -> None:
-    observation_text = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
+    observation_text = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
     expected = [
         "get_scene_info",
         "get_object_info",
@@ -49,12 +49,12 @@ def test_observation_tool_module_includes_extracted_wrappers() -> None:
 
 
 def test_screenshot_tool_module_includes_extracted_wrapper() -> None:
-    screenshot_text = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
+    screenshot_text = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
     assert "def get_viewport_screenshot(" in screenshot_text
 
 
 def test_script_registry_tool_module_includes_extracted_wrappers() -> None:
-    script_registry_text = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+    script_registry_text = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
     expected = [
         "register_context_script",
         "execute_context_script",
@@ -243,3 +243,4 @@ def test_documented_mapping_differences_are_present_in_source() -> None:
     assert not _has_def(SERVER_TEXT, "generate_hyper3d_model_via_text")
     assert not _has_def(SERVER_TEXT, "generate_hyper3d_model_via_images")
     assert "blendermcp_use_polyhaven" in ADDON_TEXT
+
