@@ -43,6 +43,15 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [
+    "Overtli-Blender_AIReview_Drive",
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/ZachHandley/blender-mcp-enhanced"
 "Repository" = "https://github.com/ZachHandley/blender-mcp-enhanced.git"
