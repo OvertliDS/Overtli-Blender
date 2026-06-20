@@ -1,10 +1,37 @@
 # Python-generated files
 __pycache__/
-*.py[oc]
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 build/
 dist/
-wheels/
-*.egg-info
+*.egg-info/
 
 # Virtual environments
 .venv
+
+# Overtli AI review generated outputs
+.ai_review_zip_cache.tsv
+.ai_review_zip_state.json
+AIReview.config.json
+Configure_AI_Review_Zip.bat
+Create_AI_Review_Zip.bat
+.pytest_cache/
+.venv/
+*.zip
+Overtli-Blender_AIReview_Drive/
+memory_bank/
+tools/
+
+# Private planning docs
+docs/architecture_refactor_plan.md
+docs/current_tool_inventory.md
+docs/phase_0_repo_orientation.md
+docs/phase_roadmap.md
+docs/rebrand_plan.md
+docs/review_package_protocol.md
+docs/safety_and_permissions_plan.md
+docs/testing_strategy.md
+docs/tool_contract_principles.md
+docs/upstream_diff_plan.md
