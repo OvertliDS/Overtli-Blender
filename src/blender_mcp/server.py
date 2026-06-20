@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from blender_mcp.connection import BlenderConnection
 from blender_mcp.server_config import DEFAULT_HOST, DEFAULT_PORT, get_default_config
+from blender_mcp.tools.context_tools import register_context_tools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -97,6 +98,9 @@ def get_blender_connection():
         logger.info("Created new persistent connection to Blender")
     
     return _blender_connection
+
+
+register_context_tools(mcp, get_blender_connection)
 
 
 @mcp.tool()
@@ -202,124 +206,6 @@ def execute_blender_code(ctx: Context, code: str) -> str:
     except Exception as e:
         logger.error(f"Error executing code: {str(e)}")
         return f"Error executing code: {str(e)}"
-
-@mcp.tool()
-def get_shared_context(ctx: Context) -> str:
-    """
-    Get the current shared context state - shows persistent variables, object handles,
-    material handles, and operation history that persists between tool calls.
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("get_shared_context")
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        logger.error(f"Error getting shared context: {str(e)}")
-        return f"Error getting shared context: {str(e)}"
-
-@mcp.tool()
-def clear_shared_context(ctx: Context, section: str = "all") -> str:
-    """
-    Clear shared context. Useful for starting fresh.
-
-    Parameters:
-    - section: What to clear (all, variables, objects, materials, operations, history)
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("clear_shared_context", {"section": section})
-        return result
-    except Exception as e:
-        logger.error(f"Error clearing shared context: {str(e)}")
-        return f"Error clearing shared context: {str(e)}"
-
-@mcp.tool()
-def get_operation_history(ctx: Context, count: int = 10) -> str:
-    """
-    Get recent operation history for debugging.
-
-    Parameters:
-    - count: Number of recent operations to show (default 10)
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("get_operation_history", {"count": count})
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        logger.error(f"Error getting operation history: {str(e)}")
-        return f"Error getting operation history: {str(e)}"
-
-@mcp.tool()
-def create_object_handle(ctx: Context, handle: str, object_name: str) -> str:
-    """
-    Create a handle for an object to reference in future operations.
-    This allows you to easily reference objects across multiple tool calls.
-
-    Parameters:
-    - handle: The handle name to create (e.g., 'my_cube', 'main_character')
-    - object_name: The name of the Blender object
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("create_object_handle", {"handle": handle, "object_name": object_name})
-
-        if "error" in result:
-            return f"Error: {result['error']}"
-
-        return f"Created handle '{handle}' for object '{object_name}' at location {result['location']}"
-    except Exception as e:
-        logger.error(f"Error creating object handle: {str(e)}")
-        return f"Error creating object handle: {str(e)}"
-
-@mcp.tool()
-def create_material_handle(ctx: Context, handle: str, material_name: str) -> str:
-    """
-    Create a handle for a material to reference in future operations.
-    This allows you to easily reference materials across multiple tool calls.
-
-    Parameters:
-    - handle: The handle name to create (e.g., 'wood_mat', 'metal_shader')
-    - material_name: The name of the Blender material
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("create_material_handle", {"handle": handle, "material_name": material_name})
-
-        if "error" in result:
-            return f"Error: {result['error']}"
-
-        return f"Created handle '{handle}' for material '{material_name}'"
-    except Exception as e:
-        logger.error(f"Error creating material handle: {str(e)}")
-        return f"Error creating material handle: {str(e)}"
-
-@mcp.tool()
-def list_object_handles(ctx: Context) -> str:
-    """
-    List all object handles and their details.
-    Shows which objects you can reference with get_object() in scripts.
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("list_object_handles")
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        logger.error(f"Error listing object handles: {str(e)}")
-        return f"Error listing object handles: {str(e)}"
-
-@mcp.tool()
-def list_material_handles(ctx: Context) -> str:
-    """
-    List all material handles and their details.
-    Shows which materials you can reference with get_material() in scripts.
-    """
-    try:
-        blender = get_blender_connection()
-        result = blender.send_command("list_material_handles")
-        return json.dumps(result, indent=2)
-    except Exception as e:
-        logger.error(f"Error listing material handles: {str(e)}")
-        return f"Error listing material handles: {str(e)}"
 
 @mcp.tool()
 def get_polyhaven_categories(ctx: Context, asset_type: str = "hdris") -> str:

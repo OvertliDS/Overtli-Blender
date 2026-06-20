@@ -23,6 +23,8 @@ Create_AI_Review_Zip.bat
 Overtli-Blender_AIReview_Drive/
 memory_bank/
 tools/
+!src/blender_mcp/tools/
+!src/blender_mcp/tools/*.py
 
 # Private planning docs
 docs/architecture_refactor_plan.md
