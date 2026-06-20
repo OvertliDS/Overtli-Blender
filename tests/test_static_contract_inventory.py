@@ -23,9 +23,7 @@ def test_server_static_surface_includes_expected_wrappers() -> None:
         "get_sketchfab_status",
         "complete_geometry_node",
         "get_geometry_nodes_status",
-        "register_context_script",
-        "execute_context_script",
-        "list_context_scripts",
+        "clear_context_scripts",
     ]
 
     missing = [name for name in expected if not _has_def(SERVER_TEXT, name)]
@@ -46,6 +44,18 @@ def test_observation_tool_module_includes_extracted_wrappers() -> None:
 def test_screenshot_tool_module_includes_extracted_wrapper() -> None:
     screenshot_text = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
     assert "def get_viewport_screenshot(" in screenshot_text
+
+
+def test_script_registry_tool_module_includes_extracted_wrappers() -> None:
+    script_registry_text = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+    expected = [
+        "register_context_script",
+        "execute_context_script",
+        "list_context_scripts",
+    ]
+
+    missing = [name for name in expected if f"def {name}(" not in script_registry_text]
+    assert missing == [], f"Missing extracted script registry tools: {missing}"
 
 
 def test_context_tool_module_includes_extracted_wrappers() -> None:
@@ -84,6 +94,7 @@ def test_addon_static_surface_includes_expected_commands() -> None:
         "register_context_script",
         "execute_context_script",
         "list_context_scripts",
+        "clear_context_scripts",
     ]
 
     missing = [name for name in expected if f'"{name}":' not in ADDON_TEXT and f"'{name}':" not in ADDON_TEXT]

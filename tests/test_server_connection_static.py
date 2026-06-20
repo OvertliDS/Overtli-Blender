@@ -17,6 +17,7 @@ SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
 CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
 
 
 def _has_def(source: str, name: str) -> bool:
@@ -87,9 +88,7 @@ def test_server_py_still_defines_key_tool_wrappers() -> None:
         "get_sketchfab_status",
         "complete_geometry_node",
         "get_geometry_nodes_status",
-        "register_context_script",
-        "execute_context_script",
-        "list_context_scripts",
+        "clear_context_scripts",
     ]:
         assert _has_def(SERVER_TEXT, name), f"Missing server wrapper: {name}"
 
@@ -117,6 +116,15 @@ def test_observation_tools_py_contains_extracted_tool_names() -> None:
 
 def test_screenshot_tools_py_contains_extracted_tool_name() -> None:
     assert _has_def(SCREENSHOT_TOOLS_TEXT, "get_viewport_screenshot")
+
+
+def test_script_registry_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "register_context_script",
+        "execute_context_script",
+        "list_context_scripts",
+    ]:
+        assert _has_def(SCRIPT_REGISTRY_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
 
 
 def test_addon_py_is_unmodified_in_worktree() -> None:
