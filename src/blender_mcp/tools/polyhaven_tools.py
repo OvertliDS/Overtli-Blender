@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -10,11 +11,15 @@ from typing import Any
 logger = logging.getLogger("BlenderMCPServer")
 
 
-def register_polyhaven_tools(
-    mcp: Any,
-    get_blender_connection: Callable[[], Any],
-    is_polyhaven_enabled: Callable[[], bool],
-) -> None:
+def _is_polyhaven_enabled() -> bool:
+    try:
+        server_module = importlib.import_module("blender_mcp.server")
+        return bool(getattr(server_module, "_polyhaven_enabled", False))
+    except Exception:
+        return False
+
+
+def register_polyhaven_tools(mcp: Any, get_blender_connection: Callable[[], Any]) -> None:
     """Register PolyHaven MCP tools on the provided FastMCP app."""
 
     @mcp.tool()
@@ -27,7 +32,7 @@ def register_polyhaven_tools(
         """
         try:
             blender = get_blender_connection()
-            if not is_polyhaven_enabled():
+            if not _is_polyhaven_enabled():
                 return "PolyHaven integration is disabled. Select it in the sidebar in BlenderMCP, then run it again."
             result = blender.send_command("get_polyhaven_categories", {"asset_type": asset_type})
 

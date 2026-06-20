@@ -8,6 +8,8 @@ CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
 PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
 POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
 SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
@@ -70,6 +72,37 @@ def test_script_registry_tools_contains_expected_tool_names() -> None:
         "clear_context_scripts",
     ]:
         assert f"def {name}(" in SCRIPT_REGISTRY_TOOLS_TEXT
+
+
+def test_code_execution_tools_module_exists_and_registers_tools() -> None:
+    assert (ROOT / "src/blender_mcp/tools/code_execution_tools.py").exists()
+    assert "def register_code_execution_tools" in CODE_EXECUTION_TOOLS_TEXT
+
+
+def test_code_execution_tools_contains_expected_tool_name() -> None:
+    assert "def execute_blender_code(" in CODE_EXECUTION_TOOLS_TEXT
+    assert '"execute_code"' in CODE_EXECUTION_TOOLS_TEXT
+
+
+def test_registry_module_exists_and_registers_tools() -> None:
+    assert (ROOT / "src/blender_mcp/tools/registry.py").exists()
+    assert "def register_all_tools" in REGISTRY_TOOLS_TEXT
+
+
+def test_registry_module_references_all_tool_registration_helpers() -> None:
+    for name in [
+        "register_context_tools",
+        "register_observation_tools",
+        "register_screenshot_tools",
+        "register_script_registry_tools",
+        "register_provider_status_tools",
+        "register_polyhaven_tools",
+        "register_sketchfab_tools",
+        "register_hyper3d_tools",
+        "register_geometry_nodes_tools",
+        "register_code_execution_tools",
+    ]:
+        assert name in REGISTRY_TOOLS_TEXT
 
 
 def test_provider_status_tools_module_exists_and_registers_tools() -> None:
@@ -143,31 +176,21 @@ def test_geometry_nodes_tools_contains_expected_tool_names() -> None:
 
 
 def test_server_imports_and_registers_context_tools() -> None:
-    assert "from blender_mcp.tools.context_tools import register_context_tools" in SERVER_TEXT
-    assert "register_context_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.observation_tools import register_observation_tools" in SERVER_TEXT
-    assert "register_observation_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.screenshot_tools import register_screenshot_tools" in SERVER_TEXT
-    assert "register_screenshot_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
-    assert "from blender_mcp.tools.script_registry_tools import register_script_registry_tools" in SERVER_TEXT
-    assert "register_script_registry_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.provider_status_tools import register_provider_status_tools" in SERVER_TEXT
-    assert "register_provider_status_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.polyhaven_tools import register_polyhaven_tools" in SERVER_TEXT
-    assert "register_polyhaven_tools(mcp, get_blender_connection, lambda: _polyhaven_enabled)" in SERVER_TEXT
-    assert "from blender_mcp.tools.sketchfab_tools import register_sketchfab_tools" in SERVER_TEXT
-    assert "register_sketchfab_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.hyper3d_tools import register_hyper3d_tools" in SERVER_TEXT
-    assert "register_hyper3d_tools(mcp, get_blender_connection)" in SERVER_TEXT
-    assert "from blender_mcp.tools.geometry_nodes_tools import register_geometry_nodes_tools" in SERVER_TEXT
-    assert "register_geometry_nodes_tools(mcp, get_blender_connection)" in SERVER_TEXT
+    assert "from blender_mcp.tools.registry import register_all_tools" in SERVER_TEXT
+    assert "register_all_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
 
 
-def test_server_still_contains_high_risk_tool_definitions() -> None:
+def test_server_no_longer_defines_execute_blender_code() -> None:
+    assert "def execute_blender_code(" not in SERVER_TEXT
+
+
+def test_server_still_contains_composition_root_bits() -> None:
     for name in [
-        "execute_blender_code",
+        "FastMCP",
+        "get_blender_connection",
+        "main",
     ]:
-        assert f"def {name}(" in SERVER_TEXT
+        assert name in SERVER_TEXT
 
 
 def test_addon_command_strings_are_still_present() -> None:
@@ -185,6 +208,7 @@ def test_addon_command_strings_are_still_present() -> None:
         "create_material_handle",
         "list_object_handles",
         "list_material_handles",
+        "execute_code",
         "get_polyhaven_categories",
         "search_polyhaven_assets",
         "download_polyhaven_asset",

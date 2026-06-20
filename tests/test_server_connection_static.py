@@ -18,6 +18,8 @@ CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
 PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
 POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
 SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
@@ -86,10 +88,28 @@ def test_blender_connection_can_be_instantiated_without_connecting() -> None:
 
 
 def test_server_py_still_defines_key_tool_wrappers() -> None:
+    assert not _has_def(SERVER_TEXT, "execute_blender_code")
+
+
+def test_code_execution_tools_py_contains_extracted_tool_name() -> None:
+    assert _has_def(CODE_EXECUTION_TOOLS_TEXT, "execute_blender_code")
+
+
+def test_registry_py_contains_all_registration_helpers() -> None:
+    assert _has_def(REGISTRY_TOOLS_TEXT, "register_all_tools")
     for name in [
-        "execute_blender_code",
+        "register_context_tools",
+        "register_observation_tools",
+        "register_screenshot_tools",
+        "register_script_registry_tools",
+        "register_provider_status_tools",
+        "register_polyhaven_tools",
+        "register_sketchfab_tools",
+        "register_hyper3d_tools",
+        "register_geometry_nodes_tools",
+        "register_code_execution_tools",
     ]:
-        assert _has_def(SERVER_TEXT, name), f"Missing server wrapper: {name}"
+        assert name in REGISTRY_TOOLS_TEXT
 
 
 def test_context_tools_py_contains_extracted_tool_names() -> None:

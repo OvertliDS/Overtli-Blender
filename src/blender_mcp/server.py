@@ -1,27 +1,12 @@
 # blender_mcp_server.py
-from mcp.server.fastmcp import FastMCP, Context, Image
-import json
-import asyncio
+from mcp.server.fastmcp import FastMCP, Image
 import logging
-import tempfile
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List
-import os
-from pathlib import Path
-import base64
-from urllib.parse import urlparse
+from typing import AsyncIterator, Dict, Any
 
 from blender_mcp.connection import BlenderConnection
 from blender_mcp.server_config import DEFAULT_HOST, DEFAULT_PORT, get_default_config
-from blender_mcp.tools.context_tools import register_context_tools
-from blender_mcp.tools.geometry_nodes_tools import register_geometry_nodes_tools
-from blender_mcp.tools.hyper3d_tools import register_hyper3d_tools
-from blender_mcp.tools.polyhaven_tools import register_polyhaven_tools
-from blender_mcp.tools.provider_status_tools import register_provider_status_tools
-from blender_mcp.tools.observation_tools import register_observation_tools
-from blender_mcp.tools.screenshot_tools import register_screenshot_tools
-from blender_mcp.tools.script_registry_tools import register_script_registry_tools
-from blender_mcp.tools.sketchfab_tools import register_sketchfab_tools
+from blender_mcp.tools.registry import register_all_tools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -68,11 +53,11 @@ mcp = FastMCP(
 
 # Global connection for resources (since resources can't access context)
 _blender_connection = None
-_polyhaven_enabled = False  # Add this global variable
+_polyhaven_enabled = False
 
 def get_blender_connection():
     """Get or create a persistent Blender connection"""
-    global _blender_connection, _polyhaven_enabled  # Add _polyhaven_enabled to globals
+    global _blender_connection, _polyhaven_enabled
     
     # If we have an existing connection, check if it's still valid
     if _blender_connection is not None:
@@ -104,50 +89,11 @@ def get_blender_connection():
             _blender_connection = None
             raise Exception("Could not connect to Blender. Make sure the Blender addon is running.")
         logger.info("Created new persistent connection to Blender")
-    
+
     return _blender_connection
 
 
-register_context_tools(mcp, get_blender_connection)
-register_observation_tools(mcp, get_blender_connection)
-register_screenshot_tools(mcp, get_blender_connection, image_type=Image)
-register_script_registry_tools(mcp, get_blender_connection)
-register_provider_status_tools(mcp, get_blender_connection)
-register_polyhaven_tools(mcp, get_blender_connection, lambda: _polyhaven_enabled)
-register_sketchfab_tools(mcp, get_blender_connection)
-register_hyper3d_tools(mcp, get_blender_connection)
-register_geometry_nodes_tools(mcp, get_blender_connection)
-
-
-@mcp.tool()
-def execute_blender_code(ctx: Context, code: str) -> str:
-    """
-    Execute arbitrary Python code in Blender. Make sure to do it step-by-step by breaking it into smaller chunks.
-
-    Now includes shared context between executions! You can use:
-    - shared['variable_name'] = value  # Store variables for later use
-    - get_object('handle_name')       # Get stored object references
-    - get_material('handle_name')     # Get stored material references
-    - store_object('handle', 'obj_name')    # Store object reference
-    - store_material('handle', 'mat_name')  # Store material reference
-
-    Parameters:
-    - code: The Python code to execute
-    """
-    try:
-        # Get the global connection
-        blender = get_blender_connection()
-        result = blender.send_command("execute_code", {"code": code})
-
-        # Show shared variables if any
-        shared_vars = result.get('shared_variables', [])
-        output = f"Code executed successfully: {result.get('result', '')}"
-        if shared_vars:
-            output += f"\nShared variables: {', '.join(shared_vars)}"
-        return output
-    except Exception as e:
-        logger.error(f"Error executing code: {str(e)}")
-        return f"Error executing code: {str(e)}"
+register_all_tools(mcp, get_blender_connection, image_type=Image)
 
 @mcp.prompt()
 def asset_creation_strategy() -> str:

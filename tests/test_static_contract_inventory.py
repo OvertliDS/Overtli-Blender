@@ -11,6 +11,8 @@ CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
+REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
 PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
 POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
 SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
@@ -25,11 +27,14 @@ def _has_def(source: str, name: str) -> bool:
 
 def test_server_static_surface_includes_expected_wrappers() -> None:
     expected = [
-        "execute_blender_code",
     ]
 
     missing = [name for name in expected if not _has_def(SERVER_TEXT, name)]
     assert missing == [], f"Missing server wrappers: {missing}"
+
+
+def test_server_no_longer_defines_execute_blender_code() -> None:
+    assert not _has_def(SERVER_TEXT, "execute_blender_code")
 
 
 def test_observation_tool_module_includes_extracted_wrappers() -> None:
@@ -59,6 +64,29 @@ def test_script_registry_tool_module_includes_extracted_wrappers() -> None:
 
     missing = [name for name in expected if f"def {name}(" not in script_registry_text]
     assert missing == [], f"Missing extracted script registry tools: {missing}"
+
+
+def test_code_execution_tool_module_includes_extracted_wrapper() -> None:
+    assert "def register_code_execution_tools" in CODE_EXECUTION_TOOLS_TEXT
+    assert "def execute_blender_code(" in CODE_EXECUTION_TOOLS_TEXT
+    assert '"execute_code"' in CODE_EXECUTION_TOOLS_TEXT
+
+
+def test_registry_tool_module_includes_all_registrations() -> None:
+    assert "def register_all_tools" in REGISTRY_TOOLS_TEXT
+    for name in [
+        "register_context_tools",
+        "register_observation_tools",
+        "register_screenshot_tools",
+        "register_script_registry_tools",
+        "register_provider_status_tools",
+        "register_polyhaven_tools",
+        "register_sketchfab_tools",
+        "register_hyper3d_tools",
+        "register_geometry_nodes_tools",
+        "register_code_execution_tools",
+    ]:
+        assert name in REGISTRY_TOOLS_TEXT
 
 
 def test_provider_status_tool_module_includes_extracted_wrappers() -> None:
@@ -168,9 +196,8 @@ def test_addon_static_surface_includes_expected_commands() -> None:
 
 
 def test_documented_mapping_differences_are_present_in_source() -> None:
-    assert "execute_blender_code" in SERVER_TEXT
     assert '"execute_code": self.execute_code' in ADDON_TEXT
     assert "create_rodin_job" in ADDON_TEXT
-    assert "generate_hyper3d_model_via_text" in SERVER_TEXT
-    assert "generate_hyper3d_model_via_images" in SERVER_TEXT
+    assert not _has_def(SERVER_TEXT, "generate_hyper3d_model_via_text")
+    assert not _has_def(SERVER_TEXT, "generate_hyper3d_model_via_images")
     assert "blendermcp_use_polyhaven" in ADDON_TEXT
