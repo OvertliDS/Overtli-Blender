@@ -43,8 +43,12 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "list_object_handles",
         "list_material_handles",
         "list_context_scripts",
+        "execute_code",
+        "get_geometry_nodes_status",
         "--include-screenshot",
         "--include-script-registry",
         "--include-provider-status",
+        "--include-geometry-nodes-status",
+        "--include-code-execution",
     ]:
         assert text in SMOKE_TEXT

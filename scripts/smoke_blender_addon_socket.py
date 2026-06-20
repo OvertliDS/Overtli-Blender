@@ -122,6 +122,22 @@ def run_optional_provider_status_smoke(sock: socket.socket, timeout_seconds: flo
             raise RuntimeError(f"{command_name}: missing enabled/message in result")
 
 
+def run_optional_geometry_nodes_status_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    response = send_command(sock, timeout_seconds, "get_geometry_nodes_status")
+    result = assert_success("get_geometry_nodes_status", response)
+    if "enabled" not in result or "message" not in result:
+        raise RuntimeError("get_geometry_nodes_status: missing enabled/message in result")
+
+
+def run_optional_code_execution_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    response = send_command(sock, timeout_seconds, "execute_code", {"code": 'print("SMOKE_CODE_OK")'})
+    result = assert_success("execute_code", response)
+    if not result.get("executed"):
+        raise RuntimeError(f"execute_code: {result}")
+    if "SMOKE_CODE_OK" not in result.get("result", ""):
+        raise RuntimeError("execute_code: expected smoke output not found")
+
+
 def run_optional_script_registry_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     category = "phase1e_smoke"
     script_name = f"runtime_smoke_{time.time_ns()}"
@@ -196,6 +212,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the optional provider status smoke.",
     )
+    parser.add_argument(
+        "--include-geometry-nodes-status",
+        action="store_true",
+        help="Run the optional Geometry Nodes status smoke.",
+    )
+    parser.add_argument(
+        "--include-code-execution",
+        action="store_true",
+        help="Run the optional harmless code execution smoke.",
+    )
     return parser
 
 
@@ -216,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.include_provider_status:
                 run_optional_provider_status_smoke(sock, args.timeout)
+
+            if args.include_geometry_nodes_status:
+                run_optional_geometry_nodes_status_smoke(sock, args.timeout)
+
+            if args.include_code_execution:
+                run_optional_code_execution_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

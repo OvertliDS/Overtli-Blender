@@ -1615,6 +1615,214 @@ class Hyper3DService:
         except Exception as e:
             return {"succeed": False, "error": str(e)}
 
+
+class RawCodeExecutionService:
+    def __init__(self, server):
+        self.server = server
+
+    def execute_code(self, code):
+        """Execute arbitrary Blender Python code with shared context"""
+        try:
+            namespace = {
+                "bpy": bpy,
+                "shared": self.server.shared_context['variables'],
+                "get_object": lambda handle: self.server.shared_context['objects'].get(handle),
+                "get_material": lambda handle: self.server.shared_context['materials'].get(handle),
+                "get_operation": lambda op_id: self.server.shared_context['operations'].get(op_id),
+                "store_object": self.server._store_object_handle,
+                "store_material": self.server._store_material_handle,
+                "store_operation": self.server._store_operation_result,
+            }
+
+            capture_buffer = io.StringIO()
+            with redirect_stdout(capture_buffer):
+                exec(code, namespace)
+
+            captured_output = capture_buffer.getvalue()
+            self.server._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, captured_output)
+            return {"executed": True, "result": captured_output, "shared_variables": list(self.server.shared_context['variables'].keys())}
+        except Exception as e:
+            error_msg = f"Code execution error: {str(e)}"
+            self.server._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, f"ERROR: {error_msg}")
+            raise Exception(error_msg)
+
+
+class GeometryNodesService:
+    def __init__(self, server):
+        self.server = server
+
+    def complete_geometry_node(self, object_name, nodes, links, input_sockets=None):
+        """Complete geometry node network creation
+
+        Args:
+            object_name: Object name
+            nodes: List of node definitions
+            links: List of node connections
+            input_sockets: Node group input interface definitions
+
+        Returns:
+            dict: Dictionary containing operation status and related information
+        """
+        try:
+            obj = bpy.data.objects.get(object_name)
+            if not obj:
+                result = self._create_geometry_nodes_object(object_name)
+                if "error" in result:
+                    return result
+                obj = bpy.data.objects.get(object_name)
+
+            geometry_modifier = None
+            for modifier in obj.modifiers:
+                if modifier.type == 'NODES':
+                    geometry_modifier = modifier
+                    break
+
+            if geometry_modifier and geometry_modifier.node_group:
+                old_node_group_name = geometry_modifier.node_group.name
+                geometry_modifier.node_group = None
+
+                old_node_group = bpy.data.node_groups.get(old_node_group_name)
+                if old_node_group:
+                    bpy.data.node_groups.remove(old_node_group)
+
+            if not geometry_modifier:
+                geometry_modifier = obj.modifiers.new(name="GeometryNodes", type='NODES')
+
+            node_group = bpy.data.node_groups.new(name=f"{object_name}_geometry", type='GeometryNodeTree')
+            if IS_BLENDER_4:
+                node_group.is_modifier = True
+
+            geometry_modifier.node_group = node_group
+            self._setup_node_group_interface(node_group, input_sockets)
+
+            created_nodes = {}
+            for i, node_data in enumerate(nodes):
+                node_type = node_data.get("type", "")
+                if not node_type:
+                    continue
+
+                try:
+                    node = node_group.nodes.new(type=node_type)
+                    created_nodes[i] = node
+
+                    if "label" in node_data:
+                        node.label = node_data["label"]
+                    if "location" in node_data:
+                        node.location = node_data["location"]
+
+                    if "inputs" in node_data:
+                        for input_name, value in node_data["inputs"].items():
+                            if hasattr(node, "inputs") and input_name in node.inputs:
+                                try:
+                                    node.inputs[input_name].default_value = value
+                                except:
+                                    pass
+
+                    if "properties" in node_data:
+                        for prop_name, value in node_data["properties"].items():
+                            if hasattr(node, prop_name):
+                                try:
+                                    setattr(node, prop_name, value)
+                                except:
+                                    pass
+
+                except Exception as e:
+                    return {"error": f"Failed to create node {node_type}: {str(e)}"}
+
+            for link_data in links:
+                try:
+                    from_node_idx = link_data.get("from_node")
+                    to_node_idx = link_data.get("to_node")
+                    from_socket = link_data.get("from_socket")
+                    to_socket = link_data.get("to_socket")
+
+                    if from_node_idx in created_nodes and to_node_idx in created_nodes:
+                        from_node = created_nodes[from_node_idx]
+                        to_node = created_nodes[to_node_idx]
+
+                        if isinstance(from_socket, str):
+                            from_output = from_node.outputs.get(from_socket)
+                        else:
+                            from_output = from_node.outputs[from_socket] if from_socket < len(from_node.outputs) else None
+
+                        if isinstance(to_socket, str):
+                            to_input = to_node.inputs.get(to_socket)
+                        else:
+                            to_input = to_node.inputs[to_socket] if to_socket < len(to_node.inputs) else None
+
+                        if from_output and to_input:
+                            node_group.links.new(from_output, to_input)
+
+                except Exception as e:
+                    return {"error": f"Failed to create link: {str(e)}"}
+
+            object_handle = f"geometry_{object_name}"
+            self.server.shared_context['objects'][object_handle] = obj
+            self.server._add_to_history("complete_geometry_node", f"object: {object_name}", f"Created geometry node network")
+
+            return {
+                "success": True,
+                "message": f"Geometry node network created for {object_name}",
+                "object_name": object_name,
+                "object_handle": object_handle,
+                "node_group": node_group.name,
+                "nodes_created": len(created_nodes),
+                "links_created": len(links)
+            }
+
+        except Exception as e:
+            error_msg = f"Failed to create geometry node network: {str(e)}"
+            self.server._add_to_history("complete_geometry_node", f"object: {object_name}", f"ERROR: {error_msg}")
+            return {"error": error_msg}
+
+    def _create_geometry_nodes_object(self, object_name):
+        """Create a basic object for geometry nodes"""
+        try:
+            bpy.ops.mesh.primitive_cube_add()
+            obj = bpy.context.active_object
+            obj.name = object_name
+            return {"success": True, "object_name": object_name}
+        except Exception as e:
+            return {"error": f"Failed to create object: {str(e)}"}
+
+    def _setup_node_group_interface(self, node_group, input_sockets):
+        """Setup the node group interface for inputs/outputs"""
+        if not input_sockets:
+            return
+
+        try:
+            if IS_BLENDER_4:
+                interface = node_group.interface
+                for item in interface.items_tree:
+                    if item.item_type in ['SOCKET']:
+                        interface.remove(item)
+
+                for socket_def in input_sockets:
+                    socket_type = socket_def.get("type", "VALUE")
+                    socket_name = socket_def.get("name", "Input")
+                    interface.new_socket(socket_name, in_out='INPUT', socket_type=socket_type)
+            else:
+                inputs = node_group.inputs
+                inputs.clear()
+
+                for socket_def in input_sockets:
+                    socket_type = socket_def.get("type", "NodeSocketFloat")
+                    socket_name = socket_def.get("name", "Input")
+                    inputs.new(socket_type, socket_name)
+
+        except Exception as e:
+            print(f"Warning: Failed to setup node group interface: {str(e)}")
+
+    def get_geometry_nodes_status(self):
+        """Get the status of geometry nodes support"""
+        return {
+            "enabled": True,
+            "blender_version": bpy.app.version_string,
+            "is_blender_4": IS_BLENDER_4,
+            "message": f"Geometry Nodes support available (Blender {bpy.app.version_string})"
+        }
+
+
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
         self.host = host
@@ -1638,10 +1846,13 @@ class BlenderMCPServer:
         self.polyhaven_service = PolyHavenService(self)
         self.sketchfab_service = SketchfabService(self)
         self.hyper3d_service = Hyper3DService(self)
+        self.raw_code_execution_service = RawCodeExecutionService(self)
+        self.geometry_nodes_service = GeometryNodesService(self)
 
         self.get_scene_info = self.scene_observation_service.get_scene_info
         self.get_object_info = self.scene_observation_service.get_object_info
         self.get_viewport_screenshot = self.viewport_screenshot_service.get_viewport_screenshot
+        self.execute_code = self.raw_code_execution_service.execute_code
         self.get_polyhaven_status = self.provider_status_service.get_polyhaven_status
         self.get_hyper3d_status = self.provider_status_service.get_hyper3d_status
         self.get_sketchfab_status = self.provider_status_service.get_sketchfab_status
@@ -1654,6 +1865,8 @@ class BlenderMCPServer:
         self.create_rodin_job = self.hyper3d_service.create_rodin_job
         self.poll_rodin_job_status = self.hyper3d_service.poll_rodin_job_status
         self.import_generated_asset = self.hyper3d_service.import_generated_asset
+        self.complete_geometry_node = self.geometry_nodes_service.complete_geometry_node
+        self.get_geometry_nodes_status = self.geometry_nodes_service.get_geometry_nodes_status
 
     def start(self):
         if self.running:
@@ -1937,35 +2150,7 @@ class BlenderMCPServer:
 
     def execute_code(self, code):
         """Execute arbitrary Blender Python code with shared context"""
-        # This is powerful but potentially dangerous - use with caution
-        try:
-            # Create namespace with shared context and helper functions
-            namespace = {
-                "bpy": bpy,
-                "shared": self.shared_context['variables'],  # Direct access to shared variables
-                "get_object": lambda handle: self.shared_context['objects'].get(handle),
-                "get_material": lambda handle: self.shared_context['materials'].get(handle),
-                "get_operation": lambda op_id: self.shared_context['operations'].get(op_id),
-                "store_object": self._store_object_handle,
-                "store_material": self._store_material_handle,
-                "store_operation": self._store_operation_result,
-            }
-
-            # Capture stdout during execution, and return it as result
-            capture_buffer = io.StringIO()
-            with redirect_stdout(capture_buffer):
-                exec(code, namespace)
-
-            captured_output = capture_buffer.getvalue()
-
-            # Store operation in history
-            self._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, captured_output)
-
-            return {"executed": True, "result": captured_output, "shared_variables": list(self.shared_context['variables'].keys())}
-        except Exception as e:
-            error_msg = f"Code execution error: {str(e)}"
-            self._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, f"ERROR: {error_msg}")
-            raise Exception(error_msg)
+        return self.raw_code_execution_service.execute_code(code)
 
     def _store_object_handle(self, handle, obj_name):
         """Store object reference by handle"""
@@ -3298,201 +3483,20 @@ class BlenderMCPServer:
 
     #region Geometry Nodes
     def complete_geometry_node(self, object_name, nodes, links, input_sockets=None):
-        """Complete geometry node network creation
-
-        Args:
-            object_name: Object name
-            nodes: List of node definitions
-            links: List of node connections
-            input_sockets: Node group input interface definitions
-
-        Returns:
-            dict: Dictionary containing operation status and related information
-        """
-        try:
-            obj = bpy.data.objects.get(object_name)
-            if not obj:
-                result = self._create_geometry_nodes_object(object_name)
-                if "error" in result:
-                    return result
-                obj = bpy.data.objects.get(object_name)
-
-            # Find geometry nodes modifier
-            geometry_modifier = None
-            for modifier in obj.modifiers:
-                if modifier.type == 'NODES':
-                    geometry_modifier = modifier
-                    break
-
-            if geometry_modifier and geometry_modifier.node_group:
-                old_node_group_name = geometry_modifier.node_group.name
-                geometry_modifier.node_group = None
-
-                # Try to delete the old node group
-                old_node_group = bpy.data.node_groups.get(old_node_group_name)
-                if old_node_group:
-                    bpy.data.node_groups.remove(old_node_group)
-
-            # If there's no geometry nodes modifier, create one
-            if not geometry_modifier:
-                geometry_modifier = obj.modifiers.new(name="GeometryNodes", type='NODES')
-
-            # Create a new node group
-            node_group = bpy.data.node_groups.new(name=f"{object_name}_geometry", type='GeometryNodeTree')
-            if IS_BLENDER_4:
-                node_group.is_modifier = True
-
-            # Set the node group for the modifier
-            geometry_modifier.node_group = node_group
-
-            # Setup node group interface
-            self._setup_node_group_interface(node_group, input_sockets)
-
-            # Create nodes
-            created_nodes = {}
-            for i, node_data in enumerate(nodes):
-                node_type = node_data.get("type", "")
-                if not node_type:
-                    continue
-
-                # Create the node
-                try:
-                    node = node_group.nodes.new(type=node_type)
-                    created_nodes[i] = node
-
-                    # Set node properties
-                    if "label" in node_data:
-                        node.label = node_data["label"]
-                    if "location" in node_data:
-                        node.location = node_data["location"]
-
-                    # Set node inputs
-                    if "inputs" in node_data:
-                        for input_name, value in node_data["inputs"].items():
-                            if hasattr(node, "inputs") and input_name in node.inputs:
-                                try:
-                                    node.inputs[input_name].default_value = value
-                                except:
-                                    pass  # Some inputs can't be set
-
-                    # Set node properties
-                    if "properties" in node_data:
-                        for prop_name, value in node_data["properties"].items():
-                            if hasattr(node, prop_name):
-                                try:
-                                    setattr(node, prop_name, value)
-                                except:
-                                    pass  # Some properties can't be set
-
-                except Exception as e:
-                    return {"error": f"Failed to create node {node_type}: {str(e)}"}
-
-            # Create links
-            for link_data in links:
-                try:
-                    from_node_idx = link_data.get("from_node")
-                    to_node_idx = link_data.get("to_node")
-                    from_socket = link_data.get("from_socket")
-                    to_socket = link_data.get("to_socket")
-
-                    if from_node_idx in created_nodes and to_node_idx in created_nodes:
-                        from_node = created_nodes[from_node_idx]
-                        to_node = created_nodes[to_node_idx]
-
-                        # Handle socket references (name or index)
-                        if isinstance(from_socket, str):
-                            from_output = from_node.outputs.get(from_socket)
-                        else:
-                            from_output = from_node.outputs[from_socket] if from_socket < len(from_node.outputs) else None
-
-                        if isinstance(to_socket, str):
-                            to_input = to_node.inputs.get(to_socket)
-                        else:
-                            to_input = to_node.inputs[to_socket] if to_socket < len(to_node.inputs) else None
-
-                        if from_output and to_input:
-                            node_group.links.new(from_output, to_input)
-
-                except Exception as e:
-                    return {"error": f"Failed to create link: {str(e)}"}
-
-            # Auto-create object handle for easy chaining
-            object_handle = f"geometry_{object_name}"
-            self.shared_context['objects'][object_handle] = obj
-
-            # Add to history
-            self._add_to_history("complete_geometry_node", f"object: {object_name}", f"Created geometry node network")
-
-            return {
-                "success": True,
-                "message": f"Geometry node network created for {object_name}",
-                "object_name": object_name,
-                "object_handle": object_handle,  # New: handle for chaining
-                "node_group": node_group.name,
-                "nodes_created": len(created_nodes),
-                "links_created": len(links)
-            }
-
-        except Exception as e:
-            error_msg = f"Failed to create geometry node network: {str(e)}"
-            self._add_to_history("complete_geometry_node", f"object: {object_name}", f"ERROR: {error_msg}")
-            return {"error": error_msg}
+        """Complete geometry node network creation"""
+        return self.geometry_nodes_service.complete_geometry_node(object_name, nodes, links, input_sockets)
 
     def _create_geometry_nodes_object(self, object_name):
         """Create a basic object for geometry nodes"""
-        try:
-            # Create a simple cube as base
-            bpy.ops.mesh.primitive_cube_add()
-            obj = bpy.context.active_object
-            obj.name = object_name
-            return {"success": True, "object_name": object_name}
-        except Exception as e:
-            return {"error": f"Failed to create object: {str(e)}"}
+        return self.geometry_nodes_service._create_geometry_nodes_object(object_name)
 
     def _setup_node_group_interface(self, node_group, input_sockets):
         """Setup the node group interface for inputs/outputs"""
-        if not input_sockets:
-            return
-
-        try:
-            # Clear existing interface
-            if IS_BLENDER_4:
-                # Blender 4.x interface
-                interface = node_group.interface
-                for item in interface.items_tree:
-                    if item.item_type in ['SOCKET']:
-                        interface.remove(item)
-
-                # Add new inputs
-                for socket_def in input_sockets:
-                    socket_type = socket_def.get("type", "VALUE")
-                    socket_name = socket_def.get("name", "Input")
-                    interface.new_socket(socket_name, in_out='INPUT', socket_type=socket_type)
-            else:
-                # Blender 3.x interface
-                inputs = node_group.inputs
-                outputs = node_group.outputs
-
-                # Clear existing
-                inputs.clear()
-
-                # Add new inputs
-                for socket_def in input_sockets:
-                    socket_type = socket_def.get("type", "NodeSocketFloat")
-                    socket_name = socket_def.get("name", "Input")
-                    inputs.new(socket_type, socket_name)
-
-        except Exception as e:
-            print(f"Warning: Failed to setup node group interface: {str(e)}")
+        return self.geometry_nodes_service._setup_node_group_interface(node_group, input_sockets)
 
     def get_geometry_nodes_status(self):
         """Get the status of geometry nodes support"""
-        return {
-            "enabled": True,
-            "blender_version": bpy.app.version_string,
-            "is_blender_4": IS_BLENDER_4,
-            "message": f"Geometry Nodes support available (Blender {bpy.app.version_string})"
-        }
+        return self.geometry_nodes_service.get_geometry_nodes_status()
 
     #region Script Registry Tools
 

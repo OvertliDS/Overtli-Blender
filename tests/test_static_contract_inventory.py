@@ -177,6 +177,8 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "class PolyHavenService",
         "class SketchfabService",
         "class Hyper3DService",
+        "class RawCodeExecutionService",
+        "class GeometryNodesService",
         "self.shared_context_service = SharedContextService(self.shared_context)",
         "self.script_registry_service = ScriptRegistryService()",
         "self.scene_observation_service = SceneObservationService(self)",
@@ -185,6 +187,11 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "self.polyhaven_service = PolyHavenService(self)",
         "self.sketchfab_service = SketchfabService(self)",
         "self.hyper3d_service = Hyper3DService(self)",
+        "self.raw_code_execution_service = RawCodeExecutionService(self)",
+        "self.geometry_nodes_service = GeometryNodesService(self)",
+        "self.execute_code = self.raw_code_execution_service.execute_code",
+        "self.complete_geometry_node = self.geometry_nodes_service.complete_geometry_node",
+        "self.get_geometry_nodes_status = self.geometry_nodes_service.get_geometry_nodes_status",
     ]:
         assert name in ADDON_TEXT
 
