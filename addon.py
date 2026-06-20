@@ -3,6 +3,8 @@
 import bpy
 import mathutils
 import json
+import os
+import sys
 import threading
 import socket
 import time
@@ -16,7 +18,96 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty
 import io
 from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Dict, Union, Any, Optional, Tuple
+
+ADDON_ROOT = os.path.dirname(os.path.abspath(__file__))
+if ADDON_ROOT not in sys.path:
+    sys.path.insert(0, ADDON_ROOT)
+
+try:
+    from src.blender_mcp.common.safety import (
+        AVAILABLE_SAFETY_MODES,
+        DEFAULT_SAFETY_MODE,
+        SAFETY_MODE_AUDIT,
+        SAFETY_MODE_COMPAT,
+        SAFETY_MODE_STRICT,
+        SAFETY_POLICY_VERSION,
+        build_command_safety_map,
+    )
+    from src.blender_mcp.common.permissions import RiskLevel
+except ModuleNotFoundError:
+    class RiskLevel(str, Enum):
+        LOW = "LOW"
+        MEDIUM = "MEDIUM"
+        HIGH = "HIGH"
+        DESTRUCTIVE = "DESTRUCTIVE"
+
+    SAFETY_MODE_COMPAT = "compatibility"
+    SAFETY_MODE_AUDIT = "audit"
+    SAFETY_MODE_STRICT = "strict"
+    SAFETY_POLICY_VERSION = "1.0"
+    DEFAULT_SAFETY_MODE = SAFETY_MODE_COMPAT
+    AVAILABLE_SAFETY_MODES = [SAFETY_MODE_COMPAT, SAFETY_MODE_AUDIT, SAFETY_MODE_STRICT]
+
+    @dataclass(frozen=True)
+    class _FallbackCommandSafetyMetadata:
+        command_type: str
+        operation_type: str
+        risk_level: RiskLevel
+        reversibility: str
+        can_mutate_scene: bool = False
+        can_execute_code: bool = False
+        can_call_network: bool = False
+        can_write_files: bool = False
+        provider_api_key_involved: bool = False
+        strict_blocked: bool = False
+        default_action: str = "allow"
+        strict_action: str = "block"
+        warnings: tuple[str, ...] = ()
+
+    def _fallback_spec(command_type, operation_type, risk_level, reversibility, **kwargs):
+        return _FallbackCommandSafetyMetadata(
+            command_type=command_type,
+            operation_type=operation_type,
+            risk_level=risk_level,
+            reversibility=reversibility,
+            **kwargs,
+        )
+
+    def build_command_safety_map():
+        return {
+            "get_scene_info": _fallback_spec("get_scene_info", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "get_object_info": _fallback_spec("get_object_info", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "get_shared_context": _fallback_spec("get_shared_context", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_operation_history": _fallback_spec("get_operation_history", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "list_object_handles": _fallback_spec("list_object_handles", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "list_material_handles": _fallback_spec("list_material_handles", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "list_context_scripts": _fallback_spec("list_context_scripts", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_polyhaven_status": _fallback_spec("get_polyhaven_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_hyper3d_status": _fallback_spec("get_hyper3d_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE", provider_api_key_involved=True),
+            "get_sketchfab_status": _fallback_spec("get_sketchfab_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE", provider_api_key_involved=True),
+            "get_geometry_nodes_status": _fallback_spec("get_geometry_nodes_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_safety_status": _fallback_spec("get_safety_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_viewport_screenshot": _fallback_spec("get_viewport_screenshot", "CAMERA", RiskLevel.MEDIUM, "REVERSIBLE", warnings=("viewport-context-dependent",)),
+            "create_object_handle": _fallback_spec("create_object_handle", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "create_material_handle": _fallback_spec("create_material_handle", "MATERIAL", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "register_context_script": _fallback_spec("register_context_script", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "execute_context_script": _fallback_spec("execute_context_script", "UPDATE_KNOWLEDGE", RiskLevel.HIGH, "UNKNOWN", can_execute_code=True, can_write_files=True, strict_blocked=True),
+            "clear_context_scripts": _fallback_spec("clear_context_scripts", "CLEANUP", RiskLevel.MEDIUM, "PARTIAL", can_write_files=True, strict_blocked=True),
+            "clear_shared_context": _fallback_spec("clear_shared_context", "CLEANUP", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True, strict_blocked=True),
+            "get_polyhaven_categories": _fallback_spec("get_polyhaven_categories", "ASSET_LIBRARY", RiskLevel.LOW, "REVERSIBLE", can_call_network=True),
+            "search_polyhaven_assets": _fallback_spec("search_polyhaven_assets", "ASSET_LIBRARY", RiskLevel.MEDIUM, "REVERSIBLE", can_call_network=True),
+            "download_polyhaven_asset": _fallback_spec("download_polyhaven_asset", "ASSET_LIBRARY", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, can_call_network=True, can_write_files=True, strict_blocked=True),
+            "set_texture": _fallback_spec("set_texture", "TEXTURE", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "search_sketchfab_models": _fallback_spec("search_sketchfab_models", "ASSET_LIBRARY", RiskLevel.MEDIUM, "REVERSIBLE", can_call_network=True, provider_api_key_involved=True),
+            "download_sketchfab_model": _fallback_spec("download_sketchfab_model", "ASSET_LIBRARY", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, can_call_network=True, can_write_files=True, provider_api_key_involved=True, strict_blocked=True),
+            "create_rodin_job": _fallback_spec("create_rodin_job", "ASSET_LIBRARY", RiskLevel.HIGH, "UNKNOWN", can_call_network=True, provider_api_key_involved=True, strict_blocked=True),
+            "poll_rodin_job_status": _fallback_spec("poll_rodin_job_status", "VERIFY", RiskLevel.MEDIUM, "REVERSIBLE", can_call_network=True, provider_api_key_involved=True),
+            "import_generated_asset": _fallback_spec("import_generated_asset", "IMPORT", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, can_call_network=True, can_write_files=True, provider_api_key_involved=True, strict_blocked=True),
+            "complete_geometry_node": _fallback_spec("complete_geometry_node", "GEOMETRY_NODES", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True),
+            "execute_code": _fallback_spec("execute_code", "VERIFY", RiskLevel.HIGH, "UNKNOWN", can_execute_code=True, strict_blocked=True),
+        }
 
 bl_info = {
     "name": "Blender MCP",
@@ -1616,6 +1707,131 @@ class Hyper3DService:
             return {"succeed": False, "error": str(e)}
 
 
+class SafetyPolicyService:
+    def __init__(self, server):
+        self.server = server
+        self.command_safety_map = build_command_safety_map()
+        self.mode, self.warnings = self._resolve_mode()
+
+    @staticmethod
+    def _metadata_attr(metadata, name):
+        if hasattr(metadata, name):
+            return getattr(metadata, name)
+        if isinstance(metadata, dict):
+            return metadata.get(name)
+        return None
+
+    def _resolve_mode(self):
+        raw_mode = os.environ.get("OVERTLI_BLENDER_SAFETY_MODE", "").strip().lower()
+        if not raw_mode:
+            return SAFETY_MODE_COMPAT, []
+
+        aliases = {
+            "legacy": SAFETY_MODE_COMPAT,
+            "permissive": SAFETY_MODE_COMPAT,
+            SAFETY_MODE_COMPAT: SAFETY_MODE_COMPAT,
+            SAFETY_MODE_AUDIT: SAFETY_MODE_AUDIT,
+            SAFETY_MODE_STRICT: SAFETY_MODE_STRICT,
+        }
+        resolved_mode = aliases.get(raw_mode)
+        if resolved_mode:
+            return resolved_mode, []
+
+        return SAFETY_MODE_COMPAT, [f"Invalid safety mode '{raw_mode}', defaulting to compatibility"]
+
+    def _build_decision(self, command_type, metadata, allowed, reason):
+        operation_type = self._metadata_attr(metadata, "operation_type")
+        risk_level = self._metadata_attr(metadata, "risk_level")
+        reversibility = self._metadata_attr(metadata, "reversibility")
+        if hasattr(operation_type, "value"):
+            operation_type = operation_type.value
+        if hasattr(risk_level, "value"):
+            risk_level = risk_level.value
+        if hasattr(reversibility, "value"):
+            reversibility = reversibility.value
+        return {
+            "allowed": allowed,
+            "mode": self.mode,
+            "command_type": command_type,
+            "operation_type": operation_type,
+            "risk_level": risk_level,
+            "reversibility": reversibility,
+            "can_mutate_scene": bool(self._metadata_attr(metadata, "can_mutate_scene")),
+            "can_execute_code": bool(self._metadata_attr(metadata, "can_execute_code")),
+            "can_call_network": bool(self._metadata_attr(metadata, "can_call_network")),
+            "can_write_files": bool(self._metadata_attr(metadata, "can_write_files")),
+            "provider_api_key_involved": bool(self._metadata_attr(metadata, "provider_api_key_involved")),
+            "strict_blocked": bool(self._metadata_attr(metadata, "strict_blocked")),
+            "default_action": self._metadata_attr(metadata, "default_action") or "allow",
+            "strict_action": self._metadata_attr(metadata, "strict_action") or "block",
+            "warnings": list(self.warnings) + list(self._metadata_attr(metadata, "warnings") or []),
+            "reason": reason,
+        }
+
+    def evaluate_command(self, command_type: str, params: dict | None = None) -> dict:
+        metadata = self.command_safety_map.get(command_type)
+        if metadata is None:
+            return {
+                "allowed": True,
+                "mode": self.mode,
+                "command_type": command_type,
+                "operation_type": "UNKNOWN",
+                "risk_level": "LOW",
+                "reversibility": "UNKNOWN",
+                "can_mutate_scene": False,
+                "can_execute_code": False,
+                "can_call_network": False,
+                "can_write_files": False,
+                "provider_api_key_involved": False,
+                "strict_blocked": False,
+                "default_action": "allow",
+                "strict_action": "block",
+                "warnings": list(self.warnings) + [f"Unknown command '{command_type}'"],
+                "reason": "unknown command",
+            }
+
+        risk_level = self._metadata_attr(metadata, "risk_level")
+        if hasattr(risk_level, "value"):
+            risk_level = risk_level.value
+        strict_blocked = bool(self._metadata_attr(metadata, "strict_blocked"))
+        blocked = self.mode == SAFETY_MODE_STRICT and (strict_blocked or risk_level in {RiskLevel.HIGH, RiskLevel.DESTRUCTIVE, "HIGH", "DESTRUCTIVE"})
+        if blocked:
+            return self._build_decision(command_type, metadata, False, "command blocked by strict safety policy")
+
+        if self.mode == SAFETY_MODE_AUDIT:
+            return self._build_decision(command_type, metadata, True, "command allowed in audit mode")
+
+        return self._build_decision(command_type, metadata, True, "command allowed in compatibility mode")
+
+    def get_safety_status(self):
+        high_risk_commands = []
+        network_commands = []
+        strict_blocked_commands = []
+
+        for command_type, metadata in self.command_safety_map.items():
+            risk_level = self._metadata_attr(metadata, "risk_level")
+            if hasattr(risk_level, "value"):
+                risk_level = risk_level.value
+            if risk_level in {RiskLevel.HIGH, RiskLevel.DESTRUCTIVE, "HIGH", "DESTRUCTIVE"}:
+                high_risk_commands.append(command_type)
+            if bool(self._metadata_attr(metadata, "can_call_network")):
+                network_commands.append(command_type)
+            if bool(self._metadata_attr(metadata, "strict_blocked")):
+                strict_blocked_commands.append(command_type)
+
+        return {
+            "mode": self.mode,
+            "available_modes": list(AVAILABLE_SAFETY_MODES),
+            "default_mode": DEFAULT_SAFETY_MODE,
+            "policy_version": SAFETY_POLICY_VERSION,
+            "command_count": len(self.command_safety_map),
+            "high_risk_commands": sorted(high_risk_commands),
+            "network_commands": sorted(network_commands),
+            "strict_blocked_commands": sorted(strict_blocked_commands),
+            "warnings": list(self.warnings),
+        }
+
+
 class RawCodeExecutionService:
     def __init__(self, server):
         self.server = server
@@ -1846,12 +2062,14 @@ class BlenderMCPServer:
         self.polyhaven_service = PolyHavenService(self)
         self.sketchfab_service = SketchfabService(self)
         self.hyper3d_service = Hyper3DService(self)
+        self.safety_policy_service = SafetyPolicyService(self)
         self.raw_code_execution_service = RawCodeExecutionService(self)
         self.geometry_nodes_service = GeometryNodesService(self)
 
         self.get_scene_info = self.scene_observation_service.get_scene_info
         self.get_object_info = self.scene_observation_service.get_object_info
         self.get_viewport_screenshot = self.viewport_screenshot_service.get_viewport_screenshot
+        self.get_safety_status = self.safety_policy_service.get_safety_status
         self.execute_code = self.raw_code_execution_service.execute_code
         self.get_polyhaven_status = self.provider_status_service.get_polyhaven_status
         self.get_hyper3d_status = self.provider_status_service.get_hyper3d_status
@@ -2027,6 +2245,7 @@ class BlenderMCPServer:
             "get_scene_info": self.get_scene_info,
             "get_object_info": self.get_object_info,
             "get_viewport_screenshot": self.get_viewport_screenshot,
+            "get_safety_status": self.get_safety_status,
             "execute_code": self.execute_code,
             "get_polyhaven_status": self.get_polyhaven_status,
             "get_hyper3d_status": self.get_hyper3d_status,
@@ -2083,9 +2302,23 @@ class BlenderMCPServer:
         cmd_type = command.get("type")
         params = command.get("params", {})
 
+        safety_decision = self.safety_policy_service.evaluate_command(cmd_type, params)
+        if not safety_decision["allowed"]:
+            return {
+                "status": "error",
+                "message": "Command blocked by safety policy",
+                "safety": safety_decision,
+            }
+
         # Add a handler for checking PolyHaven status
         if cmd_type == "get_polyhaven_status":
-            return {"status": "success", "result": self.get_polyhaven_status()}
+            response = {"status": "success", "result": self.get_polyhaven_status()}
+            if self.safety_policy_service.mode == SAFETY_MODE_AUDIT:
+                response["safety"] = safety_decision
+            return response
+
+        if cmd_type == "get_safety_status":
+            return {"status": "success", "result": self.get_safety_status()}
 
         handlers = self._build_command_handlers()
 
@@ -2095,7 +2328,10 @@ class BlenderMCPServer:
                 print(f"Executing handler for {cmd_type}")
                 result = handler(**params)
                 print(f"Handler execution complete")
-                return {"status": "success", "result": result}
+                response = {"status": "success", "result": result}
+                if self.safety_policy_service.mode == SAFETY_MODE_AUDIT:
+                    response["safety"] = safety_decision
+                return response
             except Exception as e:
                 print(f"Error in handler: {str(e)}")
                 traceback.print_exc()
@@ -2147,6 +2383,10 @@ class BlenderMCPServer:
         Returns success/error status
         """
         return self.viewport_screenshot_service.get_viewport_screenshot(max_size, filepath, format)
+
+    def get_safety_status(self):
+        """Get the current safety policy status."""
+        return self.safety_policy_service.get_safety_status()
 
     def execute_code(self, code):
         """Execute arbitrary Blender Python code with shared context"""

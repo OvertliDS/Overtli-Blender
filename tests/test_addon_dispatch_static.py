@@ -25,6 +25,7 @@ def test_addon_command_inventory_is_stable() -> None:
         "get_scene_info",
         "get_object_info",
         "get_viewport_screenshot",
+        "get_safety_status",
         "execute_code",
         "get_shared_context",
         "clear_shared_context",
@@ -57,6 +58,10 @@ def test_addon_command_inventory_is_stable() -> None:
 
 def test_addon_dispatch_logic_preserves_gating_and_unknown_command_behavior() -> None:
     for name in [
+        "safety_decision = self.safety_policy_service.evaluate_command(cmd_type, params)",
+        "Command blocked by safety policy",
+        "self.safety_policy_service.mode == SAFETY_MODE_AUDIT",
+        "if cmd_type == \"get_safety_status\":",
         "blendermcp_use_polyhaven",
         "blendermcp_use_hyper3d",
         "blendermcp_use_sketchfab",

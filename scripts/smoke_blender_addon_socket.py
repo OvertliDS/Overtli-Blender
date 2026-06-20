@@ -122,6 +122,30 @@ def run_optional_provider_status_smoke(sock: socket.socket, timeout_seconds: flo
             raise RuntimeError(f"{command_name}: missing enabled/message in result")
 
 
+def run_optional_safety_status_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(sock, timeout_seconds, "get_safety_status")
+    result = assert_success("get_safety_status", response)
+    if "mode" not in result or "policy_version" not in result:
+        raise RuntimeError("get_safety_status: missing mode/policy_version in result")
+    return result
+
+
+def run_optional_strict_block_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    response = send_command(sock, timeout_seconds, "execute_code", {"code": 'print("SMOKE_CODE_OK")'})
+    if response.get("status") != "error":
+        raise RuntimeError("execute_code: expected strict-mode block, but command succeeded")
+
+    message = str(response.get("message", ""))
+    if "blocked by safety policy" not in message.lower():
+        raise RuntimeError(f"execute_code: expected safety-policy block, got {response}")
+
+    safety = response.get("safety", {})
+    if safety.get("mode") != "strict":
+        raise RuntimeError(f"execute_code: expected strict safety metadata, got {safety}")
+
+    print("PASS execute_code blocked by strict safety policy")
+
+
 def run_optional_geometry_nodes_status_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     response = send_command(sock, timeout_seconds, "get_geometry_nodes_status")
     result = assert_success("get_geometry_nodes_status", response)
@@ -213,6 +237,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the optional provider status smoke.",
     )
     parser.add_argument(
+        "--include-safety-status",
+        action="store_true",
+        help="Run the optional safety status smoke.",
+    )
+    parser.add_argument(
+        "--expect-strict-blocks",
+        action="store_true",
+        help="Require the addon to report strict mode and block a harmless code execution request.",
+    )
+    parser.add_argument(
         "--include-geometry-nodes-status",
         action="store_true",
         help="Run the optional Geometry Nodes status smoke.",
@@ -242,6 +276,17 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.include_provider_status:
                 run_optional_provider_status_smoke(sock, args.timeout)
+
+            safety_status = None
+            if args.include_safety_status or args.expect_strict_blocks:
+                safety_status = run_optional_safety_status_smoke(sock, args.timeout)
+
+            if args.expect_strict_blocks:
+                if safety_status is None:
+                    safety_status = run_optional_safety_status_smoke(sock, args.timeout)
+                if safety_status.get("mode") != "strict":
+                    raise RuntimeError(f"Expected strict safety mode, got {safety_status.get('mode', 'unknown')}")
+                run_optional_strict_block_smoke(sock, args.timeout)
 
             if args.include_geometry_nodes_status:
                 run_optional_geometry_nodes_status_smoke(sock, args.timeout)

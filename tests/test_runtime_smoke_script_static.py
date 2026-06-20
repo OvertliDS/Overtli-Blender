@@ -45,10 +45,13 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "list_context_scripts",
         "execute_code",
         "get_geometry_nodes_status",
+        "get_safety_status",
         "--include-screenshot",
         "--include-script-registry",
         "--include-provider-status",
+        "--include-safety-status",
         "--include-geometry-nodes-status",
         "--include-code-execution",
+        "--expect-strict-blocks",
     ]:
         assert text in SMOKE_TEXT

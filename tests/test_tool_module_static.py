@@ -10,6 +10,7 @@ SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").rea
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
 CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/code_execution_tools.py").read_text(encoding="utf-8")
 REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/registry.py").read_text(encoding="utf-8")
+SAFETY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/safety_tools.py").read_text(encoding="utf-8")
 PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
 POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
 SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
@@ -96,6 +97,7 @@ def test_registry_module_references_all_tool_registration_helpers() -> None:
         "register_screenshot_tools",
         "register_script_registry_tools",
         "register_provider_status_tools",
+        "register_safety_tools",
         "register_polyhaven_tools",
         "register_sketchfab_tools",
         "register_hyper3d_tools",
@@ -117,6 +119,15 @@ def test_provider_status_tools_contains_expected_tool_names() -> None:
         "get_sketchfab_status",
     ]:
         assert f"def {name}(" in PROVIDER_STATUS_TOOLS_TEXT
+
+
+def test_safety_tools_module_exists_and_registers_tools() -> None:
+    assert (ROOT / "src/blender_mcp/tools/safety_tools.py").exists()
+    assert "def register_safety_tools" in SAFETY_TOOLS_TEXT
+
+
+def test_safety_tools_contains_expected_tool_name() -> None:
+    assert "def get_safety_status(" in SAFETY_TOOLS_TEXT
 
 
 def test_polyhaven_tools_module_exists_and_registers_tools() -> None:
