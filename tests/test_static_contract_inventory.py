@@ -171,8 +171,20 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
     for name in [
         "class SharedContextService",
         "class ScriptRegistryService",
+        "class SceneObservationService",
+        "class ViewportScreenshotService",
+        "class ProviderStatusService",
+        "class PolyHavenService",
+        "class SketchfabService",
+        "class Hyper3DService",
         "self.shared_context_service = SharedContextService(self.shared_context)",
         "self.script_registry_service = ScriptRegistryService()",
+        "self.scene_observation_service = SceneObservationService(self)",
+        "self.viewport_screenshot_service = ViewportScreenshotService(self)",
+        "self.provider_status_service = ProviderStatusService(self)",
+        "self.polyhaven_service = PolyHavenService(self)",
+        "self.sketchfab_service = SketchfabService(self)",
+        "self.hyper3d_service = Hyper3DService(self)",
     ]:
         assert name in ADDON_TEXT
 
