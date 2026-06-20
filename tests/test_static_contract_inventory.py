@@ -159,6 +159,24 @@ def test_context_tool_module_includes_extracted_wrappers() -> None:
     assert missing == [], f"Missing extracted context tools: {missing}"
 
 
+def test_addon_static_surface_includes_dispatch_helpers() -> None:
+    for name in [
+        "def _build_command_handlers(",
+        "def _dispatch_command(",
+    ]:
+        assert name in ADDON_TEXT
+
+
+def test_addon_static_surface_includes_internal_service_classes() -> None:
+    for name in [
+        "class SharedContextService",
+        "class ScriptRegistryService",
+        "self.shared_context_service = SharedContextService(self.shared_context)",
+        "self.script_registry_service = ScriptRegistryService()",
+    ]:
+        assert name in ADDON_TEXT
+
+
 def test_addon_static_surface_includes_expected_commands() -> None:
     expected = [
         "get_scene_info",

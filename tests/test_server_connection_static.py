@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
+ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
 CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
@@ -192,12 +193,14 @@ def test_geometry_nodes_tools_py_contains_extracted_tool_names() -> None:
         assert _has_def(GEOMETRY_NODES_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
 
 
-def test_addon_py_is_unmodified_in_worktree() -> None:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "--", "addon.py"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout.strip() == ""
+def test_addon_py_contains_dispatch_helpers() -> None:
+    assert "def _build_command_handlers(" in ADDON_TEXT
+    assert "def _dispatch_command(" in ADDON_TEXT
+    assert "bl_info" in ADDON_TEXT
+
+
+def test_addon_py_contains_internal_service_extraction() -> None:
+    assert "class SharedContextService" in ADDON_TEXT
+    assert "class ScriptRegistryService" in ADDON_TEXT
+    assert "self.shared_context_service = SharedContextService(self.shared_context)" in ADDON_TEXT
+    assert "self.script_registry_service = ScriptRegistryService()" in ADDON_TEXT
