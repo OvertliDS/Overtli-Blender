@@ -1,0 +1,30 @@
+# Runtime Smoke
+
+Use this checklist after starting Blender with the Blender MCP addon enabled.
+
+Prerequisite:
+- Open Blender.
+- Enable the addon in `Edit > Preferences > Add-ons`.
+- Start the addon socket server from the existing Blender MCP UI.
+
+Run from the repository root in PowerShell:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py
+```
+
+Optional checks:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-screenshot
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-script-registry
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-provider-status
+```
+
+Success criteria:
+- The default smoke prints `PASS` lines for `get_scene_info`, `get_shared_context`, `get_operation_history`, `list_object_handles`, `list_material_handles`, and `list_context_scripts`.
+- Optional screenshot smoke passes only when a visible viewport is available.
+- Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
+- Optional provider status smoke returns status-only responses without downloading assets.
+
+If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
