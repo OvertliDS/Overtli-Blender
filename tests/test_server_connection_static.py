@@ -16,6 +16,7 @@ if str(SRC) not in sys.path:
 SERVER_TEXT = (ROOT / "src/blender_mcp/server.py").read_text(encoding="utf-8")
 CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
+SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
 
 
 def _has_def(source: str, name: str) -> bool:
@@ -80,7 +81,6 @@ def test_blender_connection_can_be_instantiated_without_connecting() -> None:
 
 def test_server_py_still_defines_key_tool_wrappers() -> None:
     for name in [
-        "get_viewport_screenshot",
         "execute_blender_code",
         "get_polyhaven_status",
         "get_hyper3d_status",
@@ -113,6 +113,10 @@ def test_observation_tools_py_contains_extracted_tool_names() -> None:
         "get_object_info",
     ]:
         assert _has_def(OBSERVATION_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_screenshot_tools_py_contains_extracted_tool_name() -> None:
+    assert _has_def(SCREENSHOT_TOOLS_TEXT, "get_viewport_screenshot")
 
 
 def test_addon_py_is_unmodified_in_worktree() -> None:
