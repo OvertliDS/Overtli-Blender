@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+
+logger = logging.getLogger("BlenderMCPServer")
 
 
 def register_script_registry_tools(mcp: Any, get_blender_connection: Callable[[], Any]) -> None:
@@ -130,3 +134,33 @@ def register_script_registry_tools(mcp: Any, get_blender_connection: Callable[[]
         except Exception as e:
             return f"Error listing context scripts: {str(e)}"
 
+    @mcp.tool()
+    def clear_context_scripts(ctx: Any, category: str = None, script_name: str = None, clear_permanent: bool = False) -> str:
+        """
+        Clear context scripts from the registry.
+
+        Args:
+            category: Optional category to clear. If None, clears all categories.
+            script_name: Optional specific script to clear. Requires category to be specified.
+            clear_permanent: If True, also clears permanent scripts. If False (default), only clears temporary scripts.
+
+        Returns:
+            Confirmation message
+        """
+        try:
+            blender = get_blender_connection()
+            result = blender.send_command("clear_context_scripts", {
+                "category": category,
+                "script_name": script_name,
+                "clear_permanent": clear_permanent
+            })
+
+            if result.get("status") == "success":
+                message = result.get("message", "Scripts cleared successfully")
+                return message
+            else:
+                return f"Error clearing scripts: {result.get('message', 'Unknown error')}"
+
+        except Exception as e:
+            logger.error(f"Error clearing context scripts: {str(e)}")
+            return f"Error clearing context scripts: {str(e)}"

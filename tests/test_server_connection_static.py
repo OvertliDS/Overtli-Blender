@@ -18,6 +18,11 @@ CONTEXT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/context_tools.py").read_text
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/script_registry_tools.py").read_text(encoding="utf-8")
+PROVIDER_STATUS_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/provider_status_tools.py").read_text(encoding="utf-8")
+POLYHAVEN_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/polyhaven_tools.py").read_text(encoding="utf-8")
+SKETCHFAB_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/sketchfab_tools.py").read_text(encoding="utf-8")
+HYPER3D_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/hyper3d_tools.py").read_text(encoding="utf-8")
+GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/blender_mcp/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
 
 
 def _has_def(source: str, name: str) -> bool:
@@ -83,12 +88,6 @@ def test_blender_connection_can_be_instantiated_without_connecting() -> None:
 def test_server_py_still_defines_key_tool_wrappers() -> None:
     for name in [
         "execute_blender_code",
-        "get_polyhaven_status",
-        "get_hyper3d_status",
-        "get_sketchfab_status",
-        "complete_geometry_node",
-        "get_geometry_nodes_status",
-        "clear_context_scripts",
     ]:
         assert _has_def(SERVER_TEXT, name), f"Missing server wrapper: {name}"
 
@@ -123,8 +122,54 @@ def test_script_registry_tools_py_contains_extracted_tool_names() -> None:
         "register_context_script",
         "execute_context_script",
         "list_context_scripts",
+        "clear_context_scripts",
     ]:
         assert _has_def(SCRIPT_REGISTRY_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_provider_status_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "get_polyhaven_status",
+        "get_hyper3d_status",
+        "get_sketchfab_status",
+    ]:
+        assert _has_def(PROVIDER_STATUS_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_polyhaven_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "get_polyhaven_categories",
+        "search_polyhaven_assets",
+        "download_polyhaven_asset",
+        "set_texture",
+    ]:
+        assert _has_def(POLYHAVEN_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_sketchfab_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "search_sketchfab_models",
+        "download_sketchfab_model",
+    ]:
+        assert _has_def(SKETCHFAB_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_hyper3d_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "generate_hyper3d_model_via_text",
+        "generate_hyper3d_model_via_images",
+        "poll_rodin_job_status",
+        "import_generated_asset",
+    ]:
+        assert _has_def(HYPER3D_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
+
+
+def test_geometry_nodes_tools_py_contains_extracted_tool_names() -> None:
+    for name in [
+        "complete_geometry_node",
+        "get_geometry_nodes_status",
+    ]:
+        assert _has_def(GEOMETRY_NODES_TOOLS_TEXT, name), f"Missing extracted tool: {name}"
 
 
 def test_addon_py_is_unmodified_in_worktree() -> None:
