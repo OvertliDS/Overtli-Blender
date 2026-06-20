@@ -17,8 +17,6 @@ def _has_def(source: str, name: str) -> bool:
 
 def test_server_static_surface_includes_expected_wrappers() -> None:
     expected = [
-        "get_scene_info",
-        "get_object_info",
         "get_viewport_screenshot",
         "execute_blender_code",
         "get_polyhaven_status",
@@ -33,6 +31,17 @@ def test_server_static_surface_includes_expected_wrappers() -> None:
 
     missing = [name for name in expected if not _has_def(SERVER_TEXT, name)]
     assert missing == [], f"Missing server wrappers: {missing}"
+
+
+def test_observation_tool_module_includes_extracted_wrappers() -> None:
+    observation_text = (ROOT / "src/blender_mcp/tools/observation_tools.py").read_text(encoding="utf-8")
+    expected = [
+        "get_scene_info",
+        "get_object_info",
+    ]
+
+    missing = [name for name in expected if f"def {name}(" not in observation_text]
+    assert missing == [], f"Missing extracted observation tools: {missing}"
 
 
 def test_context_tool_module_includes_extracted_wrappers() -> None:
