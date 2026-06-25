@@ -11,6 +11,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Multi-view screenshot packs and verification snapshot manifests under `.overtli_blender/verification/`
 - Verified Phase 3 scene editing: primitive creation, transforms, duplication, bounded deletion, visibility, materials, modifiers, collections, and verified edit batches
 - Phase 3 workspace, todo, operation journal, scene snapshot, scene diff, user-change detection, and rollback tools under `.overtli_blender/workspace/`
+- Phase 4A production material workflows: channel schema, material templates, deep material inspection, shader graph inspection, texture/map slot binding, procedural material generation, material previews, material workflow batches, and confirmed material cleanup
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -68,6 +69,14 @@ Phase 3 verified edit smoke:
 ```
 
 The Phase 3 smoke creates temporary `OVERTLI_PHASE3_*` objects, materials, and collections, uses only structured edit/workspace commands, captures verification artifacts under `.overtli_blender/verification/`, writes workspace evidence under `.overtli_blender/workspace/`, checks scene diff/change detection/rollback, and cleans up only the object and collection names created by that run. It does not run raw code, download assets, or target arbitrary user objects.
+
+Phase 4A production material smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase4a-full
+```
+
+The Phase 4A smoke creates temporary `OVERTLI_PHASE4A_*` objects, materials, and a collection; exercises material channel schema, templates, procedural/custom materials, shader graph inspection, texture slot validation, preview artifacts, material workflow batches, and confirmed material deletion; then verifies no smoke-created objects, collections, or materials remain. It may write ignored preview and verification artifacts under `.overtli_blender/`, and it may reference ignored placeholder texture paths under `.overtli_blender/material_test_textures/`. It does not download assets, run raw code, bake textures, or touch arbitrary user data.
 
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 

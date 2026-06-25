@@ -438,6 +438,83 @@ def run_optional_material_ops_smoke(sock: socket.socket, timeout_seconds: float)
         raise RuntimeError(f"create_basic_material: {result}")
 
 
+def run_optional_material_channel_schema_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    result = assert_success("get_material_channel_schema", send_command(sock, timeout_seconds, "get_material_channel_schema"))
+    for key in ["base_color", "roughness", "metallic", "normal", "height", "displacement", "ambient_occlusion"]:
+        if key not in result.get("channels", {}):
+            raise RuntimeError(f"get_material_channel_schema missing channel: {key}")
+    for key in ["ORM", "RMA", "MRA", "glTF_metallic_roughness"]:
+        if key not in result.get("packed_map_conventions", {}):
+            raise RuntimeError(f"get_material_channel_schema missing packed convention: {key}")
+    return result
+
+
+def run_optional_material_templates_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    result = assert_success("get_supported_material_templates", send_command(sock, timeout_seconds, "get_supported_material_templates"))
+    for key in ["pbr_metal_gold", "glass_clear", "fabric_woven", "wood_procedural", "sci_fi_panel", "car_paint_basic"]:
+        if key not in result.get("templates", {}):
+            raise RuntimeError(f"get_supported_material_templates missing template: {key}")
+    return result
+
+
+def run_phase4a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = int(time.time())
+    collection_name = f"OVERTLI_PHASE4A_SMOKE_{stamp}"
+    cube_name = f"OVERTLI_PHASE4A_CUBE_{stamp}"
+    sphere_name = f"OVERTLI_PHASE4A_SPHERE_{stamp}"
+    gold_name = f"OVERTLI_PHASE4A_GOLD_{stamp}"
+    proc_name = f"OVERTLI_PHASE4A_PROC_{stamp}"
+    custom_name = f"OVERTLI_PHASE4A_CUSTOM_{stamp}"
+    created_objects = [cube_name, sphere_name]
+    created_materials = [gold_name, proc_name, custom_name]
+
+    try:
+        run_optional_material_channel_schema_smoke(sock, timeout_seconds)
+        run_optional_material_templates_smoke(sock, timeout_seconds)
+        assert_success("create_collection phase4a", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        assert_success("create_primitive_object phase4a cube", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": cube_name, "collection_name": collection_name}))
+        assert_success("create_primitive_object phase4a sphere", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "uv_sphere", "name": sphere_name, "collection_name": collection_name}))
+        assert_success("create_material_from_template phase4a gold", send_command(sock, timeout_seconds, "create_material_from_template", {"template_name": "pbr_metal_gold", "material_name": gold_name, "assign_to_object": cube_name, "replace_existing": True, "verify": True}))
+        assert_success("create_procedural_material phase4a proc", send_command(sock, timeout_seconds, "create_procedural_material", {"material_name": proc_name, "procedural_type": "noise", "base_color": [0.22, 0.18, 0.14, 1.0], "assign_to_object": sphere_name, "replace_existing": True, "verify": True}))
+        assert_success("create_custom_material phase4a custom", send_command(sock, timeout_seconds, "create_custom_material", {"material_name": custom_name, "recipe": {"channels": {"base_color": [0.03, 0.07, 0.12, 1.0], "metallic": 0.5, "roughness": 0.34, "emission_color": [0.0, 0.8, 1.0, 1.0], "emission_strength": 1.5}, "procedural": {"enabled": True, "noise_scale": 32.0, "bump_strength": 0.025}, "preview_shape": "cube"}, "replace_existing": True, "verify": True}))
+        assert_success("apply_material_to_objects phase4a", send_command(sock, timeout_seconds, "apply_material_to_objects", {"material_name": custom_name, "object_names": [cube_name], "verify": True}))
+        assert_success("list_materials_deep phase4a", send_command(sock, timeout_seconds, "list_materials_deep", {"max_materials": 200}))
+        assert_success("get_material_deep_info phase4a", send_command(sock, timeout_seconds, "get_material_deep_info", {"material_name": custom_name}))
+        graph = assert_success("get_shader_graph phase4a", send_command(sock, timeout_seconds, "get_shader_graph", {"material_name": custom_name}))
+        if "nodes" not in graph:
+            raise RuntimeError(f"get_shader_graph missing nodes: {graph}")
+        assert_success("add_material_node phase4a", send_command(sock, timeout_seconds, "add_material_node", {"material_name": custom_name, "node_type": "ShaderNodeTexNoise", "name": f"OVERTLI_PHASE4A_NOISE_{stamp}"}))
+        assert_success("set_material_node_input phase4a", send_command(sock, timeout_seconds, "set_material_node_input", {"material_name": custom_name, "node_name": "Principled BSDF", "input_name": "Roughness", "value": 0.41}))
+        missing_map = send_command(sock, timeout_seconds, "bind_material_texture_map", {"material_name": custom_name, "map_kind": "roughness_map", "texture_path": os.path.join(REPO_ROOT, ".overtli_blender", "material_test_textures", "missing_roughness.png"), "strict_file_exists": True})
+        if missing_map.get("status") != "success" or missing_map.get("result", {}).get("status") != "error":
+            raise RuntimeError(f"bind_material_texture_map should reject missing strict file: {missing_map}")
+        print("PASS bind_material_texture_map missing-file validation")
+        assert_success("bind_material_texture_map phase4a metadata", send_command(sock, timeout_seconds, "bind_material_texture_map", {"material_name": custom_name, "map_kind": "orm_map", "texture_path": os.path.join(REPO_ROOT, ".overtli_blender", "material_test_textures", "OVERTLI_PHASE4A_ORM.png"), "strict_file_exists": False, "connect": True, "verify": True}))
+        assert_success("create_material_preview phase4a", send_command(sock, timeout_seconds, "create_material_preview", {"material_name": custom_name, "preview_shape": "sphere", "artifact_root": REPO_ROOT}))
+        assert_success("run_material_workflow_batch phase4a", send_command(sock, timeout_seconds, "run_material_workflow_batch", {"label": "Phase 4A smoke batch", "artifact_root": REPO_ROOT, "operations": [{"command": "create_material_variant", "params": {"source_material_name": custom_name, "variant_name": f"{custom_name}_VARIANT", "overrides": {"roughness": 0.52}, "replace_existing": True, "verify": True}}, {"command": "create_material_preview", "params": {"material_name": f"{custom_name}_VARIANT", "artifact_root": REPO_ROOT, "include_snapshot": False}}]}))
+        created_materials.append(f"{custom_name}_VARIANT")
+        assert_success("get_scene_health phase4a", send_command(sock, timeout_seconds, "get_scene_health"))
+        assert_success("get_scene_index phase4a", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 200}))
+    finally:
+        cleanup = assert_success("delete_objects phase4a_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True}))
+        if cleanup.get("status") not in {"success", "partial"}:
+            raise RuntimeError(f"Phase 4A object cleanup failed: {cleanup}")
+        material_cleanup = assert_success("delete_materials phase4a_cleanup", send_command(sock, timeout_seconds, "delete_materials", {"material_names": created_materials, "confirm": True, "allow_missing": True}))
+        if material_cleanup.get("status") not in {"success", "partial"}:
+            raise RuntimeError(f"Phase 4A material cleanup failed: {material_cleanup}")
+        collection_cleanup = assert_success("delete_collection phase4a_cleanup", send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection_name, "confirm": True, "require_empty": True}))
+        if collection_cleanup.get("status") != "success":
+            raise RuntimeError(f"Phase 4A collection cleanup failed: {collection_cleanup}")
+        scene_index = assert_success("get_scene_index phase4a_cleanup_probe", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 500}))
+        materials = assert_success("list_materials_deep phase4a_cleanup_probe", send_command(sock, timeout_seconds, "list_materials_deep", {"max_materials": 500}))
+        object_leftovers = [obj.get("name") for obj in scene_index.get("objects", []) if str(obj.get("name", "")).startswith("OVERTLI_PHASE4A_")]
+        collection_leftovers = [col.get("name") for col in scene_index.get("collections", []) if str(col.get("name", "")).startswith("OVERTLI_PHASE4A_")]
+        material_leftovers = [mat.get("name") for mat in materials.get("materials", []) if str(mat.get("name", "")).startswith("OVERTLI_PHASE4A_")]
+        if object_leftovers or collection_leftovers or material_leftovers:
+            raise RuntimeError(f"Phase 4A cleanup leaked data: objects={object_leftovers}, collections={collection_leftovers}, materials={material_leftovers}")
+        print("PASS phase4a cleanup removed smoke objects, collection, and materials")
+
+
 def run_optional_modifier_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     stamp = str(int(time.time()))
     collection = f"OVERTLI_PHASE3_MOD_SMOKE_{stamp}"
@@ -630,6 +707,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-collection-ops", action="store_true", help="Run the Phase 3 collection operations smoke.")
     parser.add_argument("--include-verified-edit-batch", action="store_true", help="Run the Phase 3 verified edit batch smoke.")
     parser.add_argument("--include-workspace-safety-diff", action="store_true", help="Run the Phase 3 workspace, todo, journal, scene diff, rollback, and change-detection smoke.")
+    parser.add_argument("--include-material-intelligence", action="store_true", help="Run Phase 4A material intelligence schema, template, list, and graph smoke.")
+    parser.add_argument("--include-material-channel-schema", action="store_true", help="Run the Phase 4A material channel schema smoke.")
+    parser.add_argument("--include-material-templates", action="store_true", help="Run the Phase 4A supported material templates smoke.")
+    parser.add_argument("--include-procedural-material", action="store_true", help="Run the Phase 4A procedural material path via the full contained scenario.")
+    parser.add_argument("--include-custom-material", action="store_true", help="Run the Phase 4A custom material path via the full contained scenario.")
+    parser.add_argument("--include-texture-map-slots", action="store_true", help="Run the Phase 4A texture map slot validation path via the full contained scenario.")
+    parser.add_argument("--include-shader-graph", action="store_true", help="Run the Phase 4A shader graph path via the full contained scenario.")
+    parser.add_argument("--include-material-preview", action="store_true", help="Run the Phase 4A material preview path via the full contained scenario.")
+    parser.add_argument("--include-material-workflow-batch", action="store_true", help="Run the Phase 4A material workflow batch path via the full contained scenario.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -639,6 +725,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase3-full",
         action="store_true",
         help="Run a contained Phase 3 scene edit, material, modifier, collection, batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase4a-full",
+        action="store_true",
+        help="Run a contained Phase 4A material intelligence, shader graph, texture slot, preview, batch, and cleanup scenario.",
     )
     return parser
 
@@ -719,6 +810,28 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.phase3_full:
                 run_phase3_full_smoke(sock, args.timeout)
+
+            if args.include_material_channel_schema:
+                run_optional_material_channel_schema_smoke(sock, args.timeout)
+
+            if args.include_material_templates:
+                run_optional_material_templates_smoke(sock, args.timeout)
+
+            if args.include_material_intelligence:
+                run_optional_material_channel_schema_smoke(sock, args.timeout)
+                run_optional_material_templates_smoke(sock, args.timeout)
+                assert_success("list_materials_deep", send_command(sock, args.timeout, "list_materials_deep", {"max_materials": 100}))
+
+            if (
+                args.phase4a_full
+                or args.include_procedural_material
+                or args.include_custom_material
+                or args.include_texture_map_slots
+                or args.include_shader_graph
+                or args.include_material_preview
+                or args.include_material_workflow_batch
+            ):
+                run_phase4a_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

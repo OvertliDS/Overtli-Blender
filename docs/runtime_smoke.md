@@ -31,6 +31,16 @@ Optional checks:
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-verified-edit-batch
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-workspace-safety-diff
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase3-full
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-material-intelligence
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-material-channel-schema
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-material-templates
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-procedural-material
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-custom-material
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-texture-map-slots
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-shader-graph
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-material-preview
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-material-workflow-batch
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase4a-full
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-screenshot
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-script-registry
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-provider-status
@@ -51,6 +61,10 @@ Success criteria:
 - `--include-workspace-safety-diff` runs only the master Phase 3 workspace, todo, journal, scene diff, user-change detection, and rollback checks.
 - Phase 3 smoke does not run raw code, does not download provider assets, does not import/export files, and does not delete arbitrary user objects.
 - Phase 3 generated verification and workspace artifacts are written under `.overtli_blender/` and remain ignored by git.
+- `--phase4a-full` runs a contained Phase 4A material workflow: it creates a unique `OVERTLI_PHASE4A_SMOKE_<timestamp>` collection, two primitives, PBR/template/procedural/custom materials, texture-map-slot validation, shader graph inspection and allowlisted node editing, material preview artifacts, material workflow batch snapshots, scene health/index checks, and cleanup for only the smoke-created object, collection, and material names.
+- Phase 4A smoke writes material preview manifests under `.overtli_blender/material_previews/` and verification snapshots under `.overtli_blender/verification/`. It may reference ignored placeholder texture paths under `.overtli_blender/material_test_textures/`.
+- Phase 4A smoke does not run raw code, does not download assets, does not bake textures, does not run provider generation, and does not delete arbitrary user objects or materials.
+- Phase 4A cleanup succeeds only when remaining `OVERTLI_PHASE4A_*` objects, collections, and materials are all empty lists.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.
@@ -60,4 +74,4 @@ Success criteria:
 
 If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
 
-Generated Phase 2 and Phase 3 artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
+Generated Phase 2, Phase 3, and Phase 4A artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.

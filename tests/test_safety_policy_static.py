@@ -125,6 +125,31 @@ def test_common_safety_module_classifies_phase3_master_workspace_commands() -> N
         assert text in SAFETY_TEXT
 
 
+def test_common_safety_module_classifies_phase4a_material_commands() -> None:
+    for text in [
+        '"get_material_channel_schema", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_supported_material_templates", OperationType.OBSERVE, RiskLevel.LOW',
+        '"list_materials_deep", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_material_deep_info", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_shader_graph", OperationType.SHADER, RiskLevel.LOW',
+        '"create_material_from_template", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"create_custom_material", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"create_procedural_material", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"bind_material_texture_map", OperationType.TEXTURE, RiskLevel.MEDIUM',
+        '"run_material_workflow_batch", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"remove_material_node", OperationType.SHADER, RiskLevel.HIGH',
+        '"delete_materials", OperationType.CLEANUP, RiskLevel.HIGH',
+    ]:
+        assert text in SAFETY_TEXT
+
+
+def test_phase4a_destructive_material_commands_are_strict_blocked() -> None:
+    for command in ["remove_material_node", "delete_materials"]:
+        command_index = SAFETY_TEXT.index(f'"{command}"')
+        command_block = SAFETY_TEXT[command_index:command_index + 500]
+        assert "strict_blocked=True" in command_block
+
+
 def test_smoke_script_exposes_safety_mode_flags() -> None:
     for text in [
         "--include-safety-status",

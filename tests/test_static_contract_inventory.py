@@ -11,6 +11,11 @@ CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_
 COLLECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/collection_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
 MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_tools.py").read_text(encoding="utf-8")
+MATERIAL_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_intelligence_tools.py").read_text(encoding="utf-8")
+ADVANCED_MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/advanced_material_tools.py").read_text(encoding="utf-8")
+SHADER_GRAPH_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/shader_graph_tools.py").read_text(encoding="utf-8")
+MATERIAL_TEXTURE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_texture_tools.py").read_text(encoding="utf-8")
+MATERIAL_PREVIEW_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_preview_tools.py").read_text(encoding="utf-8")
 MODIFIER_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/modifier_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCENE_EDIT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_edit_tools.py").read_text(encoding="utf-8")
@@ -110,6 +115,11 @@ def test_registry_tool_module_includes_all_registrations() -> None:
         "register_scene_intelligence_tools",
         "register_scene_edit_tools",
         "register_material_tools",
+        "register_material_intelligence_tools",
+        "register_advanced_material_tools",
+        "register_shader_graph_tools",
+        "register_material_texture_tools",
+        "register_material_preview_tools",
         "register_modifier_tools",
         "register_collection_tools",
         "register_workspace_tools",
@@ -193,6 +203,19 @@ def test_phase3_tool_modules_include_extracted_wrappers() -> None:
     for source, names in expected.items():
         missing = [name for name in names if f"def {name}(" not in source]
         assert missing == [], f"Missing Phase 3 tools: {missing}"
+
+
+def test_phase4a_tool_modules_include_wrappers() -> None:
+    expected = {
+        MATERIAL_INTELLIGENCE_TOOLS_TEXT: ["get_material_channel_schema", "get_supported_material_templates", "list_materials_deep", "get_material_deep_info"],
+        ADVANCED_MATERIAL_TOOLS_TEXT: ["create_material_from_template", "create_custom_material", "create_procedural_material", "create_material_variant", "apply_material_to_objects", "run_material_workflow_batch", "delete_materials"],
+        SHADER_GRAPH_TOOLS_TEXT: ["get_shader_graph", "set_material_node_input", "add_material_node", "connect_material_nodes", "remove_material_node"],
+        MATERIAL_TEXTURE_TOOLS_TEXT: ["bind_material_texture_map"],
+        MATERIAL_PREVIEW_TOOLS_TEXT: ["create_material_preview"],
+    }
+    for source, names in expected.items():
+        missing = [name for name in names if f"def {name}(" not in source]
+        assert missing == [], f"Missing Phase 4A tools: {missing}"
 
 
 def test_context_tool_module_includes_extracted_wrappers() -> None:

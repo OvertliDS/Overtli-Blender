@@ -68,8 +68,18 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-collection-ops",
         "--include-verified-edit-batch",
         "--include-workspace-safety-diff",
+        "--include-material-intelligence",
+        "--include-material-channel-schema",
+        "--include-material-templates",
+        "--include-procedural-material",
+        "--include-custom-material",
+        "--include-texture-map-slots",
+        "--include-shader-graph",
+        "--include-material-preview",
+        "--include-material-workflow-batch",
         "--phase2-full",
         "--phase3-full",
+        "--phase4a-full",
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
@@ -120,3 +130,32 @@ def test_runtime_smoke_phase3_full_avoids_forbidden_commands() -> None:
         "create_rodin_job",
     ]:
         assert text not in phase3_block
+
+
+def test_runtime_smoke_phase4a_full_cleans_up_and_avoids_forbidden_commands() -> None:
+    phase4a_start = SMOKE_TEXT.index("def run_phase4a_full_smoke")
+    phase4a_end = SMOKE_TEXT.index("def run_optional_modifier_ops_smoke")
+    phase4a_block = SMOKE_TEXT[phase4a_start:phase4a_end]
+    for text in [
+        "OVERTLI_PHASE4A_SMOKE_",
+        "OVERTLI_PHASE4A_CUBE_",
+        "OVERTLI_PHASE4A_GOLD_",
+        "run_optional_material_channel_schema_smoke",
+        "run_optional_material_templates_smoke",
+        "get_shader_graph",
+        "bind_material_texture_map",
+        "create_material_preview",
+        "run_material_workflow_batch",
+        "delete_materials",
+        "delete_collection",
+        "delete_objects",
+        "bind_material_texture_map should reject missing strict file",
+    ]:
+        assert text in phase4a_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in phase4a_block
