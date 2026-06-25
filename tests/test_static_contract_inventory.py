@@ -8,8 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
 ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
+COLLECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/collection_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_tools.py").read_text(encoding="utf-8")
+MODIFIER_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/modifier_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCENE_EDIT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_edit_tools.py").read_text(encoding="utf-8")
 SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
 VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
@@ -103,6 +107,10 @@ def test_registry_tool_module_includes_all_registrations() -> None:
         "register_context_tools",
         "register_observation_tools",
         "register_scene_intelligence_tools",
+        "register_scene_edit_tools",
+        "register_material_tools",
+        "register_modifier_tools",
+        "register_collection_tools",
         "register_screenshot_tools",
         "register_verification_tools",
         "register_script_registry_tools",
@@ -172,6 +180,18 @@ def test_geometry_nodes_tool_module_includes_extracted_wrappers() -> None:
     assert missing == [], f"Missing extracted geometry nodes tools: {missing}"
 
 
+def test_phase3_tool_modules_include_extracted_wrappers() -> None:
+    expected = {
+        SCENE_EDIT_TOOLS_TEXT: ["get_supported_edit_operations", "create_primitive_object", "transform_object", "duplicate_object", "delete_objects", "set_object_visibility", "run_verified_edit_batch"],
+        MATERIAL_TOOLS_TEXT: ["create_basic_material", "assign_material", "update_material_properties"],
+        MODIFIER_TOOLS_TEXT: ["add_object_modifier", "update_object_modifier", "remove_object_modifier"],
+        COLLECTION_TOOLS_TEXT: ["create_collection", "move_objects_to_collection", "delete_collection"],
+    }
+    for source, names in expected.items():
+        missing = [name for name in names if f"def {name}(" not in source]
+        assert missing == [], f"Missing Phase 3 tools: {missing}"
+
+
 def test_context_tool_module_includes_extracted_wrappers() -> None:
     expected = [
         "get_shared_context",
@@ -203,6 +223,11 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "class ViewportScreenshotService",
         "class SceneIntelligenceService",
         "class VerificationArtifactService",
+        "class SceneEditService",
+        "class MaterialAuthoringService",
+        "class ModifierService",
+        "class CollectionOrganizationService",
+        "class VerifiedEditBatchService",
         "class ProviderStatusService",
         "class PolyHavenService",
         "class SketchfabService",
@@ -216,6 +241,11 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "self.viewport_screenshot_service = ViewportScreenshotService(self)",
         "self.scene_intelligence_service = SceneIntelligenceService(self)",
         "self.verification_artifact_service = VerificationArtifactService(self)",
+        "self.scene_edit_service = SceneEditService(self)",
+        "self.material_authoring_service = MaterialAuthoringService(self)",
+        "self.modifier_service = ModifierService(self)",
+        "self.collection_organization_service = CollectionOrganizationService(self)",
+        "self.verified_edit_batch_service = VerifiedEditBatchService(self)",
         "self.provider_status_service = ProviderStatusService(self)",
         "self.polyhaven_service = PolyHavenService(self)",
         "self.sketchfab_service = SketchfabService(self)",
@@ -243,6 +273,22 @@ def test_addon_static_surface_includes_expected_commands() -> None:
         "capture_viewport_pack",
         "create_verification_snapshot",
         "list_verification_snapshots",
+        "get_supported_edit_operations",
+        "create_primitive_object",
+        "transform_object",
+        "duplicate_object",
+        "delete_objects",
+        "set_object_visibility",
+        "create_basic_material",
+        "assign_material",
+        "update_material_properties",
+        "add_object_modifier",
+        "update_object_modifier",
+        "remove_object_modifier",
+        "create_collection",
+        "move_objects_to_collection",
+        "delete_collection",
+        "run_verified_edit_batch",
         "get_safety_status",
         "execute_code",
         "get_shared_context",

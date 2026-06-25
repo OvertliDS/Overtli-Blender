@@ -5,8 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
+COLLECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/collection_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_tools.py").read_text(encoding="utf-8")
+MODIFIER_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/modifier_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCENE_EDIT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_edit_tools.py").read_text(encoding="utf-8")
 SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
 VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
@@ -126,6 +130,10 @@ def test_registry_module_references_all_tool_registration_helpers() -> None:
         "register_context_tools",
         "register_observation_tools",
         "register_scene_intelligence_tools",
+        "register_scene_edit_tools",
+        "register_material_tools",
+        "register_modifier_tools",
+        "register_collection_tools",
         "register_screenshot_tools",
         "register_verification_tools",
         "register_script_registry_tools",
@@ -219,6 +227,29 @@ def test_geometry_nodes_tools_contains_expected_tool_names() -> None:
         assert f"def {name}(" in GEOMETRY_NODES_TOOLS_TEXT
 
 
+def test_phase3_tools_modules_exist_and_register_tools() -> None:
+    for path, helper in [
+        ("scene_edit_tools.py", "register_scene_edit_tools"),
+        ("material_tools.py", "register_material_tools"),
+        ("modifier_tools.py", "register_modifier_tools"),
+        ("collection_tools.py", "register_collection_tools"),
+    ]:
+        text = (ROOT / f"src/overtli_blender/tools/{path}").read_text(encoding="utf-8")
+        assert helper in text
+
+
+def test_phase3_tools_contain_expected_tool_names() -> None:
+    expected = {
+        SCENE_EDIT_TOOLS_TEXT: ["get_supported_edit_operations", "create_primitive_object", "transform_object", "duplicate_object", "delete_objects", "set_object_visibility", "run_verified_edit_batch"],
+        MATERIAL_TOOLS_TEXT: ["create_basic_material", "assign_material", "update_material_properties"],
+        MODIFIER_TOOLS_TEXT: ["add_object_modifier", "update_object_modifier", "remove_object_modifier"],
+        COLLECTION_TOOLS_TEXT: ["create_collection", "move_objects_to_collection", "delete_collection"],
+    }
+    for source, names in expected.items():
+        for name in names:
+            assert f"def {name}(" in source
+
+
 def test_server_imports_and_registers_context_tools() -> None:
     assert "from overtli_blender.tools.registry import register_all_tools" in SERVER_TEXT
     assert "register_all_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
@@ -249,6 +280,22 @@ def test_addon_command_strings_are_still_present() -> None:
         "capture_viewport_pack",
         "create_verification_snapshot",
         "list_verification_snapshots",
+        "get_supported_edit_operations",
+        "create_primitive_object",
+        "transform_object",
+        "duplicate_object",
+        "delete_objects",
+        "set_object_visibility",
+        "create_basic_material",
+        "assign_material",
+        "update_material_properties",
+        "add_object_modifier",
+        "update_object_modifier",
+        "remove_object_modifier",
+        "create_collection",
+        "move_objects_to_collection",
+        "delete_collection",
+        "run_verified_edit_batch",
         "register_context_script",
         "execute_context_script",
         "list_context_scripts",

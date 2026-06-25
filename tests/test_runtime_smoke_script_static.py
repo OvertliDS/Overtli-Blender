@@ -62,7 +62,13 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-scene-health",
         "--include-screenshot-pack",
         "--include-verification-snapshot",
+        "--include-edit-ops",
+        "--include-material-ops",
+        "--include-modifier-ops",
+        "--include-collection-ops",
+        "--include-verified-edit-batch",
         "--phase2-full",
+        "--phase3-full",
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
@@ -90,3 +96,25 @@ def test_runtime_smoke_phase2_full_avoids_dangerous_optional_flows() -> None:
         "run_optional_geometry_nodes_status_smoke",
     ]:
         assert text not in phase2_block
+
+
+def test_runtime_smoke_phase3_full_avoids_forbidden_commands() -> None:
+    phase3_start = SMOKE_TEXT.index("def run_phase3_full_smoke")
+    phase3_end = SMOKE_TEXT.index("def run_optional_material_ops_smoke")
+    phase3_block = SMOKE_TEXT[phase3_start:phase3_end]
+    for text in [
+        "OVERTLI_PHASE3_SMOKE_",
+        "OVERTLI_PHASE3_CUBE_",
+        "OVERTLI_PHASE3_MAT_",
+        "delete_objects",
+        "delete_collection",
+        '"confirm": True',
+    ]:
+        assert text in phase3_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in phase3_block

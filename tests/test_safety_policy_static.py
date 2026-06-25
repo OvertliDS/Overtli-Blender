@@ -85,6 +85,31 @@ def test_phase2_strict_mode_behavior_is_documented_in_policy() -> None:
         assert "strict_blocked=True" not in command_block
 
 
+def test_common_safety_module_classifies_phase3_commands() -> None:
+    for text in [
+        '"get_supported_edit_operations", OperationType.OBSERVE, RiskLevel.LOW',
+        '"create_primitive_object", OperationType.CREATE, RiskLevel.MEDIUM',
+        '"transform_object", OperationType.EDIT, RiskLevel.MEDIUM',
+        '"duplicate_object", OperationType.CREATE, RiskLevel.MEDIUM',
+        '"create_basic_material", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"add_object_modifier", OperationType.MODIFIER, RiskLevel.MEDIUM',
+        '"create_collection", OperationType.CREATE, RiskLevel.MEDIUM',
+        '"run_verified_edit_batch", OperationType.EDIT, RiskLevel.MEDIUM',
+        '"delete_objects", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"remove_object_modifier", OperationType.MODIFIER, RiskLevel.HIGH',
+        '"delete_collection", OperationType.CLEANUP, RiskLevel.HIGH',
+        "explicit-confirmation-required",
+    ]:
+        assert text in SAFETY_TEXT
+
+
+def test_phase3_destructive_commands_are_strict_blocked() -> None:
+    for command in ["delete_objects", "remove_object_modifier", "delete_collection"]:
+        command_index = SAFETY_TEXT.index(f'"{command}"')
+        command_block = SAFETY_TEXT[command_index:command_index + 500]
+        assert "strict_blocked=True" in command_block
+
+
 def test_smoke_script_exposes_safety_mode_flags() -> None:
     for text in [
         "--include-safety-status",

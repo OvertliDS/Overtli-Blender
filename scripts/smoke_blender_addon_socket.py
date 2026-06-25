@@ -228,6 +228,191 @@ def run_phase2_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     run_optional_verification_snapshot_smoke(sock, timeout_seconds)
 
 
+def run_optional_edit_ops_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    result = assert_success("get_supported_edit_operations", send_command(sock, timeout_seconds, "get_supported_edit_operations"))
+    if result.get("status") != "success" or "operations" not in result:
+        raise RuntimeError(f"get_supported_edit_operations: malformed result {result}")
+    return result
+
+
+def run_phase3_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    collection_name = f"OVERTLI_PHASE3_SMOKE_{stamp}"
+    cube_name = f"OVERTLI_PHASE3_CUBE_{stamp}"
+    duplicate_name = f"OVERTLI_PHASE3_CUBE_DUP_{stamp}"
+    material_name = f"OVERTLI_PHASE3_MAT_{stamp}"
+    created_objects: list[str] = []
+
+    run_optional_edit_ops_smoke(sock, timeout_seconds)
+    before = assert_success(
+        "create_verification_snapshot phase3_before",
+        send_command(sock, timeout_seconds, "create_verification_snapshot", {"label": f"phase3_before_{stamp}", "include_screenshots": False, "artifact_root": REPO_ROOT}),
+    )
+    print(f"ARTIFACT phase3_before {before.get('artifact_dir')}")
+
+    try:
+        collection = assert_success("create_collection", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        if collection.get("status") != "success":
+            raise RuntimeError(f"create_collection: {collection}")
+
+        material = assert_success(
+            "create_basic_material",
+            send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [1.0, 0.72, 0.18, 1.0], "metallic": 0.2, "roughness": 0.35}),
+        )
+        if material.get("status") != "success":
+            raise RuntimeError(f"create_basic_material: {material}")
+
+        created = assert_success(
+            "create_primitive_object",
+            send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": cube_name, "collection_name": collection_name}),
+        )
+        if created.get("status") != "success":
+            raise RuntimeError(f"create_primitive_object: {created}")
+        cube_name = created["object_name"]
+        created_objects.append(cube_name)
+
+        for command_name, params in [
+            ("assign_material", {"object_name": cube_name, "material_name": material_name}),
+            ("transform_object", {"object_name": cube_name, "location": [1.0, 2.0, 0.5], "rotation": [0.0, 0.0, 0.25], "scale": [1.2, 1.2, 1.2]}),
+            ("add_object_modifier", {"object_name": cube_name, "modifier_type": "BEVEL", "name": "OVERTLI_PHASE3_BEVEL", "properties": {"width": 0.08, "segments": 2}}),
+            ("update_object_modifier", {"object_name": cube_name, "modifier_name": "OVERTLI_PHASE3_BEVEL", "properties": {"width": 0.12, "segments": 3}}),
+        ]:
+            result = assert_success(command_name, send_command(sock, timeout_seconds, command_name, params))
+            if result.get("status") not in {"success", "partial"}:
+                raise RuntimeError(f"{command_name}: {result}")
+
+        duplicate = assert_success(
+            "duplicate_object",
+            send_command(sock, timeout_seconds, "duplicate_object", {"object_name": cube_name, "new_name": duplicate_name, "location_offset": [1.5, 0.0, 0.0], "collection_name": collection_name}),
+        )
+        if duplicate.get("status") != "success":
+            raise RuntimeError(f"duplicate_object: {duplicate}")
+        duplicate_name = duplicate["object_name"]
+        created_objects.append(duplicate_name)
+
+        moved = assert_success(
+            "move_objects_to_collection",
+            send_command(sock, timeout_seconds, "move_objects_to_collection", {"object_names": created_objects, "collection_name": collection_name, "unlink_from_other_collections": True}),
+        )
+        if moved.get("status") not in {"success", "partial"}:
+            raise RuntimeError(f"move_objects_to_collection: {moved}")
+
+        batch = assert_success(
+            "run_verified_edit_batch",
+            send_command(
+                sock,
+                timeout_seconds,
+                "run_verified_edit_batch",
+                {
+                    "label": f"phase3_batch_{stamp}",
+                    "artifact_root": REPO_ROOT,
+                    "operations": [
+                        {"type": "set_object_visibility", "params": {"object_name": duplicate_name, "hide_render": True}},
+                        {"type": "update_material_properties", "params": {"material_name": material_name, "roughness": 0.45}},
+                    ],
+                },
+            ),
+        )
+        if batch.get("status") != "success":
+            raise RuntimeError(f"run_verified_edit_batch: {batch}")
+        print(f"ARTIFACT phase3_batch_before {batch.get('before_snapshot', {}).get('artifact_dir')}")
+        print(f"ARTIFACT phase3_batch_after {batch.get('after_snapshot', {}).get('artifact_dir')}")
+
+        run_optional_scene_index_smoke(sock, timeout_seconds)
+        for object_name in created_objects:
+            deep = assert_success("get_object_deep_info", send_command(sock, timeout_seconds, "get_object_deep_info", {"object_name": object_name}))
+            if deep.get("status") != "success":
+                raise RuntimeError(f"get_object_deep_info {object_name}: {deep}")
+
+        after = assert_success(
+            "create_verification_snapshot phase3_after",
+            send_command(sock, timeout_seconds, "create_verification_snapshot", {"label": f"phase3_after_{stamp}", "include_screenshots": False, "artifact_root": REPO_ROOT}),
+        )
+        print(f"ARTIFACT phase3_after {after.get('artifact_dir')}")
+        print(f"PHASE3 created_objects {created_objects}")
+    finally:
+        if created_objects:
+            cleanup = assert_success(
+                "delete_objects phase3_cleanup",
+                send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True}),
+            )
+            if cleanup.get("status") not in {"success", "partial"}:
+                raise RuntimeError(f"delete_objects cleanup failed: {cleanup}")
+            scene_index = run_optional_scene_index_smoke(sock, timeout_seconds)
+            remaining = {item.get("name") for item in scene_index.get("objects", [])}
+            leaked = [name for name in created_objects if name in remaining]
+            if leaked:
+                raise RuntimeError(f"Phase 3 cleanup leaked objects: {leaked}")
+            collection_cleanup = assert_success(
+                "delete_collection phase3_cleanup",
+                send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection_name, "confirm": True, "require_empty": True}),
+            )
+            if collection_cleanup.get("status") != "success" or not collection_cleanup.get("deleted"):
+                raise RuntimeError(f"delete_collection cleanup failed: {collection_cleanup}")
+            print(f"PASS phase3 cleanup removed {created_objects}")
+
+
+def run_optional_material_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    name = f"OVERTLI_PHASE3_MAT_ONLY_{stamp}"
+    result = assert_success("create_basic_material", send_command(sock, timeout_seconds, "create_basic_material", {"name": name, "base_color": [0.2, 0.5, 1.0, 1.0]}))
+    if result.get("status") != "success":
+        raise RuntimeError(f"create_basic_material: {result}")
+
+
+def run_optional_modifier_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    collection = f"OVERTLI_PHASE3_MOD_SMOKE_{stamp}"
+    obj_name = f"OVERTLI_PHASE3_MOD_CUBE_{stamp}"
+    created = assert_success("create_primitive_object", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": obj_name, "collection_name": collection}))
+    obj_name = created.get("object_name", obj_name)
+    try:
+        added = assert_success("add_object_modifier", send_command(sock, timeout_seconds, "add_object_modifier", {"object_name": obj_name, "modifier_type": "WEIGHTED_NORMAL", "name": "OVERTLI_PHASE3_WEIGHTED_NORMAL"}))
+        if added.get("status") != "success":
+            raise RuntimeError(f"add_object_modifier: {added}")
+    finally:
+        assert_success("delete_objects modifier_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [obj_name], "confirm": True, "allow_missing": True}))
+
+
+def run_optional_collection_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    collection = f"OVERTLI_PHASE3_COLLECTION_ONLY_{stamp}"
+    try:
+        result = assert_success("create_collection", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection}))
+        if result.get("status") != "success":
+            raise RuntimeError(f"create_collection: {result}")
+    finally:
+        cleanup = assert_success("delete_collection collection_cleanup", send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection, "confirm": True, "require_empty": True}))
+        if cleanup.get("status") != "success":
+            raise RuntimeError(f"delete_collection collection_cleanup: {cleanup}")
+
+
+def run_optional_verified_edit_batch_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    collection = f"OVERTLI_PHASE3_BATCH_ONLY_{stamp}"
+    obj_name = f"OVERTLI_PHASE3_BATCH_CUBE_{stamp}"
+    batch = assert_success(
+        "run_verified_edit_batch",
+        send_command(
+            sock,
+            timeout_seconds,
+            "run_verified_edit_batch",
+            {
+                "label": f"phase3_flag_batch_{stamp}",
+                "artifact_root": REPO_ROOT,
+                "operations": [
+                    {"type": "create_collection", "params": {"collection_name": collection}},
+                    {"type": "create_primitive_object", "params": {"primitive_type": "cube", "name": obj_name, "collection_name": collection}},
+                ],
+            },
+        ),
+    )
+    if batch.get("status") != "success":
+        raise RuntimeError(f"run_verified_edit_batch: {batch}")
+    assert_success("delete_objects batch_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [obj_name], "confirm": True, "allow_missing": True}))
+    assert_success("delete_collection batch_cleanup", send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection, "confirm": True, "require_empty": True}))
+
+
 def run_optional_strict_block_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     response = send_command(sock, timeout_seconds, "execute_code", {"code": 'print("SMOKE_CODE_OK")'})
     if response.get("status") != "error":
@@ -360,10 +545,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-scene-health", action="store_true", help="Run the Phase 2 scene health smoke.")
     parser.add_argument("--include-screenshot-pack", action="store_true", help="Run the Phase 2 viewport screenshot pack smoke.")
     parser.add_argument("--include-verification-snapshot", action="store_true", help="Run the Phase 2 verification snapshot smoke.")
+    parser.add_argument("--include-edit-ops", action="store_true", help="Run the Phase 3 supported edit operations smoke.")
+    parser.add_argument("--include-material-ops", action="store_true", help="Run the Phase 3 material operations smoke.")
+    parser.add_argument("--include-modifier-ops", action="store_true", help="Run the Phase 3 modifier operations smoke.")
+    parser.add_argument("--include-collection-ops", action="store_true", help="Run the Phase 3 collection operations smoke.")
+    parser.add_argument("--include-verified-edit-batch", action="store_true", help="Run the Phase 3 verified edit batch smoke.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
         help="Run default smoke plus safe Phase 2 inspection, screenshot-pack, and verification snapshot checks.",
+    )
+    parser.add_argument(
+        "--phase3-full",
+        action="store_true",
+        help="Run a contained Phase 3 scene edit, material, modifier, collection, batch, and cleanup scenario.",
     )
     return parser
 
@@ -423,6 +618,24 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.phase2_full:
                 run_phase2_full_smoke(sock, args.timeout)
+
+            if args.include_edit_ops:
+                run_optional_edit_ops_smoke(sock, args.timeout)
+
+            if args.include_material_ops:
+                run_optional_material_ops_smoke(sock, args.timeout)
+
+            if args.include_modifier_ops:
+                run_optional_modifier_ops_smoke(sock, args.timeout)
+
+            if args.include_collection_ops:
+                run_optional_collection_ops_smoke(sock, args.timeout)
+
+            if args.include_verified_edit_batch:
+                run_optional_verified_edit_batch_smoke(sock, args.timeout)
+
+            if args.phase3_full:
+                run_phase3_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

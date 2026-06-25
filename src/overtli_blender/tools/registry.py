@@ -5,12 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from .code_execution_tools import register_code_execution_tools
+from .collection_tools import register_collection_tools
 from .context_tools import register_context_tools
 from .geometry_nodes_tools import register_geometry_nodes_tools
 from .hyper3d_tools import register_hyper3d_tools
+from .material_tools import register_material_tools
+from .modifier_tools import register_modifier_tools
 from .observation_tools import register_observation_tools
 from .safety_tools import register_safety_tools
 from .scene_intelligence_tools import register_scene_intelligence_tools
+from .scene_edit_tools import register_scene_edit_tools
 from .polyhaven_tools import register_polyhaven_tools
 from .provider_status_tools import register_provider_status_tools
 from .screenshot_tools import register_screenshot_tools
@@ -25,6 +29,10 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_context_tools(mcp, get_blender_connection)
     register_observation_tools(mcp, get_blender_connection)
     register_scene_intelligence_tools(mcp, get_blender_connection)
+    register_scene_edit_tools(mcp, get_blender_connection)
+    register_material_tools(mcp, get_blender_connection)
+    register_modifier_tools(mcp, get_blender_connection)
+    register_collection_tools(mcp, get_blender_connection)
     register_screenshot_tools(mcp, get_blender_connection, image_type=image_type)
     register_verification_tools(mcp, get_blender_connection)
     register_script_registry_tools(mcp, get_blender_connection)

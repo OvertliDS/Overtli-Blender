@@ -101,6 +101,22 @@ except ModuleNotFoundError:
             "capture_viewport_pack": _fallback_spec("capture_viewport_pack", "CAMERA", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True, warnings=("writes-local-verification-artifacts", "viewport-context-dependent")),
             "create_verification_snapshot": _fallback_spec("create_verification_snapshot", "VERIFY", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True, warnings=("writes-local-verification-artifacts",)),
             "list_verification_snapshots": _fallback_spec("list_verification_snapshots", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "get_supported_edit_operations": _fallback_spec("get_supported_edit_operations", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "create_primitive_object": _fallback_spec("create_primitive_object", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "transform_object": _fallback_spec("transform_object", "EDIT", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "duplicate_object": _fallback_spec("duplicate_object", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "delete_objects": _fallback_spec("delete_objects", "CLEANUP", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required",)),
+            "set_object_visibility": _fallback_spec("set_object_visibility", "EDIT", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "create_basic_material": _fallback_spec("create_basic_material", "MATERIAL", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "assign_material": _fallback_spec("assign_material", "MATERIAL", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "update_material_properties": _fallback_spec("update_material_properties", "MATERIAL", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "add_object_modifier": _fallback_spec("add_object_modifier", "MODIFIER", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "update_object_modifier": _fallback_spec("update_object_modifier", "MODIFIER", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "remove_object_modifier": _fallback_spec("remove_object_modifier", "MODIFIER", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required",)),
+            "create_collection": _fallback_spec("create_collection", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
+            "move_objects_to_collection": _fallback_spec("move_objects_to_collection", "EDIT", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
+            "delete_collection": _fallback_spec("delete_collection", "CLEANUP", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required", "empty-collection-only-by-default")),
+            "run_verified_edit_batch": _fallback_spec("run_verified_edit_batch", "EDIT", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True, can_write_files=True, warnings=("writes-local-verification-artifacts",)),
             "create_object_handle": _fallback_spec("create_object_handle", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "create_material_handle": _fallback_spec("create_material_handle", "MATERIAL", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "register_context_script": _fallback_spec("register_context_script", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
@@ -2393,6 +2409,499 @@ class Hyper3DService:
             return {"succeed": False, "error": str(e)}
 
 
+class SceneEditService:
+    SUPPORTED_PRIMITIVES = {
+        "cube": bpy.ops.mesh.primitive_cube_add,
+        "uv_sphere": bpy.ops.mesh.primitive_uv_sphere_add,
+        "ico_sphere": bpy.ops.mesh.primitive_ico_sphere_add,
+        "cylinder": bpy.ops.mesh.primitive_cylinder_add,
+        "cone": bpy.ops.mesh.primitive_cone_add,
+        "plane": bpy.ops.mesh.primitive_plane_add,
+        "torus": bpy.ops.mesh.primitive_torus_add,
+    }
+
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _vector(value, default, length=3):
+        if value is None:
+            return list(default)
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            raise ValueError(f"Expected a {length}-item numeric list")
+        return [float(item) for item in value]
+
+    @staticmethod
+    def _unique_name(base_name):
+        base = re.sub(r"[^A-Za-z0-9_. -]+", "_", str(base_name or "Object")).strip() or "Object"
+        if base not in bpy.data.objects:
+            return base
+        index = 1
+        while f"{base}.{index:03d}" in bpy.data.objects:
+            index += 1
+        return f"{base}.{index:03d}"
+
+    def _deep_info(self, object_name):
+        return self.server.scene_intelligence_service.get_object_deep_info(object_name=object_name).get("object")
+
+    def _verification(self, label, verify):
+        if not verify:
+            return {}
+        return self.server.verification_artifact_service.create_verification_snapshot(
+            label=label,
+            include_scene_index=True,
+            include_scene_health=True,
+            include_selection=False,
+            include_screenshots=False,
+        )
+
+    def _operation_record(self, operation, payload, result):
+        self.server._add_to_history(operation, payload, result)
+
+    def get_supported_edit_operations(self):
+        return {
+            "status": "success",
+            "operations": {
+                "create_primitive_object": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False, "supported_types": sorted(self.SUPPORTED_PRIMITIVES)},
+                "transform_object": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "duplicate_object": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "delete_objects": {"risk_level": "HIGH", "mutates_scene": True, "requires_confirmation": True},
+                "set_object_visibility": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "create_basic_material": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "assign_material": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "update_material_properties": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "add_object_modifier": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "update_object_modifier": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "remove_object_modifier": {"risk_level": "HIGH", "mutates_scene": True, "requires_confirmation": True},
+                "create_collection": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "move_objects_to_collection": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+                "delete_collection": {"risk_level": "HIGH", "mutates_scene": True, "requires_confirmation": True, "require_empty_default": True},
+                "run_verified_edit_batch": {"risk_level": "MEDIUM", "mutates_scene": True, "requires_confirmation": False},
+            },
+            "warnings": [],
+        }
+
+    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False):
+        primitive_key = str(primitive_type or "").strip().lower()
+        if primitive_key not in self.SUPPORTED_PRIMITIVES:
+            return {"status": "error", "message": f"Unsupported primitive_type: {primitive_type}", "warnings": []}
+        if material_name and material_name not in bpy.data.materials:
+            return {"status": "error", "message": f"Material not found: {material_name}", "warnings": []}
+
+        self.SUPPORTED_PRIMITIVES[primitive_key]()
+        obj = bpy.context.object
+        obj.name = self._unique_name(name or f"Overtli_{primitive_key}")
+        obj.location = self._vector(location, [0.0, 0.0, 0.0])
+        obj.rotation_euler = self._vector(rotation, [0.0, 0.0, 0.0])
+        obj.scale = self._vector(scale, [1.0, 1.0, 1.0])
+
+        collection = None
+        if collection_name:
+            collection = bpy.data.collections.get(collection_name)
+            if collection is None:
+                collection = bpy.data.collections.new(collection_name)
+                bpy.context.scene.collection.children.link(collection)
+            for linked in list(obj.users_collection):
+                linked.objects.unlink(obj)
+            collection.objects.link(obj)
+
+        if material_name:
+            obj.data.materials.append(bpy.data.materials[material_name])
+
+        result = {
+            "status": "success",
+            "object_name": obj.name,
+            "object_type": obj.type,
+            "created": True,
+            "collection_name": collection.name if collection else (obj.users_collection[0].name if obj.users_collection else None),
+            "transform": {"location": list(obj.location), "rotation": list(obj.rotation_euler), "scale": list(obj.scale)},
+            "material_name": material_name,
+            "object": self._deep_info(obj.name),
+            "verification": self._verification(f"edit_{obj.name}", verify),
+            "warnings": [],
+        }
+        self._operation_record("create_primitive_object", {"primitive_type": primitive_key, "name": name}, result)
+        return result
+
+    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        if location is not None:
+            vec = self._vector(location, [0.0, 0.0, 0.0])
+            obj.location = [obj.location[i] + vec[i] for i in range(3)] if relative else vec
+        if rotation is not None:
+            vec = self._vector(rotation, [0.0, 0.0, 0.0])
+            obj.rotation_euler = [obj.rotation_euler[i] + vec[i] for i in range(3)] if relative else vec
+        if scale is not None:
+            vec = self._vector(scale, [1.0, 1.0, 1.0])
+            obj.scale = [obj.scale[i] + vec[i] for i in range(3)] if relative else vec
+        result = {"status": "success", "object_name": obj.name, "object": self._deep_info(obj.name), "verification": self._verification(f"transform_{obj.name}", verify), "warnings": []}
+        self._operation_record("transform_object", {"object_name": object_name}, result)
+        return result
+
+    def duplicate_object(self, object_name, new_name=None, linked=False, location_offset=None, collection_name=None, verify=False):
+        source = bpy.data.objects.get(object_name)
+        if not source:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        duplicate = source.copy()
+        if not linked and getattr(source, "data", None):
+            duplicate.data = source.data.copy()
+        duplicate.name = self._unique_name(new_name or f"{source.name}_copy")
+        offset = self._vector(location_offset, [0.0, 0.0, 0.0])
+        duplicate.location = [source.location[i] + offset[i] for i in range(3)]
+        target_collection = bpy.data.collections.get(collection_name) if collection_name else (source.users_collection[0] if source.users_collection else bpy.context.scene.collection)
+        if target_collection is None:
+            return {"status": "error", "message": f"Collection not found: {collection_name}", "warnings": []}
+        target_collection.objects.link(duplicate)
+        result = {"status": "success", "source_object_name": source.name, "object_name": duplicate.name, "linked": bool(linked), "collection_name": target_collection.name, "object": self._deep_info(duplicate.name), "verification": self._verification(f"duplicate_{duplicate.name}", verify), "warnings": []}
+        self._operation_record("duplicate_object", {"object_name": object_name, "new_name": new_name}, result)
+        return result
+
+    def delete_objects(self, object_names, confirm=False, allow_missing=False, verify=False):
+        if not confirm:
+            return {"status": "error", "message": "delete_objects requires confirm=True", "deleted": [], "missing": list(object_names or []), "refused": list(object_names or []), "warnings": []}
+        if not isinstance(object_names, list) or not object_names:
+            return {"status": "error", "message": "object_names must be a non-empty list", "deleted": [], "missing": [], "refused": [], "warnings": []}
+        deleted, missing = [], []
+        for name in object_names:
+            if any(token in str(name) for token in ["*", "?", "["]):
+                return {"status": "error", "message": f"Wildcard-like object name refused: {name}", "deleted": deleted, "missing": missing, "refused": [name], "warnings": []}
+            obj = bpy.data.objects.get(str(name))
+            if obj is None:
+                missing.append(str(name))
+                continue
+            bpy.data.objects.remove(obj, do_unlink=True)
+            deleted.append(str(name))
+        if missing and not allow_missing:
+            status = "partial" if deleted else "error"
+            message = f"Missing objects: {missing}"
+        else:
+            status, message = "success", None
+        result = {"status": status, "deleted": deleted, "missing": missing, "refused": [], "verification": self._verification("delete_objects", verify), "warnings": []}
+        if message:
+            result["message"] = message
+        self._operation_record("delete_objects", {"object_names": object_names}, result)
+        return result
+
+    def set_object_visibility(self, object_name, hide_viewport=None, hide_render=None, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        if hide_viewport is not None:
+            obj.hide_viewport = bool(hide_viewport)
+        if hide_render is not None:
+            obj.hide_render = bool(hide_render)
+        result = {"status": "success", "object_name": obj.name, "visibility": {"hide_viewport": bool(obj.hide_viewport), "hide_render": bool(obj.hide_render), "visible": bool(obj.visible_get())}, "verification": self._verification(f"visibility_{obj.name}", verify), "warnings": []}
+        self._operation_record("set_object_visibility", {"object_name": object_name}, result)
+        return result
+
+
+class MaterialAuthoringService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _clamp(value, minimum=0.0, maximum=1.0):
+        return max(minimum, min(maximum, float(value)))
+
+    def _material_summary(self, material):
+        props = {"base_color": list(material.diffuse_color), "metallic": 0.0, "roughness": 0.5, "alpha": float(material.diffuse_color[3])}
+        if material.use_nodes:
+            node = material.node_tree.nodes.get("Principled BSDF") if material.node_tree else None
+            if node:
+                for key, socket_name in [("base_color", "Base Color"), ("metallic", "Metallic"), ("roughness", "Roughness"), ("alpha", "Alpha")]:
+                    socket = node.inputs.get(socket_name)
+                    if socket:
+                        value = socket.default_value
+                        props[key] = list(value) if hasattr(value, "__len__") and not isinstance(value, str) else float(value)
+        return {"name": material.name, "use_nodes": bool(material.use_nodes), "users": int(material.users), "properties": props}
+
+    def _set_properties(self, material, base_color=None, metallic=None, roughness=None, alpha=None):
+        if base_color is not None:
+            if not isinstance(base_color, (list, tuple)) or len(base_color) not in {3, 4}:
+                raise ValueError("base_color must be a 3- or 4-item numeric list")
+            color = [self._clamp(component) for component in base_color]
+            if len(color) == 3:
+                color.append(self._clamp(alpha if alpha is not None else material.diffuse_color[3]))
+            material.diffuse_color = color
+        elif alpha is not None:
+            color = list(material.diffuse_color)
+            color[3] = self._clamp(alpha)
+            material.diffuse_color = color
+
+        if material.use_nodes and material.node_tree:
+            node = material.node_tree.nodes.get("Principled BSDF")
+            if node:
+                if base_color is not None and node.inputs.get("Base Color"):
+                    node.inputs["Base Color"].default_value = material.diffuse_color
+                if metallic is not None and node.inputs.get("Metallic"):
+                    node.inputs["Metallic"].default_value = self._clamp(metallic)
+                if roughness is not None and node.inputs.get("Roughness"):
+                    node.inputs["Roughness"].default_value = self._clamp(roughness)
+                if alpha is not None and node.inputs.get("Alpha"):
+                    node.inputs["Alpha"].default_value = self._clamp(alpha)
+
+    def create_basic_material(self, name, base_color=None, metallic=None, roughness=None, alpha=None, use_nodes=True, replace_existing=False):
+        if not name:
+            return {"status": "error", "message": "name is required", "warnings": []}
+        material = bpy.data.materials.get(name)
+        created = False
+        if material and not replace_existing:
+            return {"status": "success", "material_name": material.name, "created": False, "properties": self._material_summary(material)["properties"], "warnings": ["material already exists"]}
+        if material is None:
+            material = bpy.data.materials.new(name)
+            created = True
+        material.use_nodes = bool(use_nodes)
+        self._set_properties(material, base_color, metallic, roughness, alpha)
+        result = {"status": "success", "material_name": material.name, "created": created, "properties": self._material_summary(material)["properties"], "warnings": []}
+        self.server._add_to_history("create_basic_material", {"name": name}, result)
+        return result
+
+    def assign_material(self, object_name, material_name, slot_index=None, replace=True, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        material = bpy.data.materials.get(material_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        if not material:
+            return {"status": "error", "message": f"Material not found: {material_name}", "warnings": []}
+        if slot_index is None:
+            if replace and len(obj.data.materials) > 0:
+                obj.data.materials[0] = material
+                slot_index = 0
+            else:
+                obj.data.materials.append(material)
+                slot_index = len(obj.data.materials) - 1
+        else:
+            slot_index = int(slot_index)
+            while len(obj.data.materials) <= slot_index:
+                obj.data.materials.append(None)
+            obj.data.materials[slot_index] = material
+        result = {"status": "success", "object_name": obj.name, "material_name": material.name, "slot_index": slot_index, "materials": [slot.material.name if slot.material else None for slot in obj.material_slots], "verification": self.server.scene_edit_service._verification(f"assign_material_{obj.name}", verify), "warnings": []}
+        self.server._add_to_history("assign_material", {"object_name": object_name, "material_name": material_name}, result)
+        return result
+
+    def update_material_properties(self, material_name, base_color=None, metallic=None, roughness=None, alpha=None, verify=False):
+        material = bpy.data.materials.get(material_name)
+        if not material:
+            return {"status": "error", "message": f"Material not found: {material_name}", "warnings": []}
+        self._set_properties(material, base_color, metallic, roughness, alpha)
+        result = {"status": "success", "material_name": material.name, "properties": self._material_summary(material)["properties"], "verification": self.server.scene_edit_service._verification(f"material_{material.name}", verify), "warnings": []}
+        self.server._add_to_history("update_material_properties", {"material_name": material_name}, result)
+        return result
+
+
+class ModifierService:
+    SUPPORTED_MODIFIERS = {"BEVEL", "SUBSURF", "SOLIDIFY", "MIRROR", "ARRAY", "WEIGHTED_NORMAL", "TRIANGULATE", "DECIMATE"}
+    ALLOWED_PROPERTIES = {
+        "BEVEL": {"width", "segments", "affect", "profile", "show_viewport", "show_render"},
+        "SUBSURF": {"levels", "render_levels", "subdivision_type", "show_viewport", "show_render"},
+        "SOLIDIFY": {"thickness", "offset", "use_quality_normals", "show_viewport", "show_render"},
+        "MIRROR": {"use_axis", "use_clip", "show_viewport", "show_render"},
+        "ARRAY": {"count", "relative_offset_displace", "use_relative_offset", "show_viewport", "show_render"},
+        "WEIGHTED_NORMAL": {"keep_sharp", "weight", "show_viewport", "show_render"},
+        "TRIANGULATE": {"quad_method", "ngon_method", "show_viewport", "show_render"},
+        "DECIMATE": {"ratio", "decimate_type", "show_viewport", "show_render"},
+    }
+
+    def __init__(self, server):
+        self.server = server
+
+    def _summary(self, modifier):
+        return {"name": modifier.name, "type": modifier.type, "show_viewport": bool(modifier.show_viewport), "show_render": bool(modifier.show_render)}
+
+    def _apply_properties(self, modifier, properties):
+        warnings = []
+        allowed = self.ALLOWED_PROPERTIES.get(modifier.type, set())
+        for key, value in (properties or {}).items():
+            if key not in allowed:
+                warnings.append(f"Unsupported modifier property skipped: {key}")
+                continue
+            try:
+                setattr(modifier, key, value)
+            except Exception as exc:
+                warnings.append(f"Failed to set {key}: {exc}")
+        return warnings
+
+    def add_object_modifier(self, object_name, modifier_type, name=None, properties=None, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        modifier_type = str(modifier_type or "").upper()
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        if modifier_type not in self.SUPPORTED_MODIFIERS:
+            return {"status": "error", "message": f"Unsupported modifier_type: {modifier_type}", "warnings": []}
+        modifier = obj.modifiers.new(name=name or modifier_type.title(), type=modifier_type)
+        warnings = self._apply_properties(modifier, properties)
+        result = {"status": "success", "object_name": obj.name, "modifier": self._summary(modifier), "verification": self.server.scene_edit_service._verification(f"modifier_{obj.name}", verify), "warnings": warnings}
+        self.server._add_to_history("add_object_modifier", {"object_name": object_name, "modifier_type": modifier_type}, result)
+        return result
+
+    def update_object_modifier(self, object_name, modifier_name, properties, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        modifier = obj.modifiers.get(modifier_name)
+        if not modifier:
+            return {"status": "error", "message": f"Modifier not found: {modifier_name}", "warnings": []}
+        warnings = self._apply_properties(modifier, properties or {})
+        status = "partial" if warnings else "success"
+        result = {"status": status, "object_name": obj.name, "modifier": self._summary(modifier), "verification": self.server.scene_edit_service._verification(f"modifier_{obj.name}", verify), "warnings": warnings}
+        self.server._add_to_history("update_object_modifier", {"object_name": object_name, "modifier_name": modifier_name}, result)
+        return result
+
+    def remove_object_modifier(self, object_name, modifier_name, confirm=False, verify=False):
+        if not confirm:
+            return {"status": "error", "message": "remove_object_modifier requires confirm=True", "warnings": []}
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        modifier = obj.modifiers.get(modifier_name)
+        if not modifier:
+            return {"status": "error", "message": f"Modifier not found: {modifier_name}", "warnings": []}
+        summary = self._summary(modifier)
+        obj.modifiers.remove(modifier)
+        result = {"status": "success", "object_name": obj.name, "removed_modifier": summary, "verification": self.server.scene_edit_service._verification(f"remove_modifier_{obj.name}", verify), "warnings": []}
+        self.server._add_to_history("remove_object_modifier", {"object_name": object_name, "modifier_name": modifier_name}, result)
+        return result
+
+
+class CollectionOrganizationService:
+    def __init__(self, server):
+        self.server = server
+
+    def _summary(self, collection):
+        return {"name": collection.name, "object_count": len(collection.objects), "children": [child.name for child in collection.children]}
+
+    def create_collection(self, collection_name, parent_collection_name=None, replace_existing=False):
+        if not collection_name:
+            return {"status": "error", "message": "collection_name is required", "warnings": []}
+        existing = bpy.data.collections.get(collection_name)
+        if existing and not replace_existing:
+            return {"status": "success", "collection_name": existing.name, "created": False, "collection": self._summary(existing), "warnings": ["collection already exists"]}
+        collection = existing or bpy.data.collections.new(collection_name)
+        if not existing:
+            parent = bpy.data.collections.get(parent_collection_name) if parent_collection_name else bpy.context.scene.collection
+            if parent is None:
+                return {"status": "error", "message": f"Parent collection not found: {parent_collection_name}", "warnings": []}
+            parent.children.link(collection)
+        result = {"status": "success", "collection_name": collection.name, "created": existing is None, "collection": self._summary(collection), "warnings": []}
+        self.server._add_to_history("create_collection", {"collection_name": collection_name}, result)
+        return result
+
+    def move_objects_to_collection(self, object_names, collection_name, unlink_from_other_collections=False, create_collection=False):
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            if create_collection:
+                collection = bpy.data.collections.new(collection_name)
+                bpy.context.scene.collection.children.link(collection)
+            else:
+                return {"status": "error", "message": f"Collection not found: {collection_name}", "moved": [], "missing": list(object_names or []), "warnings": []}
+        moved, missing = [], []
+        for name in object_names or []:
+            obj = bpy.data.objects.get(str(name))
+            if not obj:
+                missing.append(str(name))
+                continue
+            if obj.name not in collection.objects.keys():
+                collection.objects.link(obj)
+            if unlink_from_other_collections:
+                for linked in list(obj.users_collection):
+                    if linked != collection:
+                        linked.objects.unlink(obj)
+            moved.append(obj.name)
+        status = "partial" if missing else "success"
+        result = {"status": status, "collection_name": collection.name, "moved": moved, "missing": missing, "collection": self._summary(collection), "warnings": []}
+        self.server._add_to_history("move_objects_to_collection", {"collection_name": collection_name, "object_names": object_names}, result)
+        return result
+
+    def delete_collection(self, collection_name, confirm=False, require_empty=True):
+        if not confirm:
+            return {"status": "error", "message": "delete_collection requires confirm=True", "collection_name": collection_name, "deleted": False, "warnings": []}
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            return {"status": "error", "message": f"Collection not found: {collection_name}", "collection_name": collection_name, "deleted": False, "warnings": []}
+        object_count = len(collection.objects)
+        child_count = len(collection.children)
+        if require_empty and (object_count > 0 or child_count > 0):
+            return {
+                "status": "error",
+                "message": f"Collection is not empty: {collection_name}",
+                "collection_name": collection_name,
+                "deleted": False,
+                "object_count": object_count,
+                "child_count": child_count,
+                "warnings": ["delete_collection defaults to require_empty=True"],
+            }
+        summary = self._summary(collection)
+        bpy.data.collections.remove(collection)
+        result = {"status": "success", "collection_name": collection_name, "deleted": True, "collection": summary, "warnings": []}
+        self.server._add_to_history("delete_collection", {"collection_name": collection_name}, result)
+        return result
+
+
+class VerifiedEditBatchService:
+    SUPPORTED_BATCH_OPERATIONS = {
+        "create_primitive_object",
+        "transform_object",
+        "duplicate_object",
+        "set_object_visibility",
+        "create_basic_material",
+        "assign_material",
+        "update_material_properties",
+        "add_object_modifier",
+        "update_object_modifier",
+        "create_collection",
+        "move_objects_to_collection",
+        "delete_objects",
+        "remove_object_modifier",
+        "delete_collection",
+    }
+    DESTRUCTIVE_OPERATIONS = {"delete_objects", "remove_object_modifier", "delete_collection"}
+
+    def __init__(self, server):
+        self.server = server
+
+    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+        operations = operations or []
+        max_operations = max(1, min(int(max_operations), 50))
+        if len(operations) > max_operations:
+            return {"status": "error", "message": f"Batch exceeds max_operations={max_operations}", "operation_results": [], "errors": [], "warnings": []}
+        batch_id = f"batch_{int(time.time())}_{abs(hash(str(operations))) % 100000}"
+        batch_label = label or batch_id
+        before = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_label}_before", include_screenshots=False, artifact_root=artifact_root) if create_before_snapshot else {}
+        results, errors, warnings = [], [], []
+        for index, operation in enumerate(operations):
+            op_type = operation.get("type") or operation.get("command")
+            params = dict(operation.get("params") or {})
+            if op_type not in self.SUPPORTED_BATCH_OPERATIONS:
+                error = {"index": index, "type": op_type, "message": "Unsupported batch operation"}
+                errors.append(error)
+                if stop_on_error:
+                    break
+                continue
+            if op_type in self.DESTRUCTIVE_OPERATIONS and not (operation.get("confirm") is True and batch_allow_destructive is True):
+                error = {"index": index, "type": op_type, "message": "Destructive batch operation requires operation.confirm=True and batch_allow_destructive=True"}
+                errors.append(error)
+                if stop_on_error:
+                    break
+                continue
+            if op_type in self.DESTRUCTIVE_OPERATIONS and "confirm" not in params:
+                params["confirm"] = bool(operation.get("confirm"))
+            handler = self.server._build_command_handlers().get(op_type)
+            result = handler(**params)
+            results.append({"index": index, "type": op_type, "result": result})
+            warnings.extend(result.get("warnings", []) if isinstance(result, dict) else [])
+            if isinstance(result, dict) and result.get("status") not in {"success"}:
+                errors.append({"index": index, "type": op_type, "message": result.get("message", result.get("status"))})
+                if stop_on_error:
+                    break
+        after = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_label}_after", include_screenshots=False, artifact_root=artifact_root) if create_after_snapshot else {}
+        status = "success" if not errors else ("partial" if results else "error")
+        result = {"status": status, "batch_id": batch_id, "label": batch_label, "before_snapshot": before, "after_snapshot": after, "operation_results": results, "errors": errors, "warnings": warnings}
+        self.server._add_to_history("run_verified_edit_batch", {"label": label, "operation_count": len(operations)}, result)
+        return result
+
+
 class SafetyPolicyService:
     def __init__(self, server):
         self.server = server
@@ -2746,6 +3255,11 @@ class BlenderMCPServer:
         self.viewport_screenshot_service = ViewportScreenshotService(self)
         self.scene_intelligence_service = SceneIntelligenceService(self)
         self.verification_artifact_service = VerificationArtifactService(self)
+        self.scene_edit_service = SceneEditService(self)
+        self.material_authoring_service = MaterialAuthoringService(self)
+        self.modifier_service = ModifierService(self)
+        self.collection_organization_service = CollectionOrganizationService(self)
+        self.verified_edit_batch_service = VerifiedEditBatchService(self)
         self.provider_status_service = ProviderStatusService(self)
         self.polyhaven_service = PolyHavenService(self)
         self.sketchfab_service = SketchfabService(self)
@@ -2764,6 +3278,22 @@ class BlenderMCPServer:
         self.capture_viewport_pack = self.verification_artifact_service.capture_viewport_pack
         self.create_verification_snapshot = self.verification_artifact_service.create_verification_snapshot
         self.list_verification_snapshots = self.verification_artifact_service.list_verification_snapshots
+        self.get_supported_edit_operations = self.scene_edit_service.get_supported_edit_operations
+        self.create_primitive_object = self.scene_edit_service.create_primitive_object
+        self.transform_object = self.scene_edit_service.transform_object
+        self.duplicate_object = self.scene_edit_service.duplicate_object
+        self.delete_objects = self.scene_edit_service.delete_objects
+        self.set_object_visibility = self.scene_edit_service.set_object_visibility
+        self.create_basic_material = self.material_authoring_service.create_basic_material
+        self.assign_material = self.material_authoring_service.assign_material
+        self.update_material_properties = self.material_authoring_service.update_material_properties
+        self.add_object_modifier = self.modifier_service.add_object_modifier
+        self.update_object_modifier = self.modifier_service.update_object_modifier
+        self.remove_object_modifier = self.modifier_service.remove_object_modifier
+        self.create_collection = self.collection_organization_service.create_collection
+        self.move_objects_to_collection = self.collection_organization_service.move_objects_to_collection
+        self.delete_collection = self.collection_organization_service.delete_collection
+        self.run_verified_edit_batch = self.verified_edit_batch_service.run_verified_edit_batch
         self.get_safety_status = self.safety_policy_service.get_safety_status
         self.execute_code = self.raw_code_execution_service.execute_code
         self.get_polyhaven_status = self.provider_status_service.get_polyhaven_status
@@ -2947,6 +3477,22 @@ class BlenderMCPServer:
             "capture_viewport_pack": self.capture_viewport_pack,
             "create_verification_snapshot": self.create_verification_snapshot,
             "list_verification_snapshots": self.list_verification_snapshots,
+            "get_supported_edit_operations": self.get_supported_edit_operations,
+            "create_primitive_object": self.create_primitive_object,
+            "transform_object": self.transform_object,
+            "duplicate_object": self.duplicate_object,
+            "delete_objects": self.delete_objects,
+            "set_object_visibility": self.set_object_visibility,
+            "create_basic_material": self.create_basic_material,
+            "assign_material": self.assign_material,
+            "update_material_properties": self.update_material_properties,
+            "add_object_modifier": self.add_object_modifier,
+            "update_object_modifier": self.update_object_modifier,
+            "remove_object_modifier": self.remove_object_modifier,
+            "create_collection": self.create_collection,
+            "move_objects_to_collection": self.move_objects_to_collection,
+            "delete_collection": self.delete_collection,
+            "run_verified_edit_batch": self.run_verified_edit_batch,
             "get_safety_status": self.get_safety_status,
             "execute_code": self.execute_code,
             "get_polyhaven_status": self.get_polyhaven_status,
@@ -3113,6 +3659,70 @@ class BlenderMCPServer:
     def list_verification_snapshots(self):
         """List local verification snapshots generated by Phase 2 tools."""
         return self.verification_artifact_service.list_verification_snapshots()
+
+    def get_supported_edit_operations(self):
+        """List Phase 3 supported edit operations and safety metadata."""
+        return self.scene_edit_service.get_supported_edit_operations()
+
+    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False):
+        """Create a supported primitive object with explicit parameters."""
+        return self.scene_edit_service.create_primitive_object(primitive_type, name, location, rotation, scale, collection_name, material_name, verify)
+
+    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False):
+        """Transform one explicitly named object."""
+        return self.scene_edit_service.transform_object(object_name, location, rotation, scale, relative, verify)
+
+    def duplicate_object(self, object_name, new_name=None, linked=False, location_offset=None, collection_name=None, verify=False):
+        """Duplicate one explicitly named object."""
+        return self.scene_edit_service.duplicate_object(object_name, new_name, linked, location_offset, collection_name, verify)
+
+    def delete_objects(self, object_names, confirm=False, allow_missing=False, verify=False):
+        """Delete only explicitly named objects after confirmation."""
+        return self.scene_edit_service.delete_objects(object_names, confirm, allow_missing, verify)
+
+    def set_object_visibility(self, object_name, hide_viewport=None, hide_render=None, verify=False):
+        """Set viewport/render visibility on one explicitly named object."""
+        return self.scene_edit_service.set_object_visibility(object_name, hide_viewport, hide_render, verify)
+
+    def create_basic_material(self, name, base_color=None, metallic=None, roughness=None, alpha=None, use_nodes=True, replace_existing=False):
+        """Create or update a basic material."""
+        return self.material_authoring_service.create_basic_material(name, base_color, metallic, roughness, alpha, use_nodes, replace_existing)
+
+    def assign_material(self, object_name, material_name, slot_index=None, replace=True, verify=False):
+        """Assign an existing material to one explicitly named object."""
+        return self.material_authoring_service.assign_material(object_name, material_name, slot_index, replace, verify)
+
+    def update_material_properties(self, material_name, base_color=None, metallic=None, roughness=None, alpha=None, verify=False):
+        """Update supported properties on an existing material."""
+        return self.material_authoring_service.update_material_properties(material_name, base_color, metallic, roughness, alpha, verify)
+
+    def add_object_modifier(self, object_name, modifier_type, name=None, properties=None, verify=False):
+        """Add an allowlisted modifier to one explicitly named object."""
+        return self.modifier_service.add_object_modifier(object_name, modifier_type, name, properties, verify)
+
+    def update_object_modifier(self, object_name, modifier_name, properties, verify=False):
+        """Update allowlisted properties on an existing modifier."""
+        return self.modifier_service.update_object_modifier(object_name, modifier_name, properties, verify)
+
+    def remove_object_modifier(self, object_name, modifier_name, confirm=False, verify=False):
+        """Remove one named modifier after confirmation."""
+        return self.modifier_service.remove_object_modifier(object_name, modifier_name, confirm, verify)
+
+    def create_collection(self, collection_name, parent_collection_name=None, replace_existing=False):
+        """Create a collection without deleting existing collections."""
+        return self.collection_organization_service.create_collection(collection_name, parent_collection_name, replace_existing)
+
+    def move_objects_to_collection(self, object_names, collection_name, unlink_from_other_collections=False, create_collection=False):
+        """Move or link explicitly named objects to an existing collection."""
+        return self.collection_organization_service.move_objects_to_collection(object_names, collection_name, unlink_from_other_collections, create_collection)
+
+    def delete_collection(self, collection_name, confirm=False, require_empty=True):
+        """Delete one explicitly named collection after confirmation; empty-only by default."""
+        return self.collection_organization_service.delete_collection(collection_name, confirm, require_empty)
+
+    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+        """Run a controlled allowlisted edit batch with before/after verification."""
+        return self.verified_edit_batch_service.run_verified_edit_batch(label, operations, create_before_snapshot, create_after_snapshot, stop_on_error, max_operations, batch_allow_destructive, artifact_root)
 
     def get_safety_status(self):
         """Get the current safety policy status."""
