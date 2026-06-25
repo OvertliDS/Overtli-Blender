@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added Phase 9A advanced animation, rigging, drivers, simulation, pose/action library, and shot workflow command surfaces.
+- Added action inspection/management, batch keyframe insertion, F-Curve editing, NLA track/strip workflows, allowlisted driver DSL, rig templates, IK/constraint/custom-property helpers, pose snapshots/assets, shot plans, simulation inspection/configuration, cache approval gates, and motion validation.
+- Added Phase 9A MCP wrappers, command registry metadata, tool packs, smoke flags, docs, and static tests.
 - Added Phase 8B advanced modeling, sculpt setup, cloth pattern, reference construction, and construction validation command surfaces.
 - Added validated mesh schema creation, profile/curve workflows, non-destructive modifier construction, hard-surface panel and pipe helpers, and approval-gated sculpt/cloth/cache cleanup paths.
 - Added Phase 8A texture baking and image resource pipeline command surface.

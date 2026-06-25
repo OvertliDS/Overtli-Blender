@@ -1271,6 +1271,106 @@ def run_phase8b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True})
 
 
+def run_phase9a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    prefix = f"OVERTLI_PHASE9A_{stamp}"
+    cube_name = f"{prefix}_CUBE"
+    action_name = f"{prefix}_ACTION"
+    armature_name = f"{prefix}_ARMATURE"
+    pose_name = f"{prefix}_POSE"
+    created_objects = [cube_name, armature_name]
+    try:
+        assert_command_success("get_animation_system_capabilities phase9a", send_command(sock, timeout_seconds, "get_animation_system_capabilities"))
+        assert_command_success("inspect_animation_system phase9a", send_command(sock, timeout_seconds, "inspect_animation_system"))
+        assert_command_success("list_actions phase9a", send_command(sock, timeout_seconds, "list_actions"))
+        assert_command_success(
+            "create_primitive_object phase9a",
+            send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": cube_name}),
+        )
+        assert_command_success(
+            "create_action phase9a",
+            send_command(sock, timeout_seconds, "create_action", {"action_name": action_name, "frame_start": 1, "frame_end": 24}),
+        )
+        assert_command_success(
+            "insert_keyframe_batch phase9a",
+            send_command(
+                sock,
+                timeout_seconds,
+                "insert_keyframe_batch",
+                {
+                    "object_name": cube_name,
+                    "action_name": action_name,
+                    "keyframes": [
+                        {"frame": 1, "data_path": "location", "value": [0, 0, 0]},
+                        {"frame": 24, "data_path": "location", "value": [1, 0, 0]},
+                    ],
+                },
+            ),
+        )
+        assert_command_success("get_action_deep_info phase9a", send_command(sock, timeout_seconds, "get_action_deep_info", {"action_name": action_name}))
+        assert_command_success(
+            "set_fcurve_interpolation phase9a",
+            send_command(sock, timeout_seconds, "set_fcurve_interpolation", {"action_name": action_name, "interpolation": "LINEAR"}),
+        )
+        assert_command_success(
+            "validate_driver_dsl phase9a",
+            send_command(
+                sock,
+                timeout_seconds,
+                "validate_driver_dsl",
+                {"dsl": {"operation": "clamp", "source": {"target_name": cube_name, "data_path": "location.x"}, "min": 0, "max": 1}},
+            ),
+        )
+        driver_response = send_command(
+            sock,
+            timeout_seconds,
+            "create_driver_from_dsl",
+            {
+                "target_type": "OBJECT",
+                "target_name": cube_name,
+                "data_path": "scale",
+                "array_index": 0,
+                "dsl": {"operation": "clamp", "source": {"target_name": cube_name, "data_path": "location.x"}, "min": 0, "max": 1},
+            },
+        )
+        driver_result = driver_response.get("result") if isinstance(driver_response.get("result"), dict) else driver_response
+        if driver_result.get("status") != "requires_approval":
+            raise RuntimeError(f"create_driver_from_dsl should require approval: {driver_response}")
+        assert_command_success(
+            "create_rig_template phase9a",
+            send_command(sock, timeout_seconds, "create_rig_template", {"armature_name": armature_name, "template": "simple_biped"}),
+        )
+        assert_command_success(
+            "validate_rig phase9a",
+            send_command(sock, timeout_seconds, "validate_rig", {"armature_name": armature_name}),
+        )
+        assert_command_success(
+            "create_pose_snapshot phase9a",
+            send_command(sock, timeout_seconds, "create_pose_snapshot", {"armature_name": armature_name, "snapshot_id": pose_name}),
+        )
+        pose_response = send_command(sock, timeout_seconds, "apply_pose_snapshot", {"armature_name": armature_name, "snapshot_id": pose_name})
+        pose_result = pose_response.get("result") if isinstance(pose_response.get("result"), dict) else pose_response
+        if pose_result.get("status") != "requires_approval":
+            raise RuntimeError(f"apply_pose_snapshot should require approval: {pose_response}")
+        shot_plan_name = f"{prefix}_SHOT"
+        assert_command_success("create_shot_plan phase9a", send_command(sock, timeout_seconds, "create_shot_plan", {"plan_name": shot_plan_name, "ranges": [{"name": "main", "frame_start": 1, "frame_end": 24}]}))
+        assert_command_success("validate_shot_plan phase9a", send_command(sock, timeout_seconds, "validate_shot_plan", {"plan_name": shot_plan_name}))
+        assert_command_success("get_simulation_capabilities phase9a", send_command(sock, timeout_seconds, "get_simulation_capabilities"))
+        assert_command_success("inspect_simulation_state phase9a", send_command(sock, timeout_seconds, "inspect_simulation_state", {"object_names": [cube_name]}))
+        preview_response = send_command(sock, timeout_seconds, "simulate_preview_range", {"object_name": cube_name, "frame_start": 1, "frame_end": 8})
+        preview_result = preview_response.get("result") if isinstance(preview_response.get("result"), dict) else preview_response
+        if preview_result.get("status") != "requires_approval":
+            raise RuntimeError(f"simulate_preview_range should require approval: {preview_response}")
+        cache_response = send_command(sock, timeout_seconds, "clear_simulation_cache", {"object_name": cube_name})
+        cache_result = cache_response.get("result") if isinstance(cache_response.get("result"), dict) else cache_response
+        if cache_result.get("status") != "requires_approval":
+            raise RuntimeError(f"clear_simulation_cache should require approval: {cache_response}")
+        assert_command_success("validate_motion phase9a", send_command(sock, timeout_seconds, "validate_motion", {"object_names": [cube_name]}))
+        print("PASS phase9a full smoke completed with smoke-created data and gated driver/pose/simulation/cache actions")
+    finally:
+        send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1409,6 +1509,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-cloth-patterns", action="store_true", help="Run Phase 8B cloth pattern smoke through --phase8b-full.")
     parser.add_argument("--include-construction-validation", action="store_true", help="Run Phase 8B construction validation smoke through --phase8b-full.")
     parser.add_argument("--include-construction-cleanup-plan", action="store_true", help="Run Phase 8B construction cleanup planning smoke through --phase8b-full.")
+    parser.add_argument("--include-animation-system", action="store_true", help="Run Phase 9A animation system inspection smoke through --phase9a-full.")
+    parser.add_argument("--include-action-library", action="store_true", help="Run Phase 9A action library smoke through --phase9a-full.")
+    parser.add_argument("--include-fcurve-editing", action="store_true", help="Run Phase 9A F-Curve editing smoke through --phase9a-full.")
+    parser.add_argument("--include-nla-workflow", action="store_true", help="Run Phase 9A NLA workflow smoke through --phase9a-full.")
+    parser.add_argument("--include-driver-dsl", action="store_true", help="Run Phase 9A driver DSL smoke through --phase9a-full.")
+    parser.add_argument("--include-rig-template", action="store_true", help="Run Phase 9A rig template smoke through --phase9a-full.")
+    parser.add_argument("--include-pose-library", action="store_true", help="Run Phase 9A pose library smoke through --phase9a-full.")
+    parser.add_argument("--include-shot-workflow", action="store_true", help="Run Phase 9A shot workflow smoke through --phase9a-full.")
+    parser.add_argument("--include-simulation-workflow", action="store_true", help="Run Phase 9A simulation workflow smoke through --phase9a-full.")
+    parser.add_argument("--include-motion-validation", action="store_true", help="Run Phase 9A motion validation smoke through --phase9a-full.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1468,6 +1578,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase8b-full",
         action="store_true",
         help="Run Phase 8B advanced modeling, sculpt setup, cloth pattern, and validation smoke with smoke-created data.",
+    )
+    parser.add_argument(
+        "--phase9a-full",
+        action="store_true",
+        help="Run Phase 9A animation, rigging, drivers, pose, shot, simulation, and validation smoke with smoke-created data.",
     )
     return parser
 
@@ -1714,6 +1829,21 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_construction_cleanup_plan
             ):
                 run_phase8b_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase9a_full
+                or args.include_animation_system
+                or args.include_action_library
+                or args.include_fcurve_editing
+                or args.include_nla_workflow
+                or args.include_driver_dsl
+                or args.include_rig_template
+                or args.include_pose_library
+                or args.include_shot_workflow
+                or args.include_simulation_workflow
+                or args.include_motion_validation
+            ):
+                run_phase9a_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

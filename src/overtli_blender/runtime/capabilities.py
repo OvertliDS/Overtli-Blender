@@ -31,12 +31,25 @@ CAPABILITIES = {
     "references.construct",
     "sculpt.workflow",
     "simulation.cloth",
+    "animation.read",
+    "animation.write",
+    "drivers.read",
+    "drivers.write",
+    "rigging.read",
+    "rigging.write",
+    "pose.read",
+    "pose.write",
+    "shots.read",
+    "shots.write",
+    "simulation.read",
+    "simulation.write",
+    "motion.validate",
 }
 
 PROFILE_CAPABILITIES = {
-    "read_only": {"scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read"},
-    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth"},
-    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth"},
+    "read_only": {"scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read", "animation.read", "drivers.read", "rigging.read", "pose.read", "shots.read", "simulation.read", "motion.validate"},
+    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth", "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write", "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write", "motion.validate"},
+    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth", "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write", "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write", "motion.validate"},
     "developer": set(CAPABILITIES),
     "custom": {"scene.read"},
 }

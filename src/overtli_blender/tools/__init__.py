@@ -1,6 +1,8 @@
 from .addon_development_tools import register_addon_development_tools
 from .addon_management_tools import register_addon_management_tools
 from .advanced_knowledge_workflow_tools import register_advanced_knowledge_workflow_tools
+from .action_library_tools import register_action_library_tools
+from .animation_intelligence_advanced_tools import register_animation_intelligence_advanced_tools
 from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
@@ -13,7 +15,9 @@ from .compositor_tools import register_compositor_tools
 from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
+from .driver_tools import register_driver_tools
 from .advanced_material_tools import register_advanced_material_tools
+from .fcurve_tools import register_fcurve_tools
 from .file_access_tools import register_file_access_tools
 from .geometry_nodes_intelligence_tools import register_geometry_nodes_intelligence_tools
 from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tools
@@ -30,7 +34,10 @@ from .material_preview_tools import register_material_preview_tools
 from .material_tools import register_material_tools
 from .material_texture_tools import register_material_texture_tools
 from .modifier_tools import register_modifier_tools
+from .motion_validation_tools import register_motion_validation_tools
+from .nla_tools import register_nla_tools
 from .polyhaven_tools import register_polyhaven_tools
+from .pose_library_tools import register_pose_library_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
 from .procedural_asset_tools import register_procedural_asset_tools
 from .project_workspace_tools import register_project_workspace_tools
@@ -38,6 +45,8 @@ from .provider_status_tools import register_provider_status_tools
 from .reference_tools import register_reference_tools
 from .observation_tools import register_observation_tools
 from .render_tools import register_render_tools
+from .rig_template_tools import register_rig_template_tools
+from .rig_validation_tools import register_rig_validation_tools
 from .rigging_simulation_tools import register_rigging_simulation_tools
 from .safety_tools import register_safety_tools
 from .scene_edit_tools import register_scene_edit_tools
@@ -52,6 +61,8 @@ from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .registry import register_all_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .shot_workflow_tools import register_shot_workflow_tools
+from .simulation_workflow_tools import register_simulation_workflow_tools
 from .review_package_tools import register_review_package_tools
 from .skill_pack_tools import register_skill_pack_tools
 from .snippet_library_tools import register_snippet_library_tools
@@ -65,6 +76,8 @@ __all__ = [
     "register_addon_development_tools",
     "register_addon_management_tools",
     "register_advanced_knowledge_workflow_tools",
+    "register_action_library_tools",
+    "register_animation_intelligence_advanced_tools",
     "register_api_knowledge_tools",
     "register_animation_tools",
     "register_asset_library_tools",
@@ -77,7 +90,9 @@ __all__ = [
     "register_context_tools",
     "register_deformation_tools",
     "register_dependency_tools",
+    "register_driver_tools",
     "register_advanced_material_tools",
+    "register_fcurve_tools",
     "register_file_access_tools",
     "register_geometry_nodes_intelligence_tools",
     "register_geometry_nodes_modifier_tools",
@@ -94,7 +109,10 @@ __all__ = [
     "register_material_tools",
     "register_material_texture_tools",
     "register_modifier_tools",
+    "register_motion_validation_tools",
+    "register_nla_tools",
     "register_polyhaven_tools",
+    "register_pose_library_tools",
     "register_presentation_workflow_tools",
     "register_procedural_asset_tools",
     "register_project_workspace_tools",
@@ -102,6 +120,8 @@ __all__ = [
     "register_reference_tools",
     "register_observation_tools",
     "register_render_tools",
+    "register_rig_template_tools",
+    "register_rig_validation_tools",
     "register_rigging_simulation_tools",
     "register_safety_tools",
     "register_scene_edit_tools",
@@ -115,6 +135,8 @@ __all__ = [
     "register_screenshot_tools",
     "register_script_registry_tools",
     "register_sketchfab_tools",
+    "register_shot_workflow_tools",
+    "register_simulation_workflow_tools",
     "register_review_package_tools",
     "register_skill_pack_tools",
     "register_snippet_library_tools",

@@ -422,7 +422,50 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
     command_map.update(_phase7c_safety_map())
     command_map.update(_phase8a_safety_map())
     command_map.update(_phase8b_safety_map())
+    command_map.update(_phase9a_safety_map())
     return command_map
+
+
+def _phase9a_safety_map() -> dict[str, CommandSafetyMetadata]:
+    low = [
+        "get_animation_system_capabilities", "inspect_animation_system", "list_actions",
+        "get_action_deep_info", "validate_fcurves", "validate_nla_stack", "validate_driver_dsl",
+        "list_drivers", "get_driver_info", "validate_rig", "inspect_pose", "list_pose_assets",
+        "compare_poses", "validate_shot_plan", "create_motion_path_preview", "validate_motion",
+        "get_simulation_capabilities", "inspect_simulation_state", "get_simulation_cache_status",
+    ]
+    medium = [
+        "create_action", "duplicate_action", "rename_action", "assign_action",
+        "insert_keyframe_batch", "set_fcurve_interpolation", "add_fcurve_modifier",
+        "create_nla_track", "add_action_to_nla", "edit_nla_strip", "mute_nla_track",
+        "create_driver_from_dsl", "create_rig_template", "create_control_bones",
+        "create_ik_chain", "add_rig_constraint", "add_custom_rig_properties",
+        "create_pose_snapshot", "create_pose_asset", "create_shot_range", "create_camera_cut",
+        "create_timeline_marker", "create_shot_plan", "configure_rigidbody_basic",
+        "configure_cloth_simulation_advanced", "configure_softbody_basic",
+        "configure_hair_curve_dynamics_basic", "run_animation_rigging_workflow_batch",
+    ]
+    high = [
+        "delete_actions", "edit_keyframes", "retime_action", "remove_fcurve_modifier",
+        "delete_nla_tracks", "remove_drivers", "remove_rig_constraints", "apply_pose_snapshot",
+        "delete_pose_assets", "simulate_preview_range", "bake_simulation_cache",
+        "clear_simulation_cache",
+    ]
+    specs: dict[str, CommandSafetyMetadata] = {}
+    for name in low:
+        specs[name] = _spec(name, OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE, warnings=("phase9a-motion-workflow",))
+    for name in medium:
+        operation = OperationType.ANIMATE
+        if any(marker in name for marker in ("rig", "ik", "constraint", "custom_rig")):
+            operation = OperationType.RIG
+        elif any(marker in name for marker in ("shot", "camera_cut", "timeline_marker", "motion_path")):
+            operation = OperationType.CAMERA
+        elif any(marker in name for marker in ("simulation", "rigidbody", "cloth", "softbody", "hair")):
+            operation = OperationType.EDIT
+        specs[name] = _spec(name, operation, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True, warnings=("phase9a-structured-workflow", "exact-target-required"))
+    for name in high:
+        specs[name] = _spec(name, OperationType.CLEANUP if any(marker in name for marker in ("delete", "remove", "clear")) else OperationType.ANIMATE, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=True, strict_blocked=True, warnings=("explicit-approval-required", "phase9a-high-risk", "exact-target-only"))
+    return specs
 
 
 def _phase8b_safety_map() -> dict[str, CommandSafetyMetadata]:

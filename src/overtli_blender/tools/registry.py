@@ -7,6 +7,8 @@ from typing import Any
 from .addon_development_tools import register_addon_development_tools
 from .addon_management_tools import register_addon_management_tools
 from .advanced_knowledge_workflow_tools import register_advanced_knowledge_workflow_tools
+from .action_library_tools import register_action_library_tools
+from .animation_intelligence_advanced_tools import register_animation_intelligence_advanced_tools
 from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
@@ -23,7 +25,9 @@ from .construction_validation_tools import register_construction_validation_tool
 from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
+from .driver_tools import register_driver_tools
 from .advanced_material_tools import register_advanced_material_tools
+from .fcurve_tools import register_fcurve_tools
 from .file_access_tools import register_file_access_tools
 from .geometry_nodes_intelligence_tools import register_geometry_nodes_intelligence_tools
 from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tools
@@ -43,6 +47,8 @@ from .material_texture_tools import register_material_texture_tools
 from .modeling_schema_tools import register_modeling_schema_tools
 from .modifier_tools import register_modifier_tools
 from .modifier_construction_tools import register_modifier_construction_tools
+from .motion_validation_tools import register_motion_validation_tools
+from .nla_tools import register_nla_tools
 from .observation_tools import register_observation_tools
 from .safety_tools import register_safety_tools
 from .scene_intelligence_tools import register_scene_intelligence_tools
@@ -51,6 +57,7 @@ from .selection_tools import register_selection_tools
 from .shape_key_tools import register_shape_key_tools
 from .shader_graph_tools import register_shader_graph_tools
 from .polyhaven_tools import register_polyhaven_tools
+from .pose_library_tools import register_pose_library_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
 from .profile_modeling_tools import register_profile_modeling_tools
 from .procedural_asset_tools import register_procedural_asset_tools
@@ -59,10 +66,14 @@ from .provider_status_tools import register_provider_status_tools
 from .reference_construction_tools import register_reference_construction_tools
 from .reference_tools import register_reference_tools
 from .render_tools import register_render_tools
+from .rig_template_tools import register_rig_template_tools
+from .rig_validation_tools import register_rig_validation_tools
 from .rigging_simulation_tools import register_rigging_simulation_tools
 from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .shot_workflow_tools import register_shot_workflow_tools
+from .simulation_workflow_tools import register_simulation_workflow_tools
 from .review_package_tools import register_review_package_tools
 from .skill_pack_tools import register_skill_pack_tools
 from .snippet_library_tools import register_snippet_library_tools
@@ -113,6 +124,11 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_deformation_tools(mcp, get_blender_connection)
     register_workflow_intelligence_tools(mcp, get_blender_connection)
     register_animation_tools(mcp, get_blender_connection)
+    register_animation_intelligence_advanced_tools(mcp, get_blender_connection)
+    register_action_library_tools(mcp, get_blender_connection)
+    register_fcurve_tools(mcp, get_blender_connection)
+    register_nla_tools(mcp, get_blender_connection)
+    register_driver_tools(mcp, get_blender_connection)
     register_camera_tools(mcp, get_blender_connection)
     register_lighting_tools(mcp, get_blender_connection)
     register_render_tools(mcp, get_blender_connection)
@@ -124,6 +140,12 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_scene_kit_tools(mcp, get_blender_connection)
     register_asset_workflow_tools(mcp, get_blender_connection)
     register_rigging_simulation_tools(mcp, get_blender_connection)
+    register_rig_template_tools(mcp, get_blender_connection)
+    register_rig_validation_tools(mcp, get_blender_connection)
+    register_pose_library_tools(mcp, get_blender_connection)
+    register_shot_workflow_tools(mcp, get_blender_connection)
+    register_simulation_workflow_tools(mcp, get_blender_connection)
+    register_motion_validation_tools(mcp, get_blender_connection)
     register_geometry_nodes_intelligence_tools(mcp, get_blender_connection)
     register_geometry_nodes_template_tools(mcp, get_blender_connection)
     register_geometry_nodes_modifier_tools(mcp, get_blender_connection)

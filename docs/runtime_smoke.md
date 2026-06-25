@@ -1,5 +1,29 @@
 # Runtime Smoke
 
+## Phase 9A
+
+Run the contained Phase 9A animation, rigging, driver, pose, shot, and simulation smoke after refreshing or reloading the Blender addon:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase9a-full
+```
+
+Phase 9A smoke flags:
+
+- `--include-animation-system`
+- `--include-action-library`
+- `--include-fcurve-editing`
+- `--include-nla-workflow`
+- `--include-driver-dsl`
+- `--include-rig-template`
+- `--include-pose-library`
+- `--include-shot-workflow`
+- `--include-simulation-workflow`
+- `--include-motion-validation`
+- `--phase9a-full`
+
+`--phase9a-full` creates only `OVERTLI_PHASE9A_*` smoke data and checks safe action, keyframe, F-Curve, driver DSL validation, rig, pose, shot, simulation, and motion validation paths. Driver creation, pose application, simulation preview, and cache clearing are verified as approval-gated by default.
+
 ## Phase 8A
 
 Run the contained Phase 8A texture baking smoke after refreshing or reloading the Blender addon:

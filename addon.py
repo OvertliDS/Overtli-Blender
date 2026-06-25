@@ -1843,7 +1843,7 @@ class SceneIntelligenceService:
         return {
             "has_animation_data": True,
             "action": action.name if action else None,
-            "fcurve_count": len(action.fcurves) if action else 0,
+            "fcurve_count": len(phase9a_action_fcurves(action)) if action else 0,
             "nla_track_count": len(animation_data.nla_tracks),
         }
 
@@ -9770,6 +9770,636 @@ class AdvancedModelingWorkflowBatchService(AdvancedModelingServiceBase):
         after = self.server.create_scene_snapshot(label=f"{workflow_name or 'phase8b'}_after") if create_after_snapshot else None
         return {"status": "success" if all(item["result"].get("status") != "error" for item in results) else "partial", "workflow_name": workflow_name, "before_snapshot": before, "after_snapshot": after, "results": results}
 
+_PHASE9A_ALLOWED_INTERPOLATIONS = {"CONSTANT", "LINEAR", "BEZIER", "SINE", "QUAD", "CUBIC", "QUART", "QUINT", "EXPO", "CIRC", "BACK", "BOUNCE", "ELASTIC"}
+_PHASE9A_ALLOWED_EASING = {None, "AUTO", "EASE_IN", "EASE_OUT", "EASE_IN_OUT"}
+_PHASE9A_ALLOWED_KEYFRAME_PATHS = {"location", "rotation_euler", "rotation_quaternion", "scale"}
+_PHASE9A_ALLOWED_FCURVE_MODIFIERS = {"CYCLES", "NOISE", "LIMITS", "STEPPED"}
+_PHASE9A_ALLOWED_DRIVER_OPS = {"copy", "add", "subtract", "multiply", "divide", "clamp", "map_range", "min", "max", "abs", "negate"}
+_PHASE9A_ALLOWED_DRIVER_TARGETS = {"OBJECT", "ARMATURE", "BONE", "MATERIAL", "SHAPE_KEY"}
+_PHASE9A_ALLOWED_DRIVER_PATHS = {"location.x", "location.y", "location.z", "rotation_euler.x", "rotation_euler.y", "rotation_euler.z", "scale.x", "scale.y", "scale.z"}
+
+def phase9a_normalize_interpolation(interpolation=None, easing=None):
+    interp = (interpolation or "BEZIER").upper()
+    ease = easing.upper() if isinstance(easing, str) else easing
+    if interp not in _PHASE9A_ALLOWED_INTERPOLATIONS:
+        raise ValueError(f"Unsupported interpolation: {interpolation}")
+    if ease not in _PHASE9A_ALLOWED_EASING:
+        raise ValueError(f"Unsupported easing: {easing}")
+    return {"interpolation": interp, "easing": ease}
+
+def phase9a_validate_keyframe_batch(keyframes):
+    if not keyframes:
+        raise ValueError("At least one keyframe is required")
+    if len(keyframes) > 512:
+        raise ValueError("Too many keyframes")
+    frames, paths = [], set()
+    for item in keyframes:
+        frame = float(item.get("frame"))
+        data_path = str(item.get("data_path") or "")
+        base_path = data_path.split("[", 1)[0]
+        if base_path not in _PHASE9A_ALLOWED_KEYFRAME_PATHS and not base_path.startswith('key_blocks["'):
+            raise ValueError(f"Unsupported keyframe data_path: {data_path}")
+        phase9a_normalize_interpolation(item.get("interpolation"), item.get("easing"))
+        frames.append(frame); paths.add(data_path)
+    return {"count": len(keyframes), "frame_range": [min(frames), max(frames)], "data_paths": sorted(paths)}
+
+def phase9a_build_retime_plan(frame_start, frame_end, new_start, new_end):
+    frame_start, frame_end, new_start, new_end = float(frame_start), float(frame_end), float(new_start), float(new_end)
+    if frame_end < frame_start or new_end < new_start:
+        raise ValueError("Frame ranges must be ascending")
+    source_span = frame_end - frame_start
+    target_span = new_end - new_start
+    return {"source_range": [frame_start, frame_end], "target_range": [new_start, new_end], "scale": 1.0 if source_span == 0 else target_span / source_span}
+
+def phase9a_build_fcurve_modifier_plan(modifier_type, settings=None):
+    mod_type = str(modifier_type or "").upper()
+    if mod_type not in _PHASE9A_ALLOWED_FCURVE_MODIFIERS:
+        raise ValueError(f"Unsupported F-curve modifier: {modifier_type}")
+    return {"modifier_type": mod_type, "settings": dict(settings or {})}
+
+def phase9a_validate_nla_overlaps(strips):
+    issues, by_track = [], {}
+    for strip in strips:
+        by_track.setdefault(str(strip.get("track_name", "")), []).append(strip)
+    for track_name, items in by_track.items():
+        ordered = sorted(items, key=lambda item: float(item.get("frame_start", 0)))
+        for left, right in zip(ordered, ordered[1:]):
+            if float(left.get("frame_end", 0)) > float(right.get("frame_start", 0)):
+                issues.append({"track_name": track_name, "left": left.get("name"), "right": right.get("name"), "issue": "overlap"})
+    return {"status": "success" if not issues else "warning", "issues": issues}
+
+def phase9a_driver_source(dsl):
+    source = dsl.get("source")
+    if not isinstance(source, dict):
+        raise ValueError("Driver DSL requires a source object")
+    target_type = str(source.get("target_type", "OBJECT")).upper()
+    target_name = str(source.get("target_name") or "")
+    data_path = str(source.get("data_path") or "")
+    if target_type not in _PHASE9A_ALLOWED_DRIVER_TARGETS:
+        raise ValueError(f"Unsupported driver target_type: {target_type}")
+    if not target_name:
+        raise ValueError("Driver source target_name is required")
+    if data_path not in _PHASE9A_ALLOWED_DRIVER_PATHS and not data_path.startswith('["'):
+        raise ValueError(f"Unsupported driver source data_path: {data_path}")
+    return {"target_type": target_type, "target_name": target_name, "data_path": data_path}
+
+def phase9a_validate_driver_dsl(dsl):
+    if not isinstance(dsl, dict):
+        raise ValueError("Driver DSL must be an object")
+    operation = str(dsl.get("operation") or "").lower()
+    if operation not in _PHASE9A_ALLOWED_DRIVER_OPS:
+        raise ValueError(f"Unsupported driver DSL operation: {operation}")
+    source = phase9a_driver_source(dsl)
+    for key in ("value", "min", "max", "operand", "from_min", "from_max", "to_min", "to_max"):
+        if key in dsl and dsl[key] is not None:
+            float(dsl[key])
+    if operation == "map_range" and float(dsl.get("from_min", 0)) == float(dsl.get("from_max", 0)):
+        raise ValueError("map_range source range cannot be zero")
+    return {"status": "success", "operation": operation, "source": source, "dsl_only": True}
+
+def phase9a_compile_driver_expression(dsl):
+    validated = phase9a_validate_driver_dsl(dsl)
+    op = validated["operation"]
+    expr = "var"
+    if op == "add":
+        expr = f"(var + {float(dsl.get('value', dsl.get('operand', 0.0)))})"
+    elif op == "subtract":
+        expr = f"(var - {float(dsl.get('value', dsl.get('operand', 0.0)))})"
+    elif op == "multiply":
+        expr = f"(var * {float(dsl.get('value', dsl.get('operand', 1.0)))})"
+    elif op == "divide":
+        divisor = float(dsl.get("value", dsl.get("operand", 1.0)))
+        if divisor == 0:
+            raise ValueError("divide operand cannot be zero")
+        expr = f"(var / {divisor})"
+    elif op == "clamp":
+        expr = f"min(max(var, {float(dsl.get('min', 0.0))}), {float(dsl.get('max', 1.0))})"
+    elif op == "map_range":
+        fmin, fmax, tmin, tmax = float(dsl["from_min"]), float(dsl["from_max"]), float(dsl["to_min"]), float(dsl["to_max"])
+        expr = f"(({tmin}) + ((var - ({fmin})) * (({tmax}) - ({tmin})) / (({fmax}) - ({fmin}))))"
+    elif op == "min":
+        expr = f"min(var, {float(dsl.get('value', dsl.get('operand', 0.0)))})"
+    elif op == "max":
+        expr = f"max(var, {float(dsl.get('value', dsl.get('operand', 0.0)))})"
+    elif op == "abs":
+        expr = "abs(var)"
+    elif op == "negate":
+        expr = "(-var)"
+    return {"expression": expr, "variables": [{"name": "var", **validated["source"]}], "operation": op}
+
+def phase9a_validate_rig_names(bone_names):
+    duplicates = sorted({name for name in bone_names if bone_names.count(name) > 1})
+    empty = [name for name in bone_names if not str(name).strip()]
+    return {"status": "success" if not duplicates and not empty else "warning", "duplicates": duplicates, "empty_names": empty}
+
+def phase9a_validate_bone_hierarchy(bones):
+    names = {str(item.get("name")) for item in bones}
+    missing_parents = [item for item in bones if item.get("parent") and item.get("parent") not in names]
+    return {"status": "success" if not missing_parents else "warning", "missing_parents": missing_parents}
+
+def phase9a_action_fcurves(action):
+    if not action:
+        return []
+    direct = getattr(action, "fcurves", None)
+    if direct is not None:
+        try:
+            return list(direct)
+        except TypeError:
+            pass
+    curves, seen = [], set()
+    for layer in getattr(action, "layers", []) or []:
+        for strip in getattr(layer, "strips", []) or []:
+            for channelbag in getattr(strip, "channelbags", []) or []:
+                for fcurve in getattr(channelbag, "fcurves", []) or []:
+                    key = id(fcurve)
+                    if key not in seen:
+                        curves.append(fcurve)
+                        seen.add(key)
+    return curves
+
+def phase9a_find_fcurve(action, data_path, array_index=0):
+    direct = getattr(action, "fcurves", None)
+    if direct is not None and hasattr(direct, "find"):
+        found = direct.find(data_path, index=int(array_index))
+        if found:
+            return found
+    for fcurve in phase9a_action_fcurves(action):
+        if fcurve.data_path == data_path and int(fcurve.array_index) == int(array_index):
+            return fcurve
+    return None
+
+def phase9a_action_groups(action):
+    direct = getattr(action, "groups", None)
+    if direct is not None:
+        return [group.name for group in direct]
+    names = set()
+    for layer in getattr(action, "layers", []) or []:
+        for strip in getattr(layer, "strips", []) or []:
+            for channelbag in getattr(strip, "channelbags", []) or []:
+                for group in getattr(channelbag, "groups", []) or []:
+                    names.add(group.name)
+    return sorted(names)
+
+
+class AnimationIntelligenceAdvancedService:
+    def __init__(self, server): self.server = server
+    def get_animation_system_capabilities(self):
+        version = ".".join(str(part) for part in getattr(bpy.app, "version", (0, 0, 0)))
+        return {"status": "success", "blender_version": version, "actions": {"available": hasattr(bpy.data, "actions")}, "fcurves": {"available": hasattr(bpy.types, "FCurve"), "modifiers": hasattr(bpy.types, "FCurveModifiers")}, "keyframes": {"available": hasattr(bpy.types, "Keyframe")}, "nla": {"tracks": hasattr(bpy.types, "NlaTrack"), "strips": hasattr(bpy.types, "NlaStrip")}, "drivers": {"available": hasattr(bpy.types, "Driver"), "dsl_only": True}, "rigging": {"armatures": hasattr(bpy.data, "armatures"), "pose_bones": hasattr(bpy.types, "PoseBone"), "constraints": hasattr(bpy.types, "Constraint")}, "pose_library": {"snapshots": True, "native_pose_assets": hasattr(bpy.types, "ActionPoseMarkers")}, "shots": {"timeline_markers": hasattr(bpy.types, "TimelineMarker"), "camera_markers": True}, "motion_paths": {"available": hasattr(bpy.types, "MotionPath")}, "simulation": {"point_cache": hasattr(bpy.types, "PointCache"), "rigid_body": "available" if hasattr(bpy.types, "RigidBodyObject") else "unknown", "cloth": "available" if hasattr(bpy.types, "ClothModifier") else "unknown", "soft_body": "available" if hasattr(bpy.types, "SoftBodySettings") else "unknown", "hair_curve_dynamics": "unknown"}, "warnings": []}
+    def inspect_animation_system(self, object_names=None, include_actions=True, include_fcurves=True, include_nla=True, include_drivers=True, include_constraints=True, include_pose=True, include_simulation=True):
+        names = object_names or [obj.name for obj in bpy.context.scene.objects]
+        objects = []
+        for name in names:
+            obj = bpy.data.objects.get(name)
+            if not obj:
+                objects.append({"name": name, "status": "missing"}); continue
+            anim = getattr(obj, "animation_data", None)
+            item = {"name": obj.name, "type": obj.type, "has_animation_data": bool(anim)}
+            if include_actions and anim and anim.action: item["action"] = self.server.action_library_service._action_summary(anim.action)
+            if include_fcurves and anim and anim.action: item["fcurves"] = self.server.action_library_service._fcurve_summaries(anim.action, include_keyframes=False)
+            if include_nla and anim: item["nla_tracks"] = self.server.nla_workflow_service._nla_tracks(anim)
+            if include_drivers and anim: item["drivers"] = self.server.driver_dsl_service._drivers_for_id(obj)
+            if include_constraints: item["constraints"] = [{"name": con.name, "type": con.type, "target": getattr(getattr(con, "target", None), "name", None), "subtarget": getattr(con, "subtarget", None)} for con in getattr(obj, "constraints", [])]
+            if include_pose and obj.type == "ARMATURE": item["pose_bones"] = [bone.name for bone in getattr(obj.pose, "bones", [])]
+            if include_simulation: item["simulation"] = self.server.simulation_workflow_service._object_simulation_summary(obj)
+            objects.append(item)
+        actions = [self.server.action_library_service._action_summary(action) for action in bpy.data.actions] if include_actions else []
+        return {"status": "success", "objects": objects, "actions": actions, "warnings": []}
+
+
+class ActionLibraryService:
+    def __init__(self, server): self.server = server
+    def _action_summary(self, action):
+        assigned = [obj.name for obj in bpy.data.objects if getattr(getattr(obj, "animation_data", None), "action", None) == action]
+        fcurves = phase9a_action_fcurves(action)
+        return {"name": action.name, "users": int(action.users), "frame_range": list(action.frame_range) if hasattr(action, "frame_range") else None, "fcurve_count": len(fcurves), "groups": phase9a_action_groups(action), "pose_markers": [marker.name for marker in getattr(action, "pose_markers", [])], "assigned_objects": assigned, "asset_status": "native" if getattr(action, "asset_data", None) else "not_asset"}
+    def _fcurve_summaries(self, action, include_keyframes=False, max_keyframes=200):
+        rows = []
+        for fcurve in phase9a_action_fcurves(action):
+            keyframes = []
+            if include_keyframes:
+                for point in list(fcurve.keyframe_points)[: int(max_keyframes)]:
+                    keyframes.append({"frame": float(point.co.x), "value": float(point.co.y), "interpolation": point.interpolation, "easing": getattr(point, "easing", None)})
+            rows.append({"data_path": fcurve.data_path, "array_index": int(fcurve.array_index), "keyframe_count": len(fcurve.keyframe_points), "keyframes": keyframes, "modifiers": [{"type": mod.type, "name": mod.name} for mod in getattr(fcurve, "modifiers", [])], "group": fcurve.group.name if getattr(fcurve, "group", None) else None})
+        return rows
+    def list_actions(self): return {"status": "success", "actions": [self._action_summary(action) for action in bpy.data.actions]}
+    def get_action_deep_info(self, action_name, include_keyframes=False, max_keyframes=200):
+        action = bpy.data.actions.get(action_name)
+        if not action: return {"status": "error", "message": f"Action not found: {action_name}"}
+        info = self._action_summary(action); info["fcurves"] = self._fcurve_summaries(action, include_keyframes, max_keyframes); return {"status": "success", "action": info}
+    def create_action(self, action_name, object_name=None, frame_start=None, frame_end=None, assign_to_object=False):
+        if not action_name: return {"status": "error", "message": "action_name is required"}
+        if bpy.data.actions.get(action_name): return {"status": "error", "message": f"Action already exists: {action_name}"}
+        action = bpy.data.actions.new(action_name)
+        if frame_start is not None and frame_end is not None: action.frame_start = float(frame_start); action.frame_end = float(frame_end)
+        assigned = self.assign_action(object_name, action_name) if assign_to_object else None
+        return {"status": "success", "action": self._action_summary(action), "assigned": assigned}
+    def duplicate_action(self, source_action_name, new_action_name, assign_to_object=None):
+        source = bpy.data.actions.get(source_action_name)
+        if not source: return {"status": "error", "message": f"Action not found: {source_action_name}"}
+        if bpy.data.actions.get(new_action_name): return {"status": "error", "message": f"Action already exists: {new_action_name}"}
+        action = source.copy(); action.name = new_action_name
+        assigned = self.assign_action(assign_to_object, action.name) if assign_to_object else None
+        return {"status": "success", "action": self._action_summary(action), "assigned": assigned}
+    def rename_action(self, action_name, new_action_name, confirm=False):
+        action = bpy.data.actions.get(action_name)
+        if not action: return {"status": "error", "message": f"Action not found: {action_name}"}
+        if bpy.data.actions.get(new_action_name): return {"status": "error", "message": f"Action already exists: {new_action_name}"}
+        if action.users and not confirm: return {"status": "requires_approval", "message": "Renaming a used action requires confirmation.", "action": self._action_summary(action)}
+        action.name = new_action_name; return {"status": "success", "action": self._action_summary(action)}
+    def assign_action(self, object_name, action_name, create_animation_data=True):
+        obj, action = bpy.data.objects.get(object_name or ""), bpy.data.actions.get(action_name or "")
+        if not obj: return {"status": "error", "message": f"Object not found: {object_name}"}
+        if not action: return {"status": "error", "message": f"Action not found: {action_name}"}
+        if not obj.animation_data and create_animation_data: obj.animation_data_create()
+        if not obj.animation_data: return {"status": "error", "message": "Object has no animation data and create_animation_data is false."}
+        before = obj.animation_data.action.name if obj.animation_data.action else None; obj.animation_data.action = action
+        return {"status": "success", "object_name": obj.name, "before_action": before, "action": self._action_summary(action)}
+    def delete_actions(self, action_names, allow_used=False, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "delete_actions requires confirmation and exact action names.", "action_names": action_names}
+        removed, refused = [], []
+        for name in action_names or []:
+            action = bpy.data.actions.get(name)
+            if not action: refused.append({"name": name, "reason": "missing"}); continue
+            if action.users and not allow_used: refused.append({"name": name, "reason": "action_has_users", "users": int(action.users)}); continue
+            bpy.data.actions.remove(action); removed.append(name)
+        return {"status": "success" if not refused else "partial", "removed": removed, "refused": refused}
+
+
+class FCurveEditingService:
+    def __init__(self, server): self.server = server
+    def _action(self, name):
+        action = bpy.data.actions.get(name or "")
+        if not action: raise ValueError(f"Action not found: {name}")
+        return action
+    def insert_keyframe_batch(self, object_name, keyframes, create_action=True, action_name=None):
+        phase9a_validate_keyframe_batch(keyframes or [])
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj: return {"status": "error", "message": f"Object not found: {object_name}"}
+        old_frame = bpy.context.scene.frame_current
+        if create_action and action_name:
+            if not bpy.data.actions.get(action_name): bpy.data.actions.new(action_name)
+            self.server.action_library_service.assign_action(obj.name, action_name, create_animation_data=True)
+        inserted = []
+        try:
+            for item in keyframes:
+                data_path, frame, value = item["data_path"], int(item["frame"]), item.get("value")
+                if value is not None and hasattr(obj, data_path): setattr(obj, data_path, value)
+                obj.keyframe_insert(data_path=data_path, frame=frame, index=-1 if item.get("array_index") is None else int(item.get("array_index")))
+                inserted.append({"frame": frame, "data_path": data_path, "array_index": item.get("array_index")})
+            action = getattr(getattr(obj, "animation_data", None), "action", None)
+            if action: self.set_fcurve_interpolation(action.name, [{"data_path": item["data_path"], "array_index": item.get("array_index")} for item in keyframes], keyframes[0].get("interpolation", "BEZIER"))
+            return {"status": "success", "object_name": obj.name, "inserted": inserted, "action": action.name if action else None}
+        finally:
+            bpy.context.scene.frame_set(old_frame)
+    def edit_keyframes(self, action_name, edits, confirm=False):
+        if any(edit.get("operation") in {"delete", "delete_keyframe"} for edit in edits or []) and not confirm: return {"status": "requires_approval", "message": "Deleting keyframes requires confirmation."}
+        action, results = self._action(action_name), []
+        for edit in edits or []:
+            fcurve = phase9a_find_fcurve(action, edit.get("data_path"), int(edit.get("array_index", 0)))
+            if not fcurve: results.append({"operation": edit.get("operation"), "status": "missing_fcurve"}); continue
+            for point in list(fcurve.keyframe_points):
+                if float(point.co.x) == float(edit.get("frame", point.co.x)):
+                    if edit.get("operation") == "move_frame": point.co.x = float(edit["new_frame"])
+                    elif edit.get("operation") == "set_value": point.co.y = float(edit["value"])
+                    elif edit.get("operation") in {"delete", "delete_keyframe"}: fcurve.keyframe_points.remove(point)
+                    results.append({"operation": edit.get("operation"), "status": "success"})
+        return {"status": "success", "results": results}
+    def retime_action(self, action_name, frame_start, frame_end, new_start, new_end, confirm=False):
+        action = self._action(action_name)
+        if action.users and not confirm: return {"status": "requires_approval", "message": "Retiming a used action requires confirmation.", "action": action.name}
+        plan = phase9a_build_retime_plan(frame_start, frame_end, new_start, new_end)
+        for fcurve in phase9a_action_fcurves(action):
+            for point in fcurve.keyframe_points:
+                if frame_start <= point.co.x <= frame_end: point.co.x = new_start + ((point.co.x - frame_start) * plan["scale"])
+        return {"status": "success", "action": self.server.action_library_service._action_summary(action), "retime_plan": plan}
+    def set_fcurve_interpolation(self, action_name, fcurves=None, interpolation="BEZIER", easing=None):
+        normalized = phase9a_normalize_interpolation(interpolation, easing); action = self._action(action_name); changed = []
+        wanted = {(item.get("data_path"), item.get("array_index")) for item in (fcurves or [])}
+        for fcurve in phase9a_action_fcurves(action):
+            if wanted and (fcurve.data_path, fcurve.array_index) not in wanted and (fcurve.data_path, None) not in wanted: continue
+            for point in fcurve.keyframe_points:
+                point.interpolation = normalized["interpolation"]
+                if normalized.get("easing") and hasattr(point, "easing"): point.easing = normalized["easing"]
+            changed.append({"data_path": fcurve.data_path, "array_index": int(fcurve.array_index)})
+        return {"status": "success", "changed": changed}
+    def add_fcurve_modifier(self, action_name, data_path, array_index=0, modifier_type="CYCLES", settings=None):
+        plan = phase9a_build_fcurve_modifier_plan(modifier_type, settings); fcurve = phase9a_find_fcurve(self._action(action_name), data_path, int(array_index))
+        if not fcurve: return {"status": "error", "message": "F-curve not found."}
+        mod = fcurve.modifiers.new(type=plan["modifier_type"])
+        for key, value in (settings or {}).items():
+            if hasattr(mod, key): setattr(mod, key, value)
+        return {"status": "success", "modifier": {"type": mod.type, "name": mod.name}, "plan": plan}
+    def remove_fcurve_modifier(self, action_name, data_path, array_index=0, modifier_name=None, modifier_type=None, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Removing F-curve modifiers requires confirmation."}
+        fcurve = phase9a_find_fcurve(self._action(action_name), data_path, int(array_index))
+        if not fcurve: return {"status": "error", "message": "F-curve not found."}
+        removed = []
+        for mod in list(fcurve.modifiers):
+            if (modifier_name and mod.name == modifier_name) or (modifier_type and mod.type == modifier_type) or (not modifier_name and not modifier_type):
+                removed.append({"name": mod.name, "type": mod.type}); fcurve.modifiers.remove(mod)
+        return {"status": "success", "removed": removed}
+    def validate_fcurves(self, action_name):
+        action = self._action(action_name); fcurves = phase9a_action_fcurves(action); issues = [{"data_path": fcurve.data_path, "array_index": fcurve.array_index, "issue": "empty_fcurve"} for fcurve in fcurves if not fcurve.keyframe_points and not fcurve.modifiers]
+        return {"status": "success", "valid": not issues, "issues": issues, "fcurve_count": len(fcurves)}
+
+
+class NLAWorkflowService:
+    def __init__(self, server): self.server = server
+    def _object_anim(self, object_name):
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj: raise ValueError(f"Object not found: {object_name}")
+        if not obj.animation_data: obj.animation_data_create()
+        return obj, obj.animation_data
+    def _nla_tracks(self, anim):
+        return [{"name": track.name, "muted": bool(track.mute), "solo": bool(track.is_solo), "strips": [{"name": strip.name, "action": strip.action.name if strip.action else None, "frame_start": float(strip.frame_start), "frame_end": float(strip.frame_end), "blend_type": strip.blend_type, "muted": bool(strip.mute)} for strip in track.strips]} for track in getattr(anim, "nla_tracks", [])]
+    def create_nla_track(self, object_name, track_name):
+        obj, anim = self._object_anim(object_name)
+        if any(track.name == track_name for track in anim.nla_tracks): return {"status": "error", "message": f"NLA track already exists: {track_name}"}
+        track = anim.nla_tracks.new(); track.name = track_name
+        return {"status": "success", "object_name": obj.name, "track": {"name": track.name}}
+    def add_action_to_nla(self, object_name, action_name, track_name=None, strip_name=None, frame_start=1, frame_end=None, blend_type="REPLACE"):
+        obj, anim = self._object_anim(object_name); action = bpy.data.actions.get(action_name or "")
+        if not action: return {"status": "error", "message": f"Action not found: {action_name}"}
+        track = next((item for item in anim.nla_tracks if item.name == track_name), None) if track_name else None
+        if track is None: track = anim.nla_tracks.new(); track.name = track_name or f"{action.name}_Track"
+        end = float(frame_end if frame_end is not None else (frame_start + max(1.0, action.frame_range[1] - action.frame_range[0])))
+        strip = track.strips.new(strip_name or action.name, float(frame_start), action); strip.frame_end = end; strip.blend_type = blend_type
+        return {"status": "success", "object_name": obj.name, "track": track.name, "strip": {"name": strip.name, "frame_start": float(strip.frame_start), "frame_end": float(strip.frame_end)}}
+    def edit_nla_strip(self, object_name, track_name, strip_name, frame_start=None, frame_end=None, mute=None, blend_type=None):
+        obj, anim = self._object_anim(object_name)
+        for track in anim.nla_tracks:
+            if track.name == track_name:
+                for strip in track.strips:
+                    if strip.name == strip_name:
+                        if frame_start is not None: strip.frame_start = float(frame_start)
+                        if frame_end is not None: strip.frame_end = float(frame_end)
+                        if mute is not None: strip.mute = bool(mute)
+                        if blend_type: strip.blend_type = blend_type
+                        return {"status": "success", "object_name": obj.name, "strip": {"name": strip.name, "frame_start": float(strip.frame_start), "frame_end": float(strip.frame_end), "muted": bool(strip.mute)}}
+        return {"status": "error", "message": "NLA strip not found."}
+    def mute_nla_track(self, object_name, track_name, mute=True):
+        obj, anim = self._object_anim(object_name)
+        for track in anim.nla_tracks:
+            if track.name == track_name: track.mute = bool(mute); return {"status": "success", "object_name": obj.name, "track": {"name": track.name, "muted": bool(track.mute)}}
+        return {"status": "error", "message": "NLA track not found."}
+    def delete_nla_tracks(self, object_name, track_names, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Deleting NLA tracks requires confirmation.", "track_names": track_names}
+        obj, anim = self._object_anim(object_name); removed = []
+        for track in list(anim.nla_tracks):
+            if track.name in (track_names or []): removed.append(track.name); anim.nla_tracks.remove(track)
+        return {"status": "success", "object_name": obj.name, "removed": removed}
+    def validate_nla_stack(self, object_name):
+        obj, anim = self._object_anim(object_name); strips = [{"track_name": track.name, "name": strip.name, "frame_start": float(strip.frame_start), "frame_end": float(strip.frame_end)} for track in anim.nla_tracks for strip in track.strips]
+        result = phase9a_validate_nla_overlaps(strips); result.update({"object_name": obj.name, "tracks": self._nla_tracks(anim)}); return result
+
+
+class DriverDSLService:
+    def __init__(self, server): self.server = server
+    def validate_driver_dsl(self, dsl):
+        result = phase9a_validate_driver_dsl(dsl or {}); result["compiled"] = phase9a_compile_driver_expression(dsl or {}); return result
+    def _target_id(self, target_type, target_name):
+        target_type = str(target_type or "OBJECT").upper()
+        if target_type in {"OBJECT", "ARMATURE"}: return bpy.data.objects.get(target_name or "")
+        if target_type == "MATERIAL": return bpy.data.materials.get(target_name or "")
+        if target_type == "SHAPE_KEY": return bpy.data.shape_keys.get(target_name or "")
+        return None
+    def create_driver_from_dsl(self, target_type, target_name, data_path, dsl, array_index=-1, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Driver creation requires confirmation and allowlisted DSL.", "dsl": dsl}
+        target = self._target_id(target_type, target_name)
+        if not target: return {"status": "error", "message": f"Target not found: {target_type}:{target_name}"}
+        compiled = phase9a_compile_driver_expression(dsl or {}); fcurve = target.driver_add(data_path, int(array_index)) if int(array_index) >= 0 else target.driver_add(data_path)
+        driver = fcurve.driver; driver.type = "SCRIPTED"; driver.expression = compiled["expression"]; driver.variables.clear()
+        mapping = {"location.x": ("location", 0), "location.y": ("location", 1), "location.z": ("location", 2), "rotation_euler.x": ("rotation_euler", 0), "rotation_euler.y": ("rotation_euler", 1), "rotation_euler.z": ("rotation_euler", 2), "scale.x": ("scale", 0), "scale.y": ("scale", 1), "scale.z": ("scale", 2)}
+        for var_spec in compiled["variables"]:
+            var = driver.variables.new(); var.name = var_spec["name"]; var.targets[0].id = self._target_id(var_spec["target_type"], var_spec["target_name"])
+            data_path_mapped, index = mapping.get(var_spec["data_path"], (var_spec["data_path"], -1)); var.targets[0].data_path = data_path_mapped if index < 0 else f"{data_path_mapped}[{index}]"
+        return {"status": "success", "target": target_name, "data_path": data_path, "array_index": int(array_index), "driver": {"expression": driver.expression, "dsl_only": True, "operation": compiled["operation"]}}
+    def _drivers_for_id(self, datablock):
+        anim = getattr(datablock, "animation_data", None)
+        return [{"data_path": fcurve.data_path, "array_index": int(fcurve.array_index), "expression": fcurve.driver.expression, "variables": [var.name for var in fcurve.driver.variables]} for fcurve in (getattr(anim, "drivers", []) if anim else [])]
+    def list_drivers(self, target_type=None, target_name=None):
+        targets = [self._target_id(target_type, target_name)] if target_name else list(bpy.data.objects) + list(bpy.data.materials); rows = []
+        for target in [item for item in targets if item is not None]:
+            for driver in self._drivers_for_id(target): rows.append({"target_name": target.name, **driver})
+        return {"status": "success", "drivers": rows}
+    def get_driver_info(self, target_type, target_name, data_path, array_index=-1):
+        target = self._target_id(target_type, target_name)
+        if not target: return {"status": "error", "message": "Target not found."}
+        return {"status": "success", "drivers": [row for row in self._drivers_for_id(target) if row["data_path"] == data_path and (int(array_index) < 0 or row["array_index"] == int(array_index))]}
+    def remove_drivers(self, target_type, target_name, data_paths, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Removing drivers requires confirmation.", "data_paths": data_paths}
+        target = self._target_id(target_type, target_name)
+        if not target: return {"status": "error", "message": "Target not found."}
+        removed = []
+        for item in data_paths or []:
+            path = item.get("data_path") if isinstance(item, dict) else item; index = int(item.get("array_index", -1)) if isinstance(item, dict) else -1
+            try: target.driver_remove(path, index) if index >= 0 else target.driver_remove(path); removed.append({"data_path": path, "array_index": index})
+            except Exception as exc: removed.append({"data_path": path, "array_index": index, "error": str(exc)})
+        return {"status": "success", "removed": removed}
+
+
+class RigTemplateService:
+    def __init__(self, server): self.server = server
+    def create_rig_template(self, armature_name, template="basic_biped", bones=None, collection_name=None, location=None):
+        bones = bones or [{"name": "root", "head": [0, 0, 0], "tail": [0, 0, 1]}, {"name": "spine", "head": [0, 0, 1], "tail": [0, 0, 2], "parent": "root"}]
+        result = self.server.rigging_simulation_service.create_armature(armature_name=armature_name, bones=bones, collection_name=collection_name, location=location)
+        if result.get("status") == "success": result["template"] = template
+        return result
+    def create_control_bones(self, armature_name, controls=None): return {"status": "success", "armature_name": armature_name, "controls": controls or [], "classification": "metadata_control_recipe", "warnings": ["Control bones are recipe-backed by default."]}
+    def create_ik_chain(self, armature_name, owner_bone, target_object=None, target_bone=None, chain_count=2, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "IK chain creation requires confirmation and exact targets."}
+        return self.server.rig_validation_service.add_rig_constraint(armature_name, owner_bone, "IK", target_object=target_object, target_bone=target_bone, settings={"chain_count": chain_count})
+    def add_custom_rig_properties(self, armature_name, properties):
+        obj = bpy.data.objects.get(armature_name or "")
+        if not obj or obj.type != "ARMATURE": return {"status": "error", "message": f"Armature not found: {armature_name}"}
+        added = []
+        for prop in properties or []:
+            obj[prop.get("name")] = prop.get("default"); added.append(prop.get("name"))
+        return {"status": "success", "armature_name": obj.name, "properties": added}
+
+
+class RigValidationService:
+    def __init__(self, server): self.server = server
+    def add_rig_constraint(self, armature_name, bone_name, constraint_type, target_object=None, target_bone=None, settings=None):
+        obj = bpy.data.objects.get(armature_name or "")
+        if not obj or obj.type != "ARMATURE" or not obj.pose or bone_name not in obj.pose.bones: return {"status": "error", "message": "Armature or pose bone not found."}
+        bone = obj.pose.bones[bone_name]; con = bone.constraints.new(type=constraint_type)
+        if target_object: con.target = bpy.data.objects.get(target_object)
+        if target_bone and hasattr(con, "subtarget"): con.subtarget = target_bone
+        for key, value in (settings or {}).items():
+            if hasattr(con, key): setattr(con, key, value)
+        return {"status": "success", "constraint": {"name": con.name, "type": con.type, "owner_bone": bone.name, "target": target_object, "target_bone": target_bone}}
+    def remove_rig_constraints(self, armature_name, bone_name, constraint_names, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Removing rig constraints requires confirmation."}
+        obj = bpy.data.objects.get(armature_name or "")
+        if not obj or obj.type != "ARMATURE" or bone_name not in obj.pose.bones: return {"status": "error", "message": "Armature or pose bone not found."}
+        bone, removed = obj.pose.bones[bone_name], []
+        for con in list(bone.constraints):
+            if con.name in (constraint_names or []): removed.append(con.name); bone.constraints.remove(con)
+        return {"status": "success", "removed": removed}
+    def validate_rig(self, armature_name):
+        obj = bpy.data.objects.get(armature_name or "")
+        if not obj or obj.type != "ARMATURE": return {"status": "error", "message": f"Armature not found: {armature_name}"}
+        bones = [{"name": bone.name, "parent": bone.parent.name if bone.parent else None} for bone in obj.data.bones]; issues = []
+        for pose_bone in obj.pose.bones:
+            for con in pose_bone.constraints:
+                if hasattr(con, "target") and getattr(con, "target", None) is None and con.type in {"COPY_LOCATION", "COPY_ROTATION", "IK", "DAMPED_TRACK", "TRACK_TO", "CHILD_OF"}: issues.append({"bone": pose_bone.name, "constraint": con.name, "issue": "missing_target"})
+        return {"status": "success", "armature_name": obj.name, "bone_count": len(bones), "name_check": phase9a_validate_rig_names([b["name"] for b in bones]), "hierarchy_check": phase9a_validate_bone_hierarchy(bones), "constraint_issues": issues, "valid": not issues}
+
+
+class PoseLibraryWorkflowService:
+    def __init__(self, server): self.server = server; self.snapshots = {}; self.assets = {}
+    def inspect_pose(self, armature_name):
+        obj = bpy.data.objects.get(armature_name or "")
+        if not obj or obj.type != "ARMATURE": return {"status": "error", "message": f"Armature not found: {armature_name}"}
+        return {"status": "success", "armature_name": obj.name, "bones": {bone.name: {"location": list(bone.location), "rotation_euler": list(bone.rotation_euler), "scale": list(bone.scale)} for bone in obj.pose.bones}}
+    def create_pose_snapshot(self, armature_name, snapshot_id=None, include_custom_properties=True):
+        pose = self.inspect_pose(armature_name)
+        if pose.get("status") != "success": return pose
+        sid = snapshot_id or f"pose_{int(time.time() * 1000)}"; snapshot = {"snapshot_id": sid, "armature_name": armature_name, "frame": int(bpy.context.scene.frame_current), "bones": pose["bones"], "storage": "memory_manifest"}; self.snapshots[sid] = snapshot
+        return {"status": "success", "snapshot": snapshot}
+    def apply_pose_snapshot(self, snapshot_id, armature_name=None, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Applying a pose snapshot mutates pose data and requires confirmation.", "snapshot_id": snapshot_id}
+        snapshot = self.snapshots.get(snapshot_id)
+        if not snapshot: return {"status": "error", "message": f"Pose snapshot not found: {snapshot_id}"}
+        obj = bpy.data.objects.get(armature_name or snapshot["armature_name"])
+        if not obj or obj.type != "ARMATURE": return {"status": "error", "message": "Armature not found."}
+        applied = []
+        for name, data in snapshot["bones"].items():
+            if name in obj.pose.bones:
+                bone = obj.pose.bones[name]; bone.location = data["location"]; bone.rotation_euler = data["rotation_euler"]; bone.scale = data["scale"]; applied.append(name)
+        return {"status": "success", "applied_bones": applied}
+    def create_pose_asset(self, snapshot_id, asset_name, native_asset=False):
+        if snapshot_id not in self.snapshots: return {"status": "error", "message": f"Pose snapshot not found: {snapshot_id}"}
+        aid = f"pose_asset_{hashlib.sha256(asset_name.encode('utf-8')).hexdigest()[:12]}"; self.assets[aid] = {"asset_id": aid, "name": asset_name, "snapshot_id": snapshot_id, "native_asset": False, "storage": "manifest", "classification": "manifest_backed_pose_asset"}
+        return {"status": "success", "pose_asset": self.assets[aid], "warnings": ["Native pose asset creation is not claimed; this is manifest-backed."]}
+    def list_pose_assets(self, armature_name=None): return {"status": "success", "pose_assets": list(self.assets.values()), "storage": "manifest"}
+    def compare_poses(self, source_snapshot_id, target_snapshot_id):
+        a, b = self.snapshots.get(source_snapshot_id), self.snapshots.get(target_snapshot_id)
+        if not a or not b: return {"status": "error", "message": "Both pose snapshots must exist."}
+        changed = [name for name, pose in a["bones"].items() if b["bones"].get(name) != pose]
+        return {"status": "success", "source_id": source_snapshot_id, "target_id": target_snapshot_id, "changed_bones": changed, "max_delta": 0.0 if not changed else None}
+    def delete_pose_assets(self, asset_ids, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Deleting pose assets requires confirmation.", "asset_ids": asset_ids}
+        return {"status": "success", "removed": [aid for aid in (asset_ids or []) if self.assets.pop(aid, None) is not None]}
+
+
+class ShotWorkflowService:
+    def __init__(self, server): self.server = server; self.shot_plans = {}
+    def create_shot_range(self, name, frame_start, frame_end, camera_name=None, set_scene_range=False):
+        if frame_end < frame_start: return {"status": "error", "message": "frame_end must be >= frame_start"}
+        if camera_name and camera_name not in bpy.data.objects: return {"status": "error", "message": f"Camera not found: {camera_name}"}
+        if set_scene_range: bpy.context.scene.frame_start = int(frame_start); bpy.context.scene.frame_end = int(frame_end)
+        return {"status": "success", "shot_range": {"name": name, "frame_start": int(frame_start), "frame_end": int(frame_end), "camera_name": camera_name}}
+    def create_camera_cut(self, name, frame, camera_name):
+        camera = bpy.data.objects.get(camera_name or "")
+        if not camera or camera.type != "CAMERA": return {"status": "error", "message": f"Camera not found: {camera_name}"}
+        marker = bpy.context.scene.timeline_markers.new(name, frame=int(frame)); marker.camera = camera
+        return {"status": "success", "camera_cut": {"name": marker.name, "frame": int(marker.frame), "camera_name": camera.name}}
+    def create_timeline_marker(self, name, frame, camera_name=None):
+        marker = bpy.context.scene.timeline_markers.new(name, frame=int(frame))
+        if camera_name: marker.camera = bpy.data.objects.get(camera_name)
+        return {"status": "success", "marker": {"name": marker.name, "frame": int(marker.frame), "camera_name": marker.camera.name if marker.camera else None}}
+    def create_shot_plan(self, plan_name, ranges=None, cuts=None, markers=None):
+        plan = {"name": plan_name, "ranges": ranges or [], "cuts": cuts or [], "markers": markers or []}; self.shot_plans[plan_name] = plan; plan["validation"] = self.validate_shot_plan(plan_name)
+        return {"status": "success", "shot_plan": plan}
+    def validate_shot_plan(self, plan_name=None, plan=None):
+        plan = plan or self.shot_plans.get(plan_name or "")
+        if not plan: return {"status": "error", "message": "Shot plan not found."}
+        issues = []
+        for shot in plan.get("ranges", []):
+            if shot.get("frame_end", 0) < shot.get("frame_start", 0): issues.append({"severity": "error", "message": "Invalid shot range", "shot_name": shot.get("name")})
+            if shot.get("camera_name") and shot.get("camera_name") not in bpy.data.objects: issues.append({"severity": "error", "message": "Missing shot camera", "shot_name": shot.get("name")})
+        return {"status": "success", "valid": not issues, "issues": issues, "plan_name": plan.get("name")}
+
+
+class SimulationWorkflowService:
+    def __init__(self, server): self.server = server
+    def _cache_summary(self, point_cache): return {"frame_start": int(point_cache.frame_start), "frame_end": int(point_cache.frame_end), "is_baked": bool(getattr(point_cache, "is_baked", False)), "name": getattr(point_cache, "name", "")} if point_cache else None
+    def _object_simulation_summary(self, obj):
+        return {"modifiers": [{"name": mod.name, "type": mod.type, "cache": self._cache_summary(getattr(mod, "point_cache", None))} for mod in getattr(obj, "modifiers", []) if mod.type in {"CLOTH", "SOFT_BODY"}], "rigid_body": bool(getattr(obj, "rigid_body", None))}
+    def get_simulation_capabilities(self): result = self.server.animation_intelligence_advanced_service.get_animation_system_capabilities()["simulation"]; result["status"] = "success"; return result
+    def inspect_simulation_state(self, object_names=None):
+        names = object_names or [obj.name for obj in bpy.context.scene.objects]
+        return {"status": "success", "objects": [{"name": name, **self._object_simulation_summary(bpy.data.objects[name])} for name in names if name in bpy.data.objects], "rigid_body_world": bool(getattr(bpy.context.scene, "rigidbody_world", None))}
+    def configure_rigidbody_basic(self, object_name, body_type="ACTIVE", mass=1.0):
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj: return {"status": "error", "message": f"Object not found: {object_name}"}
+        bpy.context.view_layer.objects.active = obj; obj.select_set(True)
+        try: bpy.ops.rigidbody.object_add(type=body_type); obj.rigid_body.mass = float(mass); return {"status": "success", "object_name": obj.name, "rigid_body": {"type": obj.rigid_body.type, "mass": obj.rigid_body.mass}}
+        except Exception as exc: return {"status": "unsupported", "message": str(exc)}
+    def configure_cloth_simulation_advanced(self, object_name, frame_start=1, frame_end=48, settings=None):
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj or obj.type != "MESH": return {"status": "error", "message": f"Mesh object not found: {object_name}"}
+        mod = obj.modifiers.new("Overtli_Cloth_Advanced", "CLOTH"); cache = getattr(mod, "point_cache", None)
+        if cache: cache.frame_start = int(frame_start); cache.frame_end = int(frame_end)
+        for key, value in (settings or {}).items():
+            if hasattr(mod.settings, key): setattr(mod.settings, key, value)
+        return {"status": "success", "object_name": obj.name, "modifier": mod.name, "cache": self._cache_summary(cache), "bounded": True}
+    def configure_softbody_basic(self, object_name, frame_start=1, frame_end=48):
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj or obj.type != "MESH": return {"status": "error", "message": f"Mesh object not found: {object_name}"}
+        mod = obj.modifiers.new("Overtli_SoftBody_Basic", "SOFT_BODY"); cache = getattr(mod, "point_cache", None)
+        if cache: cache.frame_start = int(frame_start); cache.frame_end = int(frame_end)
+        return {"status": "success", "object_name": obj.name, "modifier": mod.name, "cache": self._cache_summary(cache)}
+    def configure_hair_curve_dynamics_basic(self, object_name, frame_start=1, frame_end=48): return {"status": "unsupported", "object_name": object_name, "message": "Hair curve dynamics are inspected but not configured automatically in Phase 9A."}
+    def get_simulation_cache_status(self, object_name=None):
+        names = [object_name] if object_name else [obj.name for obj in bpy.context.scene.objects]; rows = []
+        for name in names:
+            obj = bpy.data.objects.get(name or "")
+            if obj:
+                for mod in obj.modifiers:
+                    if hasattr(mod, "point_cache"): rows.append({"object_name": obj.name, "modifier": mod.name, "type": mod.type, "cache": self._cache_summary(mod.point_cache)})
+        return {"status": "success", "caches": rows}
+    def simulate_preview_range(self, object_name, frame_start=1, frame_end=24, max_frames=48, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Simulation preview changes evaluated frame and requires exact target confirmation.", "object_name": object_name}
+        return {"status": "success", "object_name": object_name, "frame_start": frame_start, "frame_end": min(frame_end, frame_start + max_frames - 1), "previewed": False, "warnings": ["Phase 9A reports bounded preview plan; cache baking is not run by default."]}
+    def bake_simulation_cache(self, object_name=None, world=False, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Simulation cache bake requires exact object/world target and confirmation.", "object_name": object_name, "world": world}
+        return {"status": "unsupported", "message": "Cache baking is approval-gated and not executed automatically in Phase 9A.", "object_name": object_name, "world": world}
+    def clear_simulation_cache(self, object_name=None, world=False, confirm=False):
+        if not confirm: return {"status": "requires_approval", "message": "Simulation cache clear requires exact object/world target and confirmation.", "object_name": object_name, "world": world}
+        return {"status": "unsupported", "message": "Cache clearing is approval-gated and not executed automatically in Phase 9A.", "object_name": object_name, "world": world}
+
+
+class MotionValidationService:
+    def __init__(self, server): self.server = server
+    def create_motion_path_preview(self, object_name, frame_start=None, frame_end=None):
+        obj = bpy.data.objects.get(object_name or "")
+        if not obj: return {"status": "error", "message": f"Object not found: {object_name}"}
+        return {"status": "success", "object_name": obj.name, "motion_path_preview": {"frame_start": frame_start or bpy.context.scene.frame_start, "frame_end": frame_end or bpy.context.scene.frame_end, "classification": "plan_only"}, "warnings": ["Motion path calculation is context-dependent; Phase 9A returns a bounded preview plan."]}
+    def validate_motion(self, object_names=None, include_rig=True, include_drivers=True, include_nla=True, include_simulation=True):
+        reports = []
+        for name in (object_names or [obj.name for obj in bpy.context.scene.objects]):
+            obj = bpy.data.objects.get(name)
+            if not obj: reports.append({"name": name, "status": "missing"}); continue
+            item = {"name": obj.name, "type": obj.type, "issues": []}
+            if include_drivers: item["drivers"] = self.server.driver_dsl_service.list_drivers("OBJECT", obj.name).get("drivers", [])
+            if include_nla and obj.animation_data: item["nla"] = self.server.nla_workflow_service.validate_nla_stack(obj.name)
+            if include_rig and obj.type == "ARMATURE": item["rig"] = self.server.rig_validation_service.validate_rig(obj.name)
+            if include_simulation: item["simulation"] = self.server.simulation_workflow_service._object_simulation_summary(obj)
+            reports.append(item)
+        return {"status": "success", "reports": reports}
+
+
+class AnimationRiggingWorkflowBatchService:
+    def __init__(self, server): self.server = server
+    def run_animation_rigging_workflow_batch(self, label=None, operations=None, stop_on_error=True, max_operations=40, allow_high_risk=False):
+        high = {"delete_actions", "delete_nla_tracks", "remove_drivers", "apply_pose_snapshot", "delete_pose_assets", "simulate_preview_range", "bake_simulation_cache", "clear_simulation_cache"}
+        handlers, results = self.server._build_command_handlers(), []
+        for op in (operations or [])[: int(max_operations)]:
+            command, params = op.get("command"), op.get("params", {})
+            if command not in handlers: result = {"status": "error", "message": f"Unknown command: {command}"}
+            elif command in high and not allow_high_risk: result = {"status": "blocked", "message": f"High-risk operation blocked in batch: {command}"}
+            else: result = handlers[command](**params)
+            results.append({"command": command, "result": result})
+            if stop_on_error and result.get("status") not in {"success", "unsupported", "requires_approval"}: break
+        return {"status": "success", "label": label, "results": results}
+
+
+PHASE9A_COMMANDS = ["get_animation_system_capabilities", "inspect_animation_system", "list_actions", "get_action_deep_info", "create_action", "duplicate_action", "rename_action", "assign_action", "delete_actions", "insert_keyframe_batch", "edit_keyframes", "retime_action", "set_fcurve_interpolation", "add_fcurve_modifier", "remove_fcurve_modifier", "validate_fcurves", "create_nla_track", "add_action_to_nla", "edit_nla_strip", "mute_nla_track", "delete_nla_tracks", "validate_nla_stack", "create_driver_from_dsl", "validate_driver_dsl", "list_drivers", "get_driver_info", "remove_drivers", "create_rig_template", "create_control_bones", "create_ik_chain", "add_rig_constraint", "remove_rig_constraints", "add_custom_rig_properties", "validate_rig", "inspect_pose", "create_pose_snapshot", "apply_pose_snapshot", "create_pose_asset", "list_pose_assets", "compare_poses", "delete_pose_assets", "create_shot_range", "create_camera_cut", "create_timeline_marker", "create_shot_plan", "validate_shot_plan", "create_motion_path_preview", "validate_motion", "get_simulation_capabilities", "inspect_simulation_state", "configure_rigidbody_basic", "configure_cloth_simulation_advanced", "configure_softbody_basic", "configure_hair_curve_dynamics_basic", "get_simulation_cache_status", "simulate_preview_range", "bake_simulation_cache", "clear_simulation_cache", "run_animation_rigging_workflow_batch"]
+
 
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
@@ -9882,6 +10512,18 @@ class BlenderMCPServer:
         self.cloth_pattern_workflow_service = ClothPatternWorkflowService(self)
         self.construction_validation_service = ConstructionValidationService(self)
         self.advanced_modeling_workflow_batch_service = AdvancedModelingWorkflowBatchService(self)
+        self.animation_intelligence_advanced_service = AnimationIntelligenceAdvancedService(self)
+        self.action_library_service = ActionLibraryService(self)
+        self.fcurve_editing_service = FCurveEditingService(self)
+        self.nla_workflow_service = NLAWorkflowService(self)
+        self.driver_dsl_service = DriverDSLService(self)
+        self.rig_template_service = RigTemplateService(self)
+        self.rig_validation_service = RigValidationService(self)
+        self.pose_library_workflow_service = PoseLibraryWorkflowService(self)
+        self.shot_workflow_service = ShotWorkflowService(self)
+        self.simulation_workflow_service = SimulationWorkflowService(self)
+        self.motion_validation_service = MotionValidationService(self)
+        self.animation_rigging_workflow_batch_service = AnimationRiggingWorkflowBatchService(self)
 
         for _name, _service in {
             "get_modeling_capabilities": self.mesh_schema_construction_service,
@@ -9920,6 +10562,65 @@ class BlenderMCPServer:
             "plan_construction_cleanup": self.construction_validation_service,
             "execute_construction_cleanup": self.construction_validation_service,
             "run_advanced_modeling_workflow_batch": self.advanced_modeling_workflow_batch_service,
+            "get_animation_system_capabilities": self.animation_intelligence_advanced_service,
+            "inspect_animation_system": self.animation_intelligence_advanced_service,
+            "list_actions": self.action_library_service,
+            "get_action_deep_info": self.action_library_service,
+            "create_action": self.action_library_service,
+            "duplicate_action": self.action_library_service,
+            "rename_action": self.action_library_service,
+            "assign_action": self.action_library_service,
+            "delete_actions": self.action_library_service,
+            "insert_keyframe_batch": self.fcurve_editing_service,
+            "edit_keyframes": self.fcurve_editing_service,
+            "retime_action": self.fcurve_editing_service,
+            "set_fcurve_interpolation": self.fcurve_editing_service,
+            "add_fcurve_modifier": self.fcurve_editing_service,
+            "remove_fcurve_modifier": self.fcurve_editing_service,
+            "validate_fcurves": self.fcurve_editing_service,
+            "create_nla_track": self.nla_workflow_service,
+            "add_action_to_nla": self.nla_workflow_service,
+            "edit_nla_strip": self.nla_workflow_service,
+            "mute_nla_track": self.nla_workflow_service,
+            "delete_nla_tracks": self.nla_workflow_service,
+            "validate_nla_stack": self.nla_workflow_service,
+            "create_driver_from_dsl": self.driver_dsl_service,
+            "validate_driver_dsl": self.driver_dsl_service,
+            "list_drivers": self.driver_dsl_service,
+            "get_driver_info": self.driver_dsl_service,
+            "remove_drivers": self.driver_dsl_service,
+            "create_rig_template": self.rig_template_service,
+            "create_control_bones": self.rig_template_service,
+            "create_ik_chain": self.rig_template_service,
+            "add_rig_constraint": self.rig_validation_service,
+            "remove_rig_constraints": self.rig_validation_service,
+            "add_custom_rig_properties": self.rig_template_service,
+            "validate_rig": self.rig_validation_service,
+            "inspect_pose": self.pose_library_workflow_service,
+            "create_pose_snapshot": self.pose_library_workflow_service,
+            "apply_pose_snapshot": self.pose_library_workflow_service,
+            "create_pose_asset": self.pose_library_workflow_service,
+            "list_pose_assets": self.pose_library_workflow_service,
+            "compare_poses": self.pose_library_workflow_service,
+            "delete_pose_assets": self.pose_library_workflow_service,
+            "create_shot_range": self.shot_workflow_service,
+            "create_camera_cut": self.shot_workflow_service,
+            "create_timeline_marker": self.shot_workflow_service,
+            "create_shot_plan": self.shot_workflow_service,
+            "validate_shot_plan": self.shot_workflow_service,
+            "create_motion_path_preview": self.motion_validation_service,
+            "validate_motion": self.motion_validation_service,
+            "get_simulation_capabilities": self.simulation_workflow_service,
+            "inspect_simulation_state": self.simulation_workflow_service,
+            "configure_rigidbody_basic": self.simulation_workflow_service,
+            "configure_cloth_simulation_advanced": self.simulation_workflow_service,
+            "configure_softbody_basic": self.simulation_workflow_service,
+            "configure_hair_curve_dynamics_basic": self.simulation_workflow_service,
+            "get_simulation_cache_status": self.simulation_workflow_service,
+            "simulate_preview_range": self.simulation_workflow_service,
+            "bake_simulation_cache": self.simulation_workflow_service,
+            "clear_simulation_cache": self.simulation_workflow_service,
+            "run_animation_rigging_workflow_batch": self.animation_rigging_workflow_batch_service,
             "get_bake_capabilities": self.bake_capabilities_service,
             "validate_bake_setup": self.bake_preflight_service,
             "estimate_bake_cost": self.bake_preflight_service,
@@ -10589,6 +11290,65 @@ class BlenderMCPServer:
             "plan_construction_cleanup": self.plan_construction_cleanup,
             "execute_construction_cleanup": self.execute_construction_cleanup,
             "run_advanced_modeling_workflow_batch": self.run_advanced_modeling_workflow_batch,
+            "get_animation_system_capabilities": self.get_animation_system_capabilities,
+            "inspect_animation_system": self.inspect_animation_system,
+            "list_actions": self.list_actions,
+            "get_action_deep_info": self.get_action_deep_info,
+            "create_action": self.create_action,
+            "duplicate_action": self.duplicate_action,
+            "rename_action": self.rename_action,
+            "assign_action": self.assign_action,
+            "delete_actions": self.delete_actions,
+            "insert_keyframe_batch": self.insert_keyframe_batch,
+            "edit_keyframes": self.edit_keyframes,
+            "retime_action": self.retime_action,
+            "set_fcurve_interpolation": self.set_fcurve_interpolation,
+            "add_fcurve_modifier": self.add_fcurve_modifier,
+            "remove_fcurve_modifier": self.remove_fcurve_modifier,
+            "validate_fcurves": self.validate_fcurves,
+            "create_nla_track": self.create_nla_track,
+            "add_action_to_nla": self.add_action_to_nla,
+            "edit_nla_strip": self.edit_nla_strip,
+            "mute_nla_track": self.mute_nla_track,
+            "delete_nla_tracks": self.delete_nla_tracks,
+            "validate_nla_stack": self.validate_nla_stack,
+            "create_driver_from_dsl": self.create_driver_from_dsl,
+            "validate_driver_dsl": self.validate_driver_dsl,
+            "list_drivers": self.list_drivers,
+            "get_driver_info": self.get_driver_info,
+            "remove_drivers": self.remove_drivers,
+            "create_rig_template": self.create_rig_template,
+            "create_control_bones": self.create_control_bones,
+            "create_ik_chain": self.create_ik_chain,
+            "add_rig_constraint": self.add_rig_constraint,
+            "remove_rig_constraints": self.remove_rig_constraints,
+            "add_custom_rig_properties": self.add_custom_rig_properties,
+            "validate_rig": self.validate_rig,
+            "inspect_pose": self.inspect_pose,
+            "create_pose_snapshot": self.create_pose_snapshot,
+            "apply_pose_snapshot": self.apply_pose_snapshot,
+            "create_pose_asset": self.create_pose_asset,
+            "list_pose_assets": self.list_pose_assets,
+            "compare_poses": self.compare_poses,
+            "delete_pose_assets": self.delete_pose_assets,
+            "create_shot_range": self.create_shot_range,
+            "create_camera_cut": self.create_camera_cut,
+            "create_timeline_marker": self.create_timeline_marker,
+            "create_shot_plan": self.create_shot_plan,
+            "validate_shot_plan": self.validate_shot_plan,
+            "create_motion_path_preview": self.create_motion_path_preview,
+            "validate_motion": self.validate_motion,
+            "get_simulation_capabilities": self.get_simulation_capabilities,
+            "inspect_simulation_state": self.inspect_simulation_state,
+            "configure_rigidbody_basic": self.configure_rigidbody_basic,
+            "configure_cloth_simulation_advanced": self.configure_cloth_simulation_advanced,
+            "configure_softbody_basic": self.configure_softbody_basic,
+            "configure_hair_curve_dynamics_basic": self.configure_hair_curve_dynamics_basic,
+            "get_simulation_cache_status": self.get_simulation_cache_status,
+            "simulate_preview_range": self.simulate_preview_range,
+            "bake_simulation_cache": self.bake_simulation_cache,
+            "clear_simulation_cache": self.clear_simulation_cache,
+            "run_animation_rigging_workflow_batch": self.run_animation_rigging_workflow_batch,
             "get_timeline_info": self.get_timeline_info,
             "list_animated_objects": self.list_animated_objects,
             "get_animation_deep_info": self.get_animation_deep_info,

@@ -45,6 +45,15 @@ TOOL_PACK_DEFINITIONS = {
     "reference_construction": ToolPack("reference_construction", "Reference Construction", "Reference-driven modeling plans, calibrated measurements, construction steps, and alignment checks.", ("reference_construction", "references", "spatial_measurement")),
     "sculpt_workflows": ToolPack("sculpt_workflows", "Sculpt Workflows", "Sculpt session setup, masks, face sets, shape-key variants, and gated stroke batches.", ("sculpt_workflows", "verified_editing")),
     "cloth_patterns": ToolPack("cloth_patterns", "Cloth Patterns", "Pattern panels, seams, pins, collision setup, and gated cloth preview/cache operations.", ("cloth_patterns", "cache_management")),
+    "advanced_animation": ToolPack("advanced_animation", "Advanced Animation", "Animation system inspection, keyframe batches, F-curve editing, retime plans, and motion previews.", ("advanced_animation", "animation", "motion_validation")),
+    "action_library": ToolPack("action_library", "Action Library", "Action inventory, deep info, create, duplicate, rename, assign, and approval-gated deletion.", ("action_library", "advanced_animation")),
+    "nla_workflows": ToolPack("nla_workflows", "NLA Workflows", "Non-linear animation tracks, strips, muting, validation, and guarded deletion.", ("nla_workflows", "advanced_animation")),
+    "drivers": ToolPack("drivers", "Drivers", "Allowlisted driver DSL validation, creation, inspection, and approval-gated removal.", ("drivers", "advanced_animation", "rigging")),
+    "rigging": ToolPack("rigging", "Rigging", "Rig templates, control recipes, IK constraints, custom rig properties, and rig validation.", ("rigging",)),
+    "pose_library": ToolPack("pose_library", "Pose Library", "Pose inspection, manifest-backed snapshots, pose assets, comparison, and guarded application/deletion.", ("pose_library", "rigging")),
+    "shot_workflows": ToolPack("shot_workflows", "Shot Workflows", "Shot ranges, camera cuts, timeline markers, shot plans, and validation.", ("shot_workflows", "rendering")),
+    "simulation_workflows": ToolPack("simulation_workflows", "Simulation Workflows", "Simulation capabilities, bounded setup, cache status, and approval-gated preview/bake/clear.", ("simulation_workflows", "cache_management", "cloth_patterns")),
+    "motion_validation": ToolPack("motion_validation", "Motion Validation", "Motion, driver, NLA, rig, shot, and simulation validation reports.", ("motion_validation", "advanced_animation", "rigging")),
 }
 
 

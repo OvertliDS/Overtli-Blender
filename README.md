@@ -20,6 +20,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 7C project runtime foundation: saved/unsaved `.blend` workspace resolution, approved-root file access, cache retention planning, task graph and scene revision tracking, reference image calibration, spatial measurement, and safe rename planning
 - Phase 8A texture baking and image resource pipeline: bake capability detection, preflight, bake target images, native/derived/approximated map classification, channel packing, baked texture validation, baked material variants, and approval-gated cleanup planning
 - Phase 8B advanced modeling workflows: validated mesh schemas, profile/extrude/lathe/loft surfaces, curve/path pipe construction, non-destructive modifier stacks, reference construction planning, shape-key-first sculpt setup, cloth pattern panels, construction validation, and gated cleanup/cache actions
+- Phase 9A animation and rigging workflows: action library tools, keyframe/F-Curve editing, NLA track/strip workflows, allowlisted driver DSL, rig templates, IK/constraint/custom-property helpers, pose snapshots/assets, shot plans, simulation inspection/configuration, cache approval gates, and motion validation
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -162,6 +163,14 @@ Phase 6B addon and knowledge workflow smoke:
 The Phase 6B smoke exercises addon status/list/info, local Blender Python API docs inspection/index/search, verified snippet metadata, local skill pack manifests, review package export/validation, and a non-destructive advanced knowledge workflow batch. It uses the local docs mirror at `memory_bank/research/blender_python_reference_5_1_md` when present and writes ignored knowledge, snippet, skill pack, addon-dev, and review artifacts under `.overtli_blender/`. It does not install addons by default, does not enable/disable/remove addons, does not execute snippets by default, does not publish private docs, does not run raw code, and does not run provider downloads.
 
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
+
+Phase 9A animation, rigging, and simulation smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase9a-full
+```
+
+The Phase 9A smoke creates temporary `OVERTLI_PHASE9A_*` scene data, exercises action, keyframe, F-Curve, driver DSL validation, rig, pose, shot, simulation, and motion validation paths, and verifies that driver creation, pose application, simulation preview, and cache clearing require approval by default.
 
 ## Upstream Credit
 

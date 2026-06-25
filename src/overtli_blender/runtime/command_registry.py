@@ -42,6 +42,14 @@ CATEGORIES = {
     "sculpt_workflows",
     "cloth_patterns",
     "construction_validation",
+    "advanced_animation",
+    "action_library",
+    "nla_workflows",
+    "drivers",
+    "pose_library",
+    "shot_workflows",
+    "simulation_workflows",
+    "motion_validation",
 }
 
 TOOL_PACKS = {
@@ -65,6 +73,15 @@ TOOL_PACKS = {
     "reference_construction",
     "sculpt_workflows",
     "cloth_patterns",
+    "advanced_animation",
+    "action_library",
+    "nla_workflows",
+    "drivers",
+    "rigging",
+    "pose_library",
+    "shot_workflows",
+    "simulation_workflows",
+    "motion_validation",
 }
 
 GOVERNANCE_COMMANDS = {
@@ -149,6 +166,8 @@ def _category(name: str, operation_type: str) -> str:
         if any(marker in lowered for marker in ("construction", "alignment")):
             return "reference_construction"
         return "references"
+    if lowered == "simulate_preview_range" or any(marker in lowered for marker in ("simulation", "rigidbody", "softbody", "hair_curve")):
+        return "simulation_workflows"
     if any(marker in lowered for marker in ("cloth", "seam", "pin_group", "collision_setup", "cloth_cache")):
         return "cloth_patterns"
     if any(marker in lowered for marker in ("sculpt_session", "sculpt_mask", "face_set", "sculpt_stroke", "sculpt_result", "shape_key_sculpt")):
@@ -157,6 +176,24 @@ def _category(name: str, operation_type: str) -> str:
         return "advanced_modeling"
     if any(marker in lowered for marker in ("construction_geometry", "construction_cleanup")):
         return "construction_validation"
+    if "animation_system" in lowered:
+        return "advanced_animation"
+    if "animation_rigging_workflow_batch" in lowered:
+        return "advanced_animation"
+    if any(marker in lowered for marker in ("action", "keyframe", "fcurve")):
+        return "action_library" if "action" in lowered else "advanced_animation"
+    if "nla" in lowered:
+        return "nla_workflows"
+    if "driver" in lowered:
+        return "drivers"
+    if any(marker in lowered for marker in ("rig_template", "control_bones", "ik_chain", "rig_constraint", "custom_rig", "validate_rig")):
+        return "rigging"
+    if "pose" in lowered:
+        return "pose_library"
+    if any(marker in lowered for marker in ("shot", "camera_cut", "timeline_marker")):
+        return "shot_workflows"
+    if "motion" in lowered:
+        return "motion_validation"
     if any(marker in lowered for marker in ("distance", "angle", "area", "volume", "unit", "bounds", "raycast", "nearest", "intersection", "clearance", "alignment", "scale_ratio", "measurement")):
         return "spatial_measurement"
     if any(marker in lowered for marker in ("cache", "artifact", "orphan")):
@@ -219,6 +256,8 @@ def _tool_pack(category: str) -> str:
         return "sculpt_workflows"
     if category == "cloth_patterns":
         return "cloth_patterns"
+    if category in {"advanced_animation", "action_library", "nla_workflows", "drivers", "rigging", "pose_library", "shot_workflows", "simulation_workflows", "motion_validation"}:
+        return category
     if category in {"core", "project", "workspace", "diagnostics"}:
         return "core"
     if category in {"scene", "verification", "selection", "deformation", "sculpting"}:
@@ -266,6 +305,20 @@ def _capabilities(metadata: Any, name: str, category: str) -> tuple[str, ...]:
         caps.add("sculpt.workflow")
     if category == "cloth_patterns":
         caps.add("simulation.cloth")
+    if category in {"advanced_animation", "action_library", "nla_workflows"}:
+        caps.add("animation.write" if metadata.can_mutate_scene else "animation.read")
+    if category == "drivers":
+        caps.add("drivers.write" if metadata.can_mutate_scene else "drivers.read")
+    if category == "rigging":
+        caps.add("rigging.write" if metadata.can_mutate_scene else "rigging.read")
+    if category == "pose_library":
+        caps.add("pose.write" if metadata.can_mutate_scene else "pose.read")
+    if category == "shot_workflows":
+        caps.add("shots.write" if metadata.can_mutate_scene else "shots.read")
+    if category == "simulation_workflows":
+        caps.add("simulation.write" if metadata.can_mutate_scene else "simulation.read")
+    if category == "motion_validation":
+        caps.add("motion.validate")
     if category == "knowledge":
         caps.add("knowledge.read")
         if metadata.can_write_files:
