@@ -6,7 +6,9 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 ## What It Does
 
 - Scene and object inspection
+- Rich Phase 2 scene index, object deep inspection, selection inspection, and scene health diagnostics
 - Viewport screenshots
+- Multi-view screenshot packs and verification snapshot manifests under `.overtli_blender/verification/`
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -50,6 +52,14 @@ overtli-blender
 The addon socket smoke runs directly against Blender and does not require MCP client setup.
 
 See [docs/runtime_smoke.md](docs/runtime_smoke.md).
+
+Phase 2 verification smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase2-full
+```
+
+Generated verification artifacts are written under `.overtli_blender/verification/` and are ignored by git.
 
 ## Upstream Credit
 

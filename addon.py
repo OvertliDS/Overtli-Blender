@@ -14,6 +14,7 @@ import traceback
 import os
 import shutil
 import zipfile
+import re
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty
 import io
 from contextlib import redirect_stdout, suppress
@@ -93,6 +94,13 @@ except ModuleNotFoundError:
             "get_geometry_nodes_status": _fallback_spec("get_geometry_nodes_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
             "get_safety_status": _fallback_spec("get_safety_status", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
             "get_viewport_screenshot": _fallback_spec("get_viewport_screenshot", "CAMERA", RiskLevel.MEDIUM, "REVERSIBLE", warnings=("viewport-context-dependent",)),
+            "get_scene_index": _fallback_spec("get_scene_index", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "get_object_deep_info": _fallback_spec("get_object_deep_info", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "get_selection_info": _fallback_spec("get_selection_info", "OBSERVE", RiskLevel.LOW, "REVERSIBLE"),
+            "get_scene_health": _fallback_spec("get_scene_health", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "capture_viewport_pack": _fallback_spec("capture_viewport_pack", "CAMERA", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True, warnings=("writes-local-verification-artifacts", "viewport-context-dependent")),
+            "create_verification_snapshot": _fallback_spec("create_verification_snapshot", "VERIFY", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True, warnings=("writes-local-verification-artifacts",)),
+            "list_verification_snapshots": _fallback_spec("list_verification_snapshots", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
             "create_object_handle": _fallback_spec("create_object_handle", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "create_material_handle": _fallback_spec("create_material_handle", "MATERIAL", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "register_context_script": _fallback_spec("register_context_script", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
@@ -787,6 +795,681 @@ class ViewportScreenshotService:
             }
         except Exception as e:
             return {"error": str(e)}
+
+
+class SceneIntelligenceService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _vector(value, digits=4):
+        return [round(float(component), digits) for component in value]
+
+    @staticmethod
+    def _matrix(value, digits=4):
+        return [[round(float(component), digits) for component in row] for row in value]
+
+    @staticmethod
+    def _collection_names(obj):
+        return [collection.name for collection in getattr(obj, "users_collection", [])]
+
+    @staticmethod
+    def _material_names(obj):
+        names = []
+        for slot in getattr(obj, "material_slots", []):
+            if slot.material:
+                names.append(slot.material.name)
+        return names
+
+    @staticmethod
+    def _modifier_names(obj):
+        return [modifier.name for modifier in getattr(obj, "modifiers", [])]
+
+    @staticmethod
+    def _constraint_names(obj):
+        return [constraint.name for constraint in getattr(obj, "constraints", [])]
+
+    def _world_bounds(self, obj):
+        if not hasattr(obj, "bound_box") or not obj.bound_box:
+            return None
+
+        corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box]
+        if not corners:
+            return None
+
+        min_corner = [min(corner[index] for corner in corners) for index in range(3)]
+        max_corner = [max(corner[index] for corner in corners) for index in range(3)]
+        center = [(min_corner[index] + max_corner[index]) / 2 for index in range(3)]
+        size = [max_corner[index] - min_corner[index] for index in range(3)]
+        return {
+            "min": self._vector(min_corner),
+            "max": self._vector(max_corner),
+            "center": self._vector(center),
+            "size": self._vector(size),
+        }
+
+    def _object_summary(self, obj, include_materials=True, include_modifiers=True, include_constraints=True):
+        active = bpy.context.view_layer.objects.active
+        summary = {
+            "name": obj.name,
+            "type": obj.type,
+            "visible": bool(obj.visible_get()),
+            "hidden_viewport": bool(obj.hide_viewport),
+            "selected": bool(obj.select_get()),
+            "active": active == obj,
+            "collection_names": self._collection_names(obj),
+            "parent": obj.parent.name if obj.parent else None,
+            "children": [child.name for child in obj.children],
+            "location": self._vector(obj.location),
+            "rotation_euler": self._vector(obj.rotation_euler),
+            "scale": self._vector(obj.scale),
+            "dimensions": self._vector(obj.dimensions),
+            "bound_box_world": self._world_bounds(obj),
+        }
+        if include_materials:
+            summary["material_names"] = self._material_names(obj)
+        if include_modifiers:
+            summary["modifier_names"] = self._modifier_names(obj)
+        if include_constraints:
+            summary["constraint_names"] = self._constraint_names(obj)
+        return summary
+
+    def _collection_summary(self, collection):
+        return {
+            "name": collection.name,
+            "object_count": len(collection.objects),
+            "children": [child.name for child in collection.children],
+            "hide_viewport": bool(collection.hide_viewport),
+        }
+
+    def _material_summary(self, material):
+        return {
+            "name": material.name,
+            "use_nodes": bool(material.use_nodes),
+            "users": int(material.users),
+        }
+
+    def get_scene_index(
+        self,
+        include_hidden=True,
+        include_materials=True,
+        include_modifiers=True,
+        include_constraints=True,
+        include_collections=True,
+        max_objects=None,
+    ):
+        warnings = []
+        scene = bpy.context.scene
+        objects = list(scene.objects)
+        if not include_hidden:
+            objects = [obj for obj in objects if obj.visible_get()]
+
+        truncated = False
+        if max_objects is not None:
+            try:
+                max_count = max(0, int(max_objects))
+                if len(objects) > max_count:
+                    objects = objects[:max_count]
+                    truncated = True
+                    warnings.append(f"Scene index truncated to {max_count} objects")
+            except (TypeError, ValueError):
+                warnings.append(f"Ignoring invalid max_objects value: {max_objects!r}")
+
+        scene_data = {
+            "name": scene.name,
+            "frame_current": int(scene.frame_current),
+            "frame_start": int(scene.frame_start),
+            "frame_end": int(scene.frame_end),
+            "unit_system": scene.unit_settings.system,
+            "render_engine": scene.render.engine,
+            "object_count": len(scene.objects),
+            "collection_count": len(bpy.data.collections),
+            "material_count": len(bpy.data.materials),
+            "camera_count": sum(1 for obj in scene.objects if obj.type == "CAMERA"),
+            "light_count": sum(1 for obj in scene.objects if obj.type == "LIGHT"),
+        }
+
+        return {
+            "status": "success",
+            "scene": scene_data,
+            "objects": [
+                self._object_summary(obj, include_materials, include_modifiers, include_constraints)
+                for obj in objects
+            ],
+            "collections": [self._collection_summary(collection) for collection in bpy.data.collections] if include_collections else [],
+            "materials": [self._material_summary(material) for material in bpy.data.materials] if include_materials else [],
+            "warnings": warnings,
+            "truncated": truncated,
+        }
+
+    def _mesh_stats(self, obj):
+        mesh = obj.data
+        return {
+            "vertices": len(mesh.vertices),
+            "edges": len(mesh.edges),
+            "polygons": len(mesh.polygons),
+            "triangles_estimate": sum(max(1, len(poly.vertices) - 2) for poly in mesh.polygons),
+        }
+
+    def _modifier_details(self, obj):
+        return [
+            {
+                "name": modifier.name,
+                "type": modifier.type,
+                "show_viewport": bool(modifier.show_viewport),
+                "show_render": bool(modifier.show_render),
+            }
+            for modifier in getattr(obj, "modifiers", [])
+        ]
+
+    def _constraint_details(self, obj):
+        return [
+            {
+                "name": constraint.name,
+                "type": constraint.type,
+                "mute": bool(constraint.mute),
+                "influence": round(float(constraint.influence), 4),
+            }
+            for constraint in getattr(obj, "constraints", [])
+        ]
+
+    def _material_slots(self, obj):
+        materials = []
+        for index, slot in enumerate(getattr(obj, "material_slots", [])):
+            material = slot.material
+            materials.append({
+                "slot_index": index,
+                "slot_name": slot.name,
+                "material_name": material.name if material else None,
+                "use_nodes": bool(material.use_nodes) if material else False,
+            })
+        return materials
+
+    def _animation_summary(self, obj):
+        animation_data = obj.animation_data
+        if not animation_data:
+            return {"has_animation_data": False}
+        action = animation_data.action
+        return {
+            "has_animation_data": True,
+            "action": action.name if action else None,
+            "fcurve_count": len(action.fcurves) if action else 0,
+            "nla_track_count": len(animation_data.nla_tracks),
+        }
+
+    def _custom_properties(self, obj):
+        properties = {}
+        for key in obj.keys():
+            if key == "_RNA_UI":
+                continue
+            value = obj.get(key)
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                properties[key] = value
+            else:
+                properties[key] = str(value)
+        return properties
+
+    def _type_specific_info(self, obj):
+        data = getattr(obj, "data", None)
+        if obj.type == "CAMERA" and data:
+            return {
+                "lens": round(float(data.lens), 4),
+                "sensor_width": round(float(data.sensor_width), 4),
+                "clip_start": round(float(data.clip_start), 4),
+                "clip_end": round(float(data.clip_end), 4),
+                "dof_enabled": bool(data.dof.use_dof),
+            }
+        if obj.type == "LIGHT" and data:
+            return {
+                "light_type": data.type,
+                "energy": round(float(data.energy), 4),
+                "color": self._vector(data.color),
+                "use_shadow": bool(getattr(data, "use_shadow", False)),
+            }
+        if obj.type == "CURVE" and data:
+            return {"spline_count": len(data.splines), "dimensions": data.dimensions}
+        if obj.type == "ARMATURE" and data:
+            return {"bone_count": len(data.bones)}
+        if obj.type == "EMPTY":
+            return {"empty_display_type": obj.empty_display_type}
+        return {}
+
+    def get_object_deep_info(
+        self,
+        object_name=None,
+        name=None,
+        include_mesh_stats=True,
+        include_material_slots=True,
+        include_modifiers=True,
+        include_constraints=True,
+        include_animation=True,
+        include_custom_properties=True,
+    ):
+        target_name = object_name or name
+        if not target_name:
+            return {"status": "error", "message": "object_name is required"}
+
+        obj = bpy.data.objects.get(target_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {target_name}"}
+
+        info = {
+            "name": obj.name,
+            "type": obj.type,
+            "data_name": obj.data.name if getattr(obj, "data", None) else None,
+            "parent": obj.parent.name if obj.parent else None,
+            "children": [child.name for child in obj.children],
+            "collection_names": self._collection_names(obj),
+            "visible": bool(obj.visible_get()),
+            "selected": bool(obj.select_get()),
+            "active": bpy.context.view_layer.objects.active == obj,
+            "transform": {
+                "location": self._vector(obj.location),
+                "rotation_euler": self._vector(obj.rotation_euler),
+                "scale": self._vector(obj.scale),
+                "matrix_world": self._matrix(obj.matrix_world),
+            },
+            "dimensions": self._vector(obj.dimensions),
+            "bounding_box": self._world_bounds(obj),
+            "type_specific": self._type_specific_info(obj),
+        }
+        if include_mesh_stats and obj.type == "MESH" and obj.data:
+            info["mesh_stats"] = self._mesh_stats(obj)
+        if include_material_slots:
+            info["materials"] = self._material_slots(obj)
+        if include_modifiers:
+            info["modifiers"] = self._modifier_details(obj)
+        if include_constraints:
+            info["constraints"] = self._constraint_details(obj)
+        if include_animation:
+            info["animation"] = self._animation_summary(obj)
+        if include_custom_properties:
+            info["custom_properties"] = self._custom_properties(obj)
+
+        return {"status": "success", "object": info, "warnings": []}
+
+    def get_selection_info(self):
+        selected = list(bpy.context.selected_objects)
+        active = bpy.context.view_layer.objects.active
+        bounds = None
+        warnings = []
+
+        if selected:
+            object_bounds = [self._world_bounds(obj) for obj in selected]
+            object_bounds = [bound for bound in object_bounds if bound]
+            if object_bounds:
+                min_corner = [min(bound["min"][index] for bound in object_bounds) for index in range(3)]
+                max_corner = [max(bound["max"][index] for bound in object_bounds) for index in range(3)]
+                center = [(min_corner[index] + max_corner[index]) / 2 for index in range(3)]
+                size = [max_corner[index] - min_corner[index] for index in range(3)]
+                bounds = {
+                    "min": self._vector(min_corner),
+                    "max": self._vector(max_corner),
+                    "center": self._vector(center),
+                    "size": self._vector(size),
+                }
+
+        mode = getattr(bpy.context, "mode", "UNKNOWN")
+        if mode != "OBJECT":
+            warnings.append("Edit-mode component selection details are not implemented; object selection was reported without changing mode")
+
+        return {
+            "status": "success",
+            "active_object": active.name if active else None,
+            "selected_objects": [obj.name for obj in selected],
+            "selected_count": len(selected),
+            "mode": mode,
+            "selection_bounds": bounds,
+            "objects": [
+                {
+                    "name": obj.name,
+                    "type": obj.type,
+                    "visible": bool(obj.visible_get()),
+                    "dimensions": self._vector(obj.dimensions),
+                }
+                for obj in selected
+            ],
+            "warnings": warnings,
+        }
+
+    def get_scene_health(self):
+        scene = bpy.context.scene
+        objects = list(scene.objects)
+        mesh_objects = [obj for obj in objects if obj.type == "MESH"]
+        hidden = [obj for obj in objects if obj.hide_viewport or not obj.visible_get()]
+        no_material = [obj for obj in mesh_objects if not self._material_names(obj)]
+        negative_scale = [obj for obj in objects if any(float(axis) < 0 for axis in obj.scale)]
+        unapplied_scale = [obj for obj in objects if any(abs(float(axis) - 1.0) > 0.001 for axis in obj.scale)]
+        missing_mesh_data = [obj for obj in mesh_objects if obj.data is None]
+        far_from_origin = [obj for obj in objects if obj.location.length > 10000]
+        empty_collections = [collection for collection in bpy.data.collections if len(collection.objects) == 0 and len(collection.children) == 0]
+        issues = []
+
+        def add_issue(severity, code, message, issue_objects=None):
+            issues.append({
+                "severity": severity,
+                "code": code,
+                "message": message,
+                "objects": [obj.name for obj in issue_objects or []],
+            })
+
+        if not any(obj.type == "CAMERA" for obj in objects):
+            add_issue("warning", "NO_CAMERA", "Scene has no camera")
+        if not any(obj.type == "LIGHT" for obj in objects):
+            add_issue("info", "NO_LIGHTS", "Scene has no lights")
+        if no_material:
+            add_issue("info", "MISSING_MATERIALS", f"{len(no_material)} mesh object(s) have no material slots", no_material[:20])
+        if hidden:
+            add_issue("info", "HIDDEN_OBJECTS", f"{len(hidden)} object(s) are hidden or not visible in viewport", hidden[:20])
+        if len(objects) > 1000:
+            add_issue("warning", "LARGE_OBJECT_COUNT", f"Scene has {len(objects)} objects")
+        if negative_scale:
+            add_issue("warning", "NEGATIVE_SCALE", f"{len(negative_scale)} object(s) have negative scale", negative_scale[:20])
+        if unapplied_scale:
+            add_issue("info", "UNAPPLIED_SCALE", f"{len(unapplied_scale)} object(s) have scale different from 1.0", unapplied_scale[:20])
+        if missing_mesh_data:
+            add_issue("error", "MISSING_MESH_DATA", f"{len(missing_mesh_data)} mesh object(s) have missing mesh data", missing_mesh_data[:20])
+        if empty_collections:
+            issues.append({
+                "severity": "info",
+                "code": "EMPTY_COLLECTIONS",
+                "message": f"{len(empty_collections)} empty collection(s)",
+                "objects": [],
+                "collections": [collection.name for collection in empty_collections[:20]],
+            })
+        if far_from_origin:
+            add_issue("warning", "FAR_FROM_ORIGIN", f"{len(far_from_origin)} object(s) are very far from origin", far_from_origin[:20])
+
+        summary = {
+            "object_count": len(objects),
+            "hidden_count": len(hidden),
+            "mesh_count": len(mesh_objects),
+            "material_count": len(bpy.data.materials),
+            "missing_material_objects": len(no_material),
+            "camera_count": sum(1 for obj in objects if obj.type == "CAMERA"),
+            "light_count": sum(1 for obj in objects if obj.type == "LIGHT"),
+            "objects_with_negative_scale": len(negative_scale),
+            "objects_with_unapplied_scale": len(unapplied_scale),
+            "objects_with_modifiers": sum(1 for obj in objects if len(getattr(obj, "modifiers", [])) > 0),
+        }
+        return {"status": "success", "summary": summary, "issues": issues, "warnings": []}
+
+
+class VerificationArtifactService:
+    DEFAULT_VIEWS = ["perspective", "front", "right", "top"]
+    SUPPORTED_VIEWS = {"perspective", "front", "right", "top", "back", "left", "bottom", "camera"}
+
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _utc_timestamp():
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    @staticmethod
+    def _snapshot_stamp():
+        return time.strftime("%Y%m%d_%H%M%S", time.localtime())
+
+    @staticmethod
+    def _safe_label(label):
+        if not label:
+            return "scene"
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(label)).strip("._-")
+        return safe[:60] or "scene"
+
+    def _artifact_root(self, artifact_root=None):
+        root = artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT") or ADDON_ROOT
+        return os.path.abspath(os.path.expanduser(str(root)))
+
+    def _snapshot_dir(self, snapshot_name=None, label=None, artifact_root=None):
+        snapshot_id = f"{self._snapshot_stamp()}_{self._safe_label(snapshot_name or label)}"
+        base_dir = os.path.join(self._artifact_root(artifact_root), ".overtli_blender", "verification", "snapshots", snapshot_id)
+        suffix = 1
+        candidate = base_dir
+        while os.path.exists(candidate):
+            suffix += 1
+            candidate = f"{base_dir}_{suffix}"
+        os.makedirs(candidate, exist_ok=True)
+        return os.path.basename(candidate), candidate
+
+    @staticmethod
+    def _write_json(path, data):
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2, sort_keys=True)
+
+    def _find_viewport_context(self):
+        screen = bpy.context.screen
+        if not screen:
+            return None
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            region = next((region for region in area.regions if region.type == "WINDOW"), None)
+            space = next((space for space in area.spaces if space.type == "VIEW_3D"), None)
+            if region and space and space.region_3d:
+                return area, region, space, space.region_3d
+        return None
+
+    def _capture_named_view(self, view_name, filepath, max_size):
+        viewport_context = self._find_viewport_context()
+        if not viewport_context:
+            return {"view": view_name, "path": filepath, "status": "error", "message": "No 3D viewport found"}
+
+        area, region, space, region_3d = viewport_context
+        original_state = {
+            "view_perspective": region_3d.view_perspective,
+            "view_location": region_3d.view_location.copy(),
+            "view_rotation": region_3d.view_rotation.copy(),
+            "view_distance": region_3d.view_distance,
+            "view_camera_zoom": region_3d.view_camera_zoom,
+            "view_camera_offset": tuple(region_3d.view_camera_offset),
+        }
+
+        try:
+            with bpy.context.temp_override(area=area, region=region, space_data=space, region_data=region_3d):
+                if view_name == "camera":
+                    if bpy.context.scene.camera is None:
+                        return {"view": view_name, "path": filepath, "status": "error", "message": "Scene has no active camera"}
+                    region_3d.view_perspective = "CAMERA"
+                elif view_name != "perspective":
+                    bpy.ops.view3d.view_axis(type=view_name.upper(), align_active=False)
+                else:
+                    region_3d.view_perspective = "PERSP"
+                bpy.ops.screen.screenshot_area(filepath=filepath)
+
+            img = bpy.data.images.load(filepath)
+            width, height = img.size
+            if max(width, height) > max_size:
+                scale = max_size / max(width, height)
+                width = max(1, int(width * scale))
+                height = max(1, int(height * scale))
+                img.scale(width, height)
+                img.file_format = "PNG"
+                img.save()
+            bpy.data.images.remove(img)
+            return {"view": view_name, "path": filepath, "width": width, "height": height, "status": "success"}
+        except Exception as exc:
+            return {"view": view_name, "path": filepath, "status": "error", "message": str(exc)}
+        finally:
+            try:
+                region_3d.view_perspective = original_state["view_perspective"]
+                region_3d.view_location = original_state["view_location"]
+                region_3d.view_rotation = original_state["view_rotation"]
+                region_3d.view_distance = original_state["view_distance"]
+                region_3d.view_camera_zoom = original_state["view_camera_zoom"]
+                region_3d.view_camera_offset = original_state["view_camera_offset"]
+            except Exception:
+                pass
+
+    def _normalize_views(self, views):
+        if not views:
+            return list(self.DEFAULT_VIEWS), []
+        normalized = []
+        warnings = []
+        for view in views:
+            name = str(view).strip().lower()
+            if name not in self.SUPPORTED_VIEWS:
+                warnings.append(f"Unsupported view skipped: {view}")
+                continue
+            if name not in normalized:
+                normalized.append(name)
+        if not normalized:
+            normalized = list(self.DEFAULT_VIEWS)
+            warnings.append("No supported views requested; default views were used")
+        return normalized, warnings
+
+    def capture_viewport_pack(self, views=None, max_size=800, include_manifest=True, snapshot_name=None, artifact_dir=None, artifact_root=None):
+        max_size = max(64, min(int(max_size), 4096))
+        view_names, warnings = self._normalize_views(views)
+        if artifact_dir:
+            snapshot_id = os.path.basename(os.path.normpath(artifact_dir))
+            target_dir = artifact_dir
+            os.makedirs(target_dir, exist_ok=True)
+        else:
+            snapshot_id, target_dir = self._snapshot_dir(snapshot_name=snapshot_name or "viewport_pack", artifact_root=artifact_root)
+
+        screenshot_dir = os.path.join(target_dir, "screenshots")
+        os.makedirs(screenshot_dir, exist_ok=True)
+        screenshots = []
+        for view_name in view_names:
+            path = os.path.join(screenshot_dir, f"{view_name}.png")
+            result = self._capture_named_view(view_name, path, max_size)
+            screenshots.append(result)
+            if result.get("status") != "success":
+                warnings.append(f"{view_name}: {result.get('message', 'capture failed')}")
+
+        if not any(item.get("status") == "success" for item in screenshots):
+            return {
+                "status": "error",
+                "message": "No screenshots were captured",
+                "snapshot_id": snapshot_id,
+                "artifact_dir": target_dir,
+                "screenshots": screenshots,
+                "warnings": warnings,
+            }
+
+        manifest = {
+            "snapshot_id": snapshot_id,
+            "created_at": self._utc_timestamp(),
+            "artifact_dir": target_dir,
+            "command": "capture_viewport_pack",
+            "parameters": {"views": view_names, "max_size": max_size, "include_manifest": include_manifest},
+            "screenshots": screenshots,
+            "warnings": warnings,
+        }
+        manifest_path = os.path.join(target_dir, "manifest.json")
+        if include_manifest:
+            self._write_json(manifest_path, manifest)
+
+        return {
+            "status": "success",
+            "snapshot_id": snapshot_id,
+            "artifact_dir": target_dir,
+            "screenshots": screenshots,
+            "manifest_path": manifest_path if include_manifest else None,
+            "warnings": warnings,
+        }
+
+    def create_verification_snapshot(
+        self,
+        label=None,
+        include_scene_index=True,
+        include_scene_health=True,
+        include_selection=True,
+        include_screenshots=True,
+        views=None,
+        max_size=800,
+        artifact_root=None,
+    ):
+        snapshot_id, target_dir = self._snapshot_dir(label=label or "scene", artifact_root=artifact_root)
+        warnings = []
+        artifacts = {"screenshots": []}
+
+        if include_scene_index:
+            path = os.path.join(target_dir, "scene_index.json")
+            scene_index = self.server.scene_intelligence_service.get_scene_index()
+            self._write_json(path, scene_index)
+            artifacts["scene_index"] = "scene_index.json"
+            warnings.extend(scene_index.get("warnings", []))
+
+        if include_scene_health:
+            path = os.path.join(target_dir, "scene_health.json")
+            scene_health = self.server.scene_intelligence_service.get_scene_health()
+            self._write_json(path, scene_health)
+            artifacts["scene_health"] = "scene_health.json"
+            warnings.extend(scene_health.get("warnings", []))
+
+        if include_selection:
+            path = os.path.join(target_dir, "selection_info.json")
+            selection_info = self.server.scene_intelligence_service.get_selection_info()
+            self._write_json(path, selection_info)
+            artifacts["selection_info"] = "selection_info.json"
+            warnings.extend(selection_info.get("warnings", []))
+
+        if include_screenshots:
+            pack_result = self.capture_viewport_pack(
+                views=views,
+                max_size=max_size,
+                include_manifest=False,
+                snapshot_name=snapshot_id,
+                artifact_dir=target_dir,
+                artifact_root=artifact_root,
+            )
+            artifacts["screenshots"] = [
+                os.path.relpath(item.get("path"), target_dir).replace("\\", "/")
+                for item in pack_result.get("screenshots", [])
+                if item.get("status") == "success" and item.get("path")
+            ]
+            warnings.extend(pack_result.get("warnings", []))
+            if pack_result.get("status") != "success":
+                warnings.append(pack_result.get("message", "Screenshot pack failed"))
+
+        manifest = {
+            "snapshot_id": snapshot_id,
+            "label": label,
+            "created_at": self._utc_timestamp(),
+            "blender_file": bpy.data.filepath or None,
+            "scene_name": bpy.context.scene.name,
+            "safety_mode": self.server.safety_policy_service.mode,
+            "commands": {
+                "include_scene_index": bool(include_scene_index),
+                "include_scene_health": bool(include_scene_health),
+                "include_selection": bool(include_selection),
+                "include_screenshots": bool(include_screenshots),
+            },
+            "artifact_dir": target_dir,
+            "artifacts": artifacts,
+            "warnings": warnings,
+        }
+        manifest_path = os.path.join(target_dir, "manifest.json")
+        self._write_json(manifest_path, manifest)
+
+        return {
+            "status": "success",
+            "snapshot_id": snapshot_id,
+            "artifact_dir": target_dir,
+            "manifest_path": manifest_path,
+            "artifacts": artifacts,
+            "warnings": warnings,
+        }
+
+    def list_verification_snapshots(self):
+        snapshot_root = os.path.join(self._artifact_root(), ".overtli_blender", "verification", "snapshots")
+        if not os.path.isdir(snapshot_root):
+            return {"status": "success", "snapshot_root": snapshot_root, "snapshots": [], "warnings": []}
+
+        snapshots = []
+        for name in sorted(os.listdir(snapshot_root), reverse=True):
+            path = os.path.join(snapshot_root, name)
+            if not os.path.isdir(path):
+                continue
+            manifest_path = os.path.join(path, "manifest.json")
+            snapshots.append({
+                "snapshot_id": name,
+                "artifact_dir": path,
+                "manifest_path": manifest_path if os.path.exists(manifest_path) else None,
+            })
+        return {"status": "success", "snapshot_root": snapshot_root, "snapshots": snapshots, "warnings": []}
 
 
 class ProviderStatusService:
@@ -2061,6 +2744,8 @@ class BlenderMCPServer:
         self.script_registry_service = ScriptRegistryService()
         self.scene_observation_service = SceneObservationService(self)
         self.viewport_screenshot_service = ViewportScreenshotService(self)
+        self.scene_intelligence_service = SceneIntelligenceService(self)
+        self.verification_artifact_service = VerificationArtifactService(self)
         self.provider_status_service = ProviderStatusService(self)
         self.polyhaven_service = PolyHavenService(self)
         self.sketchfab_service = SketchfabService(self)
@@ -2072,6 +2757,13 @@ class BlenderMCPServer:
         self.get_scene_info = self.scene_observation_service.get_scene_info
         self.get_object_info = self.scene_observation_service.get_object_info
         self.get_viewport_screenshot = self.viewport_screenshot_service.get_viewport_screenshot
+        self.get_scene_index = self.scene_intelligence_service.get_scene_index
+        self.get_object_deep_info = self.scene_intelligence_service.get_object_deep_info
+        self.get_selection_info = self.scene_intelligence_service.get_selection_info
+        self.get_scene_health = self.scene_intelligence_service.get_scene_health
+        self.capture_viewport_pack = self.verification_artifact_service.capture_viewport_pack
+        self.create_verification_snapshot = self.verification_artifact_service.create_verification_snapshot
+        self.list_verification_snapshots = self.verification_artifact_service.list_verification_snapshots
         self.get_safety_status = self.safety_policy_service.get_safety_status
         self.execute_code = self.raw_code_execution_service.execute_code
         self.get_polyhaven_status = self.provider_status_service.get_polyhaven_status
@@ -2248,6 +2940,13 @@ class BlenderMCPServer:
             "get_scene_info": self.get_scene_info,
             "get_object_info": self.get_object_info,
             "get_viewport_screenshot": self.get_viewport_screenshot,
+            "get_scene_index": self.get_scene_index,
+            "get_object_deep_info": self.get_object_deep_info,
+            "get_selection_info": self.get_selection_info,
+            "get_scene_health": self.get_scene_health,
+            "capture_viewport_pack": self.capture_viewport_pack,
+            "create_verification_snapshot": self.create_verification_snapshot,
+            "list_verification_snapshots": self.list_verification_snapshots,
             "get_safety_status": self.get_safety_status,
             "execute_code": self.execute_code,
             "get_polyhaven_status": self.get_polyhaven_status,
@@ -2386,6 +3085,34 @@ class BlenderMCPServer:
         Returns success/error status
         """
         return self.viewport_screenshot_service.get_viewport_screenshot(max_size, filepath, format)
+
+    def get_scene_index(self, include_hidden=True, include_materials=True, include_modifiers=True, include_constraints=True, include_collections=True, max_objects=None):
+        """Get a bounded, JSON-serializable index of the current scene."""
+        return self.scene_intelligence_service.get_scene_index(include_hidden, include_materials, include_modifiers, include_constraints, include_collections, max_objects)
+
+    def get_object_deep_info(self, object_name=None, name=None, include_mesh_stats=True, include_material_slots=True, include_modifiers=True, include_constraints=True, include_animation=True, include_custom_properties=True):
+        """Get deep, bounded inspection data for a single object."""
+        return self.scene_intelligence_service.get_object_deep_info(object_name, name, include_mesh_stats, include_material_slots, include_modifiers, include_constraints, include_animation, include_custom_properties)
+
+    def get_selection_info(self):
+        """Get active object and selection details without mutating selection."""
+        return self.scene_intelligence_service.get_selection_info()
+
+    def get_scene_health(self):
+        """Get a non-destructive scene metrics and health summary."""
+        return self.scene_intelligence_service.get_scene_health()
+
+    def capture_viewport_pack(self, views=None, max_size=800, include_manifest=True, snapshot_name=None, artifact_root=None):
+        """Capture a local multi-view screenshot pack under the generated artifact directory."""
+        return self.verification_artifact_service.capture_viewport_pack(views, max_size, include_manifest, snapshot_name, artifact_root=artifact_root)
+
+    def create_verification_snapshot(self, label=None, include_scene_index=True, include_scene_health=True, include_selection=True, include_screenshots=True, views=None, max_size=800, artifact_root=None):
+        """Create a local verification snapshot manifest and requested artifacts."""
+        return self.verification_artifact_service.create_verification_snapshot(label, include_scene_index, include_scene_health, include_selection, include_screenshots, views, max_size, artifact_root)
+
+    def list_verification_snapshots(self):
+        """List local verification snapshots generated by Phase 2 tools."""
+        return self.verification_artifact_service.list_verification_snapshots()
 
     def get_safety_status(self):
         """Get the current safety policy status."""

@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
+VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
 CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
 REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
@@ -60,6 +62,35 @@ def test_screenshot_tools_contains_expected_tool_name() -> None:
     assert "def get_viewport_screenshot(" in SCREENSHOT_TOOLS_TEXT
 
 
+def test_scene_intelligence_tools_module_exists_and_registers_tools() -> None:
+    assert (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").exists()
+    assert "def register_scene_intelligence_tools" in SCENE_INTELLIGENCE_TOOLS_TEXT
+
+
+def test_scene_intelligence_tools_contains_expected_tool_names() -> None:
+    for name in [
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+    ]:
+        assert f"def {name}(" in SCENE_INTELLIGENCE_TOOLS_TEXT
+
+
+def test_verification_tools_module_exists_and_registers_tools() -> None:
+    assert (ROOT / "src/overtli_blender/tools/verification_tools.py").exists()
+    assert "def register_verification_tools" in VERIFICATION_TOOLS_TEXT
+
+
+def test_verification_tools_contains_expected_tool_names() -> None:
+    for name in [
+        "capture_viewport_pack",
+        "create_verification_snapshot",
+        "list_verification_snapshots",
+    ]:
+        assert f"def {name}(" in VERIFICATION_TOOLS_TEXT
+
+
 def test_script_registry_tools_module_exists_and_registers_tools() -> None:
     assert (ROOT / "src/overtli_blender/tools/script_registry_tools.py").exists()
     assert "def register_script_registry_tools" in SCRIPT_REGISTRY_TOOLS_TEXT
@@ -94,7 +125,9 @@ def test_registry_module_references_all_tool_registration_helpers() -> None:
     for name in [
         "register_context_tools",
         "register_observation_tools",
+        "register_scene_intelligence_tools",
         "register_screenshot_tools",
+        "register_verification_tools",
         "register_script_registry_tools",
         "register_provider_status_tools",
         "register_safety_tools",
@@ -209,6 +242,13 @@ def test_addon_command_strings_are_still_present() -> None:
         "get_scene_info",
         "get_object_info",
         "get_viewport_screenshot",
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+        "capture_viewport_pack",
+        "create_verification_snapshot",
+        "list_verification_snapshots",
         "register_context_script",
         "execute_context_script",
         "list_context_scripts",

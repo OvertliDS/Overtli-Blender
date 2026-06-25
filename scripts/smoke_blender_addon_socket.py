@@ -11,6 +11,7 @@ import time
 
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 9876
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 
 def receive_json_response(sock: socket.socket, timeout_seconds: float) -> dict:
@@ -128,6 +129,103 @@ def run_optional_safety_status_smoke(sock: socket.socket, timeout_seconds: float
     if "mode" not in result or "policy_version" not in result:
         raise RuntimeError("get_safety_status: missing mode/policy_version in result")
     return result
+
+
+def run_optional_scene_index_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 25})
+    result = assert_success("get_scene_index", response)
+    if result.get("status") != "success" or "scene" not in result or "objects" not in result:
+        raise RuntimeError(f"get_scene_index: malformed result {result}")
+    return result
+
+
+def run_optional_selection_info_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(sock, timeout_seconds, "get_selection_info")
+    result = assert_success("get_selection_info", response)
+    if result.get("status") != "success" or "selected_objects" not in result:
+        raise RuntimeError(f"get_selection_info: malformed result {result}")
+    return result
+
+
+def run_optional_scene_health_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(sock, timeout_seconds, "get_scene_health")
+    result = assert_success("get_scene_health", response)
+    if result.get("status") != "success" or "summary" not in result or "issues" not in result:
+        raise RuntimeError(f"get_scene_health: malformed result {result}")
+    return result
+
+
+def _resolve_object_for_deep_info(sock: socket.socket, timeout_seconds: float) -> str | None:
+    selection = run_optional_selection_info_smoke(sock, timeout_seconds)
+    active_object = selection.get("active_object")
+    if active_object:
+        return str(active_object)
+
+    scene_index = run_optional_scene_index_smoke(sock, timeout_seconds)
+    objects = scene_index.get("objects", [])
+    if objects:
+        return str(objects[0].get("name"))
+    return None
+
+
+def run_optional_object_deep_info_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    object_name = _resolve_object_for_deep_info(sock, timeout_seconds)
+    if not object_name:
+        print("WARN get_object_deep_info skipped: scene has no objects")
+        return
+
+    response = send_command(sock, timeout_seconds, "get_object_deep_info", {"object_name": object_name})
+    result = assert_success("get_object_deep_info", response)
+    if result.get("status") != "success" or "object" not in result:
+        raise RuntimeError(f"get_object_deep_info: malformed result {result}")
+
+
+def run_optional_screenshot_pack_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(
+        sock,
+        timeout_seconds,
+        "capture_viewport_pack",
+        {
+            "views": ["perspective", "front", "right", "top"],
+            "max_size": 400,
+            "snapshot_name": "smoke_pack",
+            "artifact_root": REPO_ROOT,
+        },
+    )
+    result = assert_success("capture_viewport_pack", response)
+    if result.get("status") != "success" or "artifact_dir" not in result or "screenshots" not in result:
+        raise RuntimeError(f"capture_viewport_pack: malformed result {result}")
+    print(f"ARTIFACT capture_viewport_pack {result.get('artifact_dir')}")
+    return result
+
+
+def run_optional_verification_snapshot_smoke(sock: socket.socket, timeout_seconds: float) -> dict:
+    response = send_command(
+        sock,
+        timeout_seconds,
+        "create_verification_snapshot",
+        {
+            "label": "phase2_smoke",
+            "views": ["perspective", "front", "right", "top"],
+            "max_size": 400,
+            "artifact_root": REPO_ROOT,
+        },
+    )
+    result = assert_success("create_verification_snapshot", response)
+    if result.get("status") != "success" or "manifest_path" not in result or "artifacts" not in result:
+        raise RuntimeError(f"create_verification_snapshot: malformed result {result}")
+    print(f"ARTIFACT create_verification_snapshot {result.get('artifact_dir')}")
+    return result
+
+
+def run_phase2_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    run_optional_safety_status_smoke(sock, timeout_seconds)
+    run_optional_scene_index_smoke(sock, timeout_seconds)
+    run_optional_selection_info_smoke(sock, timeout_seconds)
+    run_optional_scene_health_smoke(sock, timeout_seconds)
+    run_optional_object_deep_info_smoke(sock, timeout_seconds)
+    run_optional_screenshot_pack_smoke(sock, timeout_seconds)
+    run_optional_verification_snapshot_smoke(sock, timeout_seconds)
 
 
 def run_optional_strict_block_smoke(sock: socket.socket, timeout_seconds: float) -> None:
@@ -256,6 +354,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the optional harmless code execution smoke.",
     )
+    parser.add_argument("--include-scene-index", action="store_true", help="Run the Phase 2 scene index smoke.")
+    parser.add_argument("--include-object-deep-info", action="store_true", help="Run the Phase 2 object deep info smoke.")
+    parser.add_argument("--include-selection-info", action="store_true", help="Run the Phase 2 selection info smoke.")
+    parser.add_argument("--include-scene-health", action="store_true", help="Run the Phase 2 scene health smoke.")
+    parser.add_argument("--include-screenshot-pack", action="store_true", help="Run the Phase 2 viewport screenshot pack smoke.")
+    parser.add_argument("--include-verification-snapshot", action="store_true", help="Run the Phase 2 verification snapshot smoke.")
+    parser.add_argument(
+        "--phase2-full",
+        action="store_true",
+        help="Run default smoke plus safe Phase 2 inspection, screenshot-pack, and verification snapshot checks.",
+    )
     return parser
 
 
@@ -293,6 +402,27 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.include_code_execution:
                 run_optional_code_execution_smoke(sock, args.timeout)
+
+            if args.include_scene_index:
+                run_optional_scene_index_smoke(sock, args.timeout)
+
+            if args.include_selection_info:
+                run_optional_selection_info_smoke(sock, args.timeout)
+
+            if args.include_scene_health:
+                run_optional_scene_health_smoke(sock, args.timeout)
+
+            if args.include_object_deep_info:
+                run_optional_object_deep_info_smoke(sock, args.timeout)
+
+            if args.include_screenshot_pack:
+                run_optional_screenshot_pack_smoke(sock, args.timeout)
+
+            if args.include_verification_snapshot:
+                run_optional_verification_snapshot_smoke(sock, args.timeout)
+
+            if args.phase2_full:
+                run_phase2_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

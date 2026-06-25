@@ -6,10 +6,12 @@ from .polyhaven_tools import register_polyhaven_tools
 from .provider_status_tools import register_provider_status_tools
 from .observation_tools import register_observation_tools
 from .safety_tools import register_safety_tools
+from .scene_intelligence_tools import register_scene_intelligence_tools
 from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .registry import register_all_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .verification_tools import register_verification_tools
 
 __all__ = [
     "register_all_tools",
@@ -21,7 +23,9 @@ __all__ = [
     "register_provider_status_tools",
     "register_observation_tools",
     "register_safety_tools",
+    "register_scene_intelligence_tools",
     "register_screenshot_tools",
     "register_script_registry_tools",
     "register_sketchfab_tools",
+    "register_verification_tools",
 ]

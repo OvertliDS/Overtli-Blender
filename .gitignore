@@ -21,10 +21,13 @@ Create_AI_Review_Zip.bat
 .venv/
 *.zip
 Overtli-Blender_AIReview_Drive/
+.overtli_blender/
 memory_bank/
 tools/
 !src/blender_mcp/tools/
 !src/blender_mcp/tools/*.py
+!src/overtli_blender/tools/
+!src/overtli_blender/tools/*.py
 
 # Private planning docs
 docs/architecture_refactor_plan.md

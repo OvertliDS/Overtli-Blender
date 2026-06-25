@@ -46,12 +46,47 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "execute_code",
         "get_geometry_nodes_status",
         "get_safety_status",
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+        "capture_viewport_pack",
+        "create_verification_snapshot",
         "--include-screenshot",
         "--include-script-registry",
         "--include-provider-status",
         "--include-safety-status",
+        "--include-scene-index",
+        "--include-object-deep-info",
+        "--include-selection-info",
+        "--include-scene-health",
+        "--include-screenshot-pack",
+        "--include-verification-snapshot",
+        "--phase2-full",
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
     ]:
         assert text in SMOKE_TEXT
+
+
+def test_runtime_smoke_phase2_full_avoids_dangerous_optional_flows() -> None:
+    phase2_start = SMOKE_TEXT.index("def run_phase2_full_smoke")
+    phase2_end = SMOKE_TEXT.index("def run_optional_strict_block_smoke")
+    phase2_block = SMOKE_TEXT[phase2_start:phase2_end]
+    for text in [
+        "run_optional_scene_index_smoke",
+        "run_optional_selection_info_smoke",
+        "run_optional_scene_health_smoke",
+        "run_optional_object_deep_info_smoke",
+        "run_optional_screenshot_pack_smoke",
+        "run_optional_verification_snapshot_smoke",
+    ]:
+        assert text in phase2_block
+    for text in [
+        "run_optional_code_execution_smoke",
+        "run_optional_script_registry_smoke",
+        "run_optional_provider_status_smoke",
+        "run_optional_geometry_nodes_status_smoke",
+    ]:
+        assert text not in phase2_block

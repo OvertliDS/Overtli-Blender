@@ -56,6 +56,35 @@ def test_common_safety_module_classifies_high_risk_commands() -> None:
         assert text in SAFETY_TEXT
 
 
+def test_common_safety_module_classifies_phase2_commands() -> None:
+    for text in [
+        '"get_scene_index", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_object_deep_info", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_selection_info", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_scene_health", OperationType.VERIFY, RiskLevel.LOW',
+        '"capture_viewport_pack"',
+        '"create_verification_snapshot"',
+        '"list_verification_snapshots", OperationType.VERIFY, RiskLevel.LOW',
+        "can_write_files=True",
+        '"writes-local-verification-artifacts"',
+    ]:
+        assert text in SAFETY_TEXT
+
+
+def test_phase2_strict_mode_behavior_is_documented_in_policy() -> None:
+    for command in [
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+        "capture_viewport_pack",
+        "create_verification_snapshot",
+    ]:
+        command_index = SAFETY_TEXT.index(f'"{command}"')
+        command_block = SAFETY_TEXT[command_index:command_index + 500]
+        assert "strict_blocked=True" not in command_block
+
+
 def test_smoke_script_exposes_safety_mode_flags() -> None:
     for text in [
         "--include-safety-status",

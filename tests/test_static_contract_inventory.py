@@ -10,6 +10,8 @@ ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
+SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
+VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
 CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
 REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
@@ -53,6 +55,29 @@ def test_screenshot_tool_module_includes_extracted_wrapper() -> None:
     assert "def get_viewport_screenshot(" in screenshot_text
 
 
+def test_scene_intelligence_tool_module_includes_extracted_wrappers() -> None:
+    expected = [
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+    ]
+
+    missing = [name for name in expected if f"def {name}(" not in SCENE_INTELLIGENCE_TOOLS_TEXT]
+    assert missing == [], f"Missing extracted scene intelligence tools: {missing}"
+
+
+def test_verification_tool_module_includes_extracted_wrappers() -> None:
+    expected = [
+        "capture_viewport_pack",
+        "create_verification_snapshot",
+        "list_verification_snapshots",
+    ]
+
+    missing = [name for name in expected if f"def {name}(" not in VERIFICATION_TOOLS_TEXT]
+    assert missing == [], f"Missing extracted verification tools: {missing}"
+
+
 def test_script_registry_tool_module_includes_extracted_wrappers() -> None:
     script_registry_text = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
     expected = [
@@ -77,7 +102,9 @@ def test_registry_tool_module_includes_all_registrations() -> None:
     for name in [
         "register_context_tools",
         "register_observation_tools",
+        "register_scene_intelligence_tools",
         "register_screenshot_tools",
+        "register_verification_tools",
         "register_script_registry_tools",
         "register_provider_status_tools",
         "register_safety_tools",
@@ -174,6 +201,8 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "class ScriptRegistryService",
         "class SceneObservationService",
         "class ViewportScreenshotService",
+        "class SceneIntelligenceService",
+        "class VerificationArtifactService",
         "class ProviderStatusService",
         "class PolyHavenService",
         "class SketchfabService",
@@ -185,6 +214,8 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "self.script_registry_service = ScriptRegistryService()",
         "self.scene_observation_service = SceneObservationService(self)",
         "self.viewport_screenshot_service = ViewportScreenshotService(self)",
+        "self.scene_intelligence_service = SceneIntelligenceService(self)",
+        "self.verification_artifact_service = VerificationArtifactService(self)",
         "self.provider_status_service = ProviderStatusService(self)",
         "self.polyhaven_service = PolyHavenService(self)",
         "self.sketchfab_service = SketchfabService(self)",
@@ -205,6 +236,13 @@ def test_addon_static_surface_includes_expected_commands() -> None:
         "get_scene_info",
         "get_object_info",
         "get_viewport_screenshot",
+        "get_scene_index",
+        "get_object_deep_info",
+        "get_selection_info",
+        "get_scene_health",
+        "capture_viewport_pack",
+        "create_verification_snapshot",
+        "list_verification_snapshots",
         "get_safety_status",
         "execute_code",
         "get_shared_context",

@@ -48,6 +48,9 @@ def test_old_package_path_is_removed_from_source_tree() -> None:
 def test_private_planning_is_not_required_for_public_baseline() -> None:
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "memory_bank/" in gitignore
+    assert ".overtli_blender/" in gitignore
     assert "tools/" in gitignore
+    assert "!src/overtli_blender/tools/" in gitignore
+    assert "!src/overtli_blender/tools/*.py" in gitignore
     assert "docs/architecture_refactor_plan.md" in gitignore
 
