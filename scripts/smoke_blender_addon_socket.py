@@ -814,6 +814,76 @@ def run_optional_script_registry_smoke(sock: socket.socket, timeout_seconds: flo
             print(f"WARN clear_context_scripts: {exc}")
 
 
+def _phase5b_best_format(format_result: dict) -> str:
+    imports = format_result.get("import_formats", {})
+    exports = format_result.get("export_formats", {})
+    for fmt in ["glb", "obj", "stl", "fbx", "ply"]:
+        if imports.get(fmt, {}).get("supported") and exports.get(fmt, {}).get("supported"):
+            return fmt
+    raise RuntimeError(f"No shared import/export format available for Phase 5B smoke: {format_result}")
+
+
+def run_phase5b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(time.time_ns())
+    prefix = f"OVERTLI_PHASE5B_{stamp}"
+    collection_name = f"{prefix}_COLLECTION"
+    import_collection = f"{prefix}_IMPORTED_COLLECTION"
+    object_name = f"{prefix}_OBJECT"
+    material_name = f"{prefix}_MAT"
+    camera_name = f"{prefix}_CAMERA"
+    kit_id = f"{prefix}_KIT"
+    selected_export_path = os.path.join(REPO_ROOT, ".overtli_blender", "exports", "selected", f"{prefix}_selected.glb")
+
+    try:
+        assert_success("create_collection phase5b", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        assert_success("create_basic_material phase5b", send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.45, 0.75, 0.35, 1.0], "replace_existing": True}))
+        assert_success("create_primitive_object phase5b", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": object_name, "collection_name": collection_name, "material_name": material_name}))
+        assert_success("create_camera phase5b", send_command(sock, timeout_seconds, "create_camera", {"camera_name": camera_name, "collection_name": collection_name, "set_active": True}))
+        assert_success("frame_camera_to_objects phase5b", send_command(sock, timeout_seconds, "frame_camera_to_objects", {"camera_name": camera_name, "object_names": [object_name], "view": "front_perspective"}))
+        assert_success("set_render_settings phase5b", send_command(sock, timeout_seconds, "set_render_settings", {"engine": "BLENDER_WORKBENCH", "resolution_x": 320, "resolution_y": 320, "samples": 8, "clamp_for_smoke": True}))
+
+        formats = assert_success("get_supported_asset_formats phase5b", send_command(sock, timeout_seconds, "get_supported_asset_formats"))
+        fmt = _phase5b_best_format(formats)
+        selected_export_path = os.path.join(REPO_ROOT, ".overtli_blender", "exports", "selected", f"{prefix}_selected.{fmt}")
+        assert_success("scan_asset_folder phase5b", send_command(sock, timeout_seconds, "scan_asset_folder", {"folder_path": os.path.join(REPO_ROOT, "assets"), "max_files": 100, "artifact_root": REPO_ROOT}))
+        scene_assets = assert_success("list_scene_assets phase5b", send_command(sock, timeout_seconds, "list_scene_assets"))
+        if not any(obj.get("name") == object_name for obj in scene_assets.get("objects", [])):
+            raise RuntimeError("Phase 5B smoke object missing from scene asset inventory")
+        assert_success("get_asset_dependency_report phase5b", send_command(sock, timeout_seconds, "get_asset_dependency_report", {"artifact_root": REPO_ROOT}))
+        assert_success("create_asset_manifest phase5b", send_command(sock, timeout_seconds, "create_asset_manifest", {"label": prefix, "artifact_root": REPO_ROOT}))
+        assert_success("create_asset_preview phase5b", send_command(sock, timeout_seconds, "create_asset_preview", {"object_names": [object_name], "label": prefix, "artifact_root": REPO_ROOT, "clamp_for_smoke": True}))
+        export_result = assert_success("export_selected_objects phase5b", send_command(sock, timeout_seconds, "export_selected_objects", {"output_path": selected_export_path, "format_hint": fmt, "object_names": [object_name], "overwrite": True, "artifact_root": REPO_ROOT}))
+        if not export_result.get("exists"):
+            raise RuntimeError(f"Phase 5B export did not create artifact: {export_result}")
+        assert_success("get_asset_file_info phase5b", send_command(sock, timeout_seconds, "get_asset_file_info", {"file_path": selected_export_path}))
+        import_result = assert_success("import_model_file phase5b", send_command(sock, timeout_seconds, "import_model_file", {"file_path": selected_export_path, "format_hint": fmt, "collection_name": import_collection, "rename_prefix": f"{prefix}_IMPORTED_", "verify": True}))
+        if not import_result.get("created_objects"):
+            raise RuntimeError(f"Phase 5B import did not report created objects: {import_result}")
+        kit = assert_success("create_scene_kit phase5b", send_command(sock, timeout_seconds, "create_scene_kit", {"kit_id": kit_id, "label": prefix, "object_names": [object_name], "export_format": fmt, "include_preview": True, "include_scene_export": True, "overwrite": True, "artifact_root": REPO_ROOT}))
+        assert_success("validate_scene_kit phase5b", send_command(sock, timeout_seconds, "validate_scene_kit", {"kit_path": os.path.dirname(kit["manifest_path"])}))
+        assert_success("list_scene_kits phase5b", send_command(sock, timeout_seconds, "list_scene_kits", {"artifact_root": REPO_ROOT}))
+        batch = assert_success("run_asset_workflow_batch phase5b", send_command(sock, timeout_seconds, "run_asset_workflow_batch", {"label": prefix, "artifact_root": REPO_ROOT, "operations": [{"command": "get_supported_asset_formats", "params": {}}, {"command": "list_scene_assets", "params": {}}, {"command": "validate_external_dependencies", "params": {}}]}))
+        if batch.get("status") not in {"success", "partial"}:
+            raise RuntimeError(f"Phase 5B batch failed: {batch}")
+        assert_success("validate_external_dependencies phase5b", send_command(sock, timeout_seconds, "validate_external_dependencies"))
+        assert_success("get_scene_health phase5b", send_command(sock, timeout_seconds, "get_scene_health"))
+    finally:
+        cleanup = assert_success("cleanup_asset_artifacts phase5b", send_command(sock, timeout_seconds, "cleanup_asset_artifacts", {"prefix": prefix, "confirm": True, "cleanup_scene_data": True, "cleanup_files": False, "artifact_root": REPO_ROOT}))
+        scene_assets = assert_success("list_scene_assets phase5b_cleanup_probe", send_command(sock, timeout_seconds, "list_scene_assets"))
+        leftovers = {
+            "objects": [obj.get("name") for obj in scene_assets.get("objects", []) if obj.get("name", "").startswith(prefix)],
+            "collections": [col.get("name") for col in scene_assets.get("collections", []) if col.get("name", "").startswith(prefix)],
+            "materials": [mat.get("name") for mat in scene_assets.get("materials", []) if mat.get("name", "").startswith(prefix)],
+            "images": [img.get("name") for img in scene_assets.get("images", []) if img.get("name", "").startswith(prefix)],
+            "actions": [act.get("name") for act in scene_assets.get("actions", []) if act.get("name", "").startswith(prefix)],
+            "libraries": [lib.get("name") for lib in scene_assets.get("libraries", []) if lib.get("name", "").startswith(prefix)],
+        }
+        remaining = {key: value for key, value in leftovers.items() if value}
+        if remaining:
+            raise RuntimeError(f"Phase 5B cleanup left smoke-created scene data: {remaining}; cleanup={cleanup}")
+        print("PASS phase5b cleanup removed smoke-created scene data")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -889,6 +959,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-preview-animation", action="store_true", help="Run Phase 5A bounded preview animation via the full contained scenario.")
     parser.add_argument("--include-compositor-ops", action="store_true", help="Run Phase 5A compositor/pass operations via the full contained scenario.")
     parser.add_argument("--include-presentation-batch", action="store_true", help="Run Phase 5A presentation batch via the full contained scenario.")
+    parser.add_argument("--include-asset-formats", action="store_true", help="Run Phase 5B asset format detection via the full contained scenario.")
+    parser.add_argument("--include-asset-scan", action="store_true", help="Run Phase 5B asset folder scanning via the full contained scenario.")
+    parser.add_argument("--include-scene-assets", action="store_true", help="Run Phase 5B scene asset inventory via the full contained scenario.")
+    parser.add_argument("--include-dependency-report", action="store_true", help="Run Phase 5B dependency reporting via the full contained scenario.")
+    parser.add_argument("--include-asset-manifest", action="store_true", help="Run Phase 5B asset manifest creation via the full contained scenario.")
+    parser.add_argument("--include-import-export", action="store_true", help="Run Phase 5B local smoke export/import via the full contained scenario.")
+    parser.add_argument("--include-scene-kit", action="store_true", help="Run Phase 5B scene kit create/validate via the full contained scenario.")
+    parser.add_argument("--include-asset-preview", action="store_true", help="Run Phase 5B asset preview creation via the full contained scenario.")
+    parser.add_argument("--include-asset-workflow-batch", action="store_true", help="Run Phase 5B asset workflow batch via the full contained scenario.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -913,6 +992,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase5a-full",
         action="store_true",
         help="Run a contained Phase 5A animation, camera, lighting, render, compositor, presentation batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase5b-full",
+        action="store_true",
+        help="Run a contained Phase 5B asset scan, dependency, export/import, scene-kit, batch, and cleanup scenario.",
     )
     return parser
 
@@ -1049,6 +1133,20 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_presentation_batch
             ):
                 run_phase5a_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase5b_full
+                or args.include_asset_formats
+                or args.include_asset_scan
+                or args.include_scene_assets
+                or args.include_dependency_report
+                or args.include_asset_manifest
+                or args.include_import_export
+                or args.include_scene_kit
+                or args.include_asset_preview
+                or args.include_asset_workflow_batch
+            ):
+                run_phase5b_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

@@ -5,15 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 from .animation_tools import register_animation_tools
+from .asset_library_tools import register_asset_library_tools
+from .asset_workflow_tools import register_asset_workflow_tools
 from .camera_tools import register_camera_tools
 from .code_execution_tools import register_code_execution_tools
 from .collection_tools import register_collection_tools
 from .compositor_tools import register_compositor_tools
 from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
+from .dependency_tools import register_dependency_tools
 from .advanced_material_tools import register_advanced_material_tools
 from .geometry_nodes_tools import register_geometry_nodes_tools
 from .hyper3d_tools import register_hyper3d_tools
+from .import_export_tools import register_import_export_tools
 from .lattice_tools import register_lattice_tools
 from .lighting_tools import register_lighting_tools
 from .material_intelligence_tools import register_material_intelligence_tools
@@ -32,9 +36,11 @@ from .polyhaven_tools import register_polyhaven_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
 from .provider_status_tools import register_provider_status_tools
 from .render_tools import register_render_tools
+from .rigging_simulation_tools import register_rigging_simulation_tools
 from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .scene_kit_tools import register_scene_kit_tools
 from .verification_tools import register_verification_tools
 from .vertex_group_tools import register_vertex_group_tools
 from .workflow_intelligence_tools import register_workflow_intelligence_tools
@@ -66,6 +72,12 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_render_tools(mcp, get_blender_connection)
     register_compositor_tools(mcp, get_blender_connection)
     register_presentation_workflow_tools(mcp, get_blender_connection)
+    register_asset_library_tools(mcp, get_blender_connection)
+    register_dependency_tools(mcp, get_blender_connection)
+    register_import_export_tools(mcp, get_blender_connection)
+    register_scene_kit_tools(mcp, get_blender_connection)
+    register_asset_workflow_tools(mcp, get_blender_connection)
+    register_rigging_simulation_tools(mcp, get_blender_connection)
     register_modifier_tools(mcp, get_blender_connection)
     register_collection_tools(mcp, get_blender_connection)
     register_workspace_tools(mcp, get_blender_connection)

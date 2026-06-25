@@ -14,6 +14,8 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 4A production material workflows: channel schema, material templates, deep material inspection, shader graph inspection, texture/map slot binding, procedural material generation, material previews, material workflow batches, and confirmed material cleanup
 - Phase 4B method, asset, region, deformation, and sculpt workflows: method plans, playbooks, tricks knowledge, anti-pattern rules, modifier recipes, confidence scoring, asset scans/previews, style/PBR material helpers, texture-folder import, paintable texture setup, UV map inspection, measurements, vertex groups, Basis-preserving shape keys, lattice deformers, proportional-style deformation, sculpt mask intent, shape-key sculpt workflows, and deformation workflow batches
 - Phase 5A presentation workflows: timeline and animation inspection, transform/material/light/shape-key animation, camera creation/framing, active camera control, light and studio setup tools, render settings, still/contact-sheet/preview artifacts, turntable setup, compositor/pass presets, presentation workflow batches, and exact-prefix cleanup
+- Phase 5B asset workflows: runtime import/export format detection, bounded local folder scans, scene asset inventory, asset file inspection, dependency reports, asset manifests, `.blend` append/link, local model import/export, asset previews/contact sheets, reusable scene kits, external dependency validation/collection, and asset workflow batches
+- Phase 8 basics: driver add/remove, armature creation/inspection, mesh-to-armature parenting with vertex groups, pose-bone transforms, and basic cloth/hair/soft-body/rigid-body/collision setup
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -95,6 +97,14 @@ Phase 5A presentation smoke:
 ```
 
 The Phase 5A smoke creates temporary `OVERTLI_PHASE5A_*` scene data, exercises timeline, animation, camera, lighting, render settings, still render, contact sheet, turntable, bounded preview animation, compositor/pass, and presentation batch workflows, then removes exact smoke-created scene data. It writes ignored render, preview, presentation, and verification artifacts under `.overtli_blender/`. It does not download assets, run raw code, render high-cost full animations, or touch arbitrary user objects.
+
+Phase 5B asset workflow smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase5b-full
+```
+
+The Phase 5B smoke creates temporary `OVERTLI_PHASE5B_*` scene data, exports only its smoke-created object under `.overtli_blender/exports/`, imports only that exported local file into a smoke collection, writes asset scan/manifests/dependency reports/previews/scene kits under `.overtli_blender/`, runs an allowlisted asset workflow batch, and removes exact smoke-created scene data. It does not download provider assets, run raw code, import arbitrary user files, overwrite by default, or delete arbitrary files.
 
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 

@@ -61,6 +61,16 @@ Optional checks:
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-compositor-ops
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-presentation-batch
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase5a-full
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-asset-formats
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-asset-scan
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-scene-assets
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-dependency-report
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-asset-manifest
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-import-export
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-scene-kit
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-asset-preview
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-asset-workflow-batch
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase5b-full
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-screenshot
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-script-registry
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-provider-status
@@ -92,6 +102,10 @@ Success criteria:
 - Phase 5A smoke writes render artifacts under `.overtli_blender/renders/`, presentation batch manifests under `.overtli_blender/presentation/`, and verification snapshots under `.overtli_blender/verification/`.
 - Phase 5A smoke does not run raw code, does not download assets, does not run provider generation, does not run high-cost full animations, does not create arbitrary compositor graphs, and does not touch arbitrary user objects.
 - Phase 5A cleanup succeeds only when remaining `OVERTLI_PHASE5A_*` objects, collections, and materials are all empty lists.
+- `--phase5b-full` runs a contained Phase 5B asset workflow: it creates temporary `OVERTLI_PHASE5B_*` scene data, detects supported import/export formats, scans the local `assets/` folder, inventories scene assets, writes dependency and asset manifests, creates a preview, exports the smoke-created object to `.overtli_blender/exports/`, imports only that exported file into a smoke collection, creates and validates a scene kit under `.overtli_blender/scene_kits/`, runs an allowlisted asset workflow batch, checks scene health, and cleans exact smoke-created scene data.
+- Phase 5B smoke writes generated files under `.overtli_blender/assets/`, `.overtli_blender/imports/`, `.overtli_blender/exports/`, `.overtli_blender/scene_kits/`, `.overtli_blender/dependency_reports/`, `.overtli_blender/renders/`, and `.overtli_blender/verification/`.
+- Phase 5B smoke does not run raw code, does not download provider assets, does not run provider generation, does not import arbitrary user files, does not write outside `.overtli_blender/` by default, and does not delete arbitrary files.
+- Phase 5B cleanup succeeds only when remaining `OVERTLI_PHASE5B_*` objects, collections, materials, images, actions, and libraries are all empty lists. Generated files under `.overtli_blender/` may remain as ignored evidence.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.
@@ -101,4 +115,4 @@ Success criteria:
 
 If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
 
-Generated Phase 2, Phase 3, Phase 4A, Phase 4B, and Phase 5A artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
+Generated Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 5A, and Phase 5B artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.

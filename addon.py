@@ -5124,6 +5124,753 @@ class PresentationWorkflowBatchService:
         return {"status": "success", "prefix": prefix, "deleted": deleted, "artifact_deleted": artifact_deleted, "warnings": []}
 
 
+class AssetPathService:
+    MODEL_EXTENSIONS = {".glb", ".gltf", ".obj", ".fbx", ".stl", ".ply", ".usd", ".usda", ".usdc", ".abc", ".dae"}
+    TEXTURE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr", ".hdr", ".webp"}
+    MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi"}
+
+    @staticmethod
+    def artifact_root(artifact_root=None):
+        return RenderArtifactService.artifact_root(artifact_root)
+
+    @staticmethod
+    def workspace_path(*parts, artifact_root=None):
+        path = os.path.join(AssetPathService.artifact_root(artifact_root), ".overtli_blender", *parts)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    @staticmethod
+    def local_path(path, must_exist=True):
+        if not path:
+            raise ValueError("A local filesystem path is required")
+        value = os.path.abspath(os.path.expanduser(str(path)))
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", str(path)):
+            raise ValueError("Only local filesystem paths are supported")
+        if must_exist and not os.path.exists(value):
+            raise ValueError(f"Path does not exist: {value}")
+        return value
+
+    @staticmethod
+    def classify(path):
+        ext = os.path.splitext(str(path))[1].lower()
+        if ext == ".blend":
+            return "blend"
+        if ext in AssetPathService.MODEL_EXTENSIONS:
+            return "model"
+        if ext in AssetPathService.TEXTURE_EXTENSIONS:
+            return "texture"
+        if ext in AssetPathService.MEDIA_EXTENSIONS:
+            return "media"
+        return "unknown"
+
+    @staticmethod
+    def write_json(path, data):
+        RenderArtifactService.write_json(path, data)
+        return path
+
+
+class AssetLibraryIntelligenceService:
+    IMPORT_OPERATORS = {
+        "glb": [("bpy.ops.import_scene.gltf", lambda filepath: bpy.ops.import_scene.gltf(filepath=filepath))],
+        "gltf": [("bpy.ops.import_scene.gltf", lambda filepath: bpy.ops.import_scene.gltf(filepath=filepath))],
+        "obj": [("bpy.ops.wm.obj_import", lambda filepath: bpy.ops.wm.obj_import(filepath=filepath)), ("bpy.ops.import_scene.obj", lambda filepath: bpy.ops.import_scene.obj(filepath=filepath))],
+        "fbx": [("bpy.ops.import_scene.fbx", lambda filepath: bpy.ops.import_scene.fbx(filepath=filepath))],
+        "stl": [("bpy.ops.wm.stl_import", lambda filepath: bpy.ops.wm.stl_import(filepath=filepath)), ("bpy.ops.import_mesh.stl", lambda filepath: bpy.ops.import_mesh.stl(filepath=filepath))],
+        "ply": [("bpy.ops.wm.ply_import", lambda filepath: bpy.ops.wm.ply_import(filepath=filepath)), ("bpy.ops.import_mesh.ply", lambda filepath: bpy.ops.import_mesh.ply(filepath=filepath))],
+        "usd": [("bpy.ops.wm.usd_import", lambda filepath: bpy.ops.wm.usd_import(filepath=filepath))],
+        "usda": [("bpy.ops.wm.usd_import", lambda filepath: bpy.ops.wm.usd_import(filepath=filepath))],
+        "usdc": [("bpy.ops.wm.usd_import", lambda filepath: bpy.ops.wm.usd_import(filepath=filepath))],
+        "abc": [("bpy.ops.wm.alembic_import", lambda filepath: bpy.ops.wm.alembic_import(filepath=filepath))],
+        "dae": [("bpy.ops.wm.collada_import", lambda filepath: bpy.ops.wm.collada_import(filepath=filepath))],
+    }
+    EXPORT_OPERATORS = {
+        "glb": [("bpy.ops.export_scene.gltf", lambda filepath, selected: bpy.ops.export_scene.gltf(filepath=filepath, export_format="GLB", use_selection=selected))],
+        "gltf": [("bpy.ops.export_scene.gltf", lambda filepath, selected: bpy.ops.export_scene.gltf(filepath=filepath, export_format="GLTF_SEPARATE", use_selection=selected))],
+        "obj": [("bpy.ops.wm.obj_export", lambda filepath, selected: bpy.ops.wm.obj_export(filepath=filepath, export_selected_objects=selected)), ("bpy.ops.export_scene.obj", lambda filepath, selected: bpy.ops.export_scene.obj(filepath=filepath, use_selection=selected))],
+        "fbx": [("bpy.ops.export_scene.fbx", lambda filepath, selected: bpy.ops.export_scene.fbx(filepath=filepath, use_selection=selected))],
+        "stl": [("bpy.ops.wm.stl_export", lambda filepath, selected: bpy.ops.wm.stl_export(filepath=filepath, export_selected_objects=selected)), ("bpy.ops.export_mesh.stl", lambda filepath, selected: bpy.ops.export_mesh.stl(filepath=filepath, use_selection=selected))],
+        "ply": [("bpy.ops.wm.ply_export", lambda filepath, selected: bpy.ops.wm.ply_export(filepath=filepath, export_selected_objects=selected)), ("bpy.ops.export_mesh.ply", lambda filepath, selected: bpy.ops.export_mesh.ply(filepath=filepath, use_selection=selected))],
+        "usd": [("bpy.ops.wm.usd_export", lambda filepath, selected: bpy.ops.wm.usd_export(filepath=filepath, selected_objects_only=selected))],
+        "usda": [("bpy.ops.wm.usd_export", lambda filepath, selected: bpy.ops.wm.usd_export(filepath=filepath, selected_objects_only=selected))],
+        "usdc": [("bpy.ops.wm.usd_export", lambda filepath, selected: bpy.ops.wm.usd_export(filepath=filepath, selected_objects_only=selected))],
+        "abc": [("bpy.ops.wm.alembic_export", lambda filepath, selected: bpy.ops.wm.alembic_export(filepath=filepath, selected=selected))],
+        "dae": [("bpy.ops.wm.collada_export", lambda filepath, selected: bpy.ops.wm.collada_export(filepath=filepath, selected=selected))],
+    }
+
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _operator_exists(path):
+        target = bpy.ops
+        for part in path.replace("bpy.ops.", "").split("."):
+            if not hasattr(target, part):
+                return False
+            target = getattr(target, part)
+        return True
+
+    def _format_status(self, mapping):
+        result = {}
+        for fmt, options in mapping.items():
+            found = next((name for name, _runner in options if self._operator_exists(name)), None)
+            result[fmt] = {"supported": bool(found), "operator": found}
+        return result
+
+    def get_supported_asset_formats(self):
+        return {
+            "status": "success",
+            "import_formats": self._format_status(self.IMPORT_OPERATORS),
+            "export_formats": self._format_status(self.EXPORT_OPERATORS),
+            "blend_library": {"append_supported": True, "link_supported": True},
+            "warnings": [],
+        }
+
+    def choose_importer(self, fmt):
+        for name, runner in self.IMPORT_OPERATORS.get(str(fmt).lower(), []):
+            if self._operator_exists(name):
+                return name, runner
+        return None, None
+
+    def choose_exporter(self, fmt):
+        for name, runner in self.EXPORT_OPERATORS.get(str(fmt).lower(), []):
+            if self._operator_exists(name):
+                return name, runner
+        return None, None
+
+    def scan_asset_folder(self, folder_path, recursive=True, include_textures=True, include_blend_files=True, include_model_files=True, max_files=1000, write_manifest=True, artifact_root=None):
+        try:
+            folder = AssetPathService.local_path(folder_path)
+            if not os.path.isdir(folder):
+                return {"status": "error", "message": "folder_path must be a directory", "warnings": []}
+            max_files = max(1, min(int(max_files), 5000))
+            formats = self.get_supported_asset_formats()
+            assets = []
+            by_type = {"model": 0, "texture": 0, "blend": 0, "media": 0, "unknown": 0}
+            walker = os.walk(folder) if recursive else [(folder, [], os.listdir(folder))]
+            truncated = False
+            for root, dirs, files in walker:
+                dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", ".venv", "Library", "Temp", "Logs", "Obj"}]
+                for filename in files:
+                    path = os.path.join(root, filename)
+                    kind = AssetPathService.classify(path)
+                    if kind == "texture" and not include_textures:
+                        continue
+                    if kind == "blend" and not include_blend_files:
+                        continue
+                    if kind == "model" and not include_model_files:
+                        continue
+                    stat = os.stat(path)
+                    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+                    assets.append({"path": path, "name": filename, "extension": "." + ext if ext else "", "kind": kind, "size_bytes": stat.st_size, "modified_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)), "import_supported": bool(formats["import_formats"].get(ext, {}).get("supported")) if kind == "model" else kind == "blend", "warnings": []})
+                    by_type[kind] = by_type.get(kind, 0) + 1
+                    if len(assets) >= max_files:
+                        truncated = True
+                        break
+                if truncated:
+                    break
+            manifest_path = None
+            result = {"status": "success", "folder_path": folder, "recursive": bool(recursive), "file_count": len(assets), "by_type": by_type, "assets": assets, "manifest_path": None, "truncated": truncated, "warnings": []}
+            if write_manifest:
+                out = os.path.join(AssetPathService.workspace_path("assets", "scans", artifact_root=artifact_root), f"asset_scan_{RenderArtifactService.stamp()}.json")
+                manifest_path = AssetPathService.write_json(out, result)
+                result["manifest_path"] = manifest_path
+            return result
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def list_asset_libraries(self, artifact_root=None):
+        base = AssetPathService.workspace_path("assets", artifact_root=artifact_root)
+        libraries = [{"name": "Repo Local Assets", "path": base, "source": "repo_workspace", "exists": os.path.isdir(base)}]
+        prefs = getattr(bpy.context, "preferences", None)
+        filepaths = getattr(prefs, "filepaths", None)
+        for item in getattr(filepaths, "asset_libraries", []) or []:
+            path = os.path.abspath(bpy.path.abspath(item.path))
+            libraries.append({"name": item.name, "path": path, "source": "blender_preferences", "exists": os.path.isdir(path)})
+        kit_root = AssetPathService.workspace_path("scene_kits", artifact_root=artifact_root)
+        libraries.append({"name": "Scene Kits", "path": kit_root, "source": "scene_kits", "exists": os.path.isdir(kit_root)})
+        return {"status": "success", "libraries": libraries, "warnings": []}
+
+    def get_asset_file_info(self, file_path, inspect_blend_contents=True):
+        try:
+            path = AssetPathService.local_path(file_path)
+            stat = os.stat(path)
+            ext = os.path.splitext(path)[1].lower()
+            kind = AssetPathService.classify(path)
+            result = {"status": "success", "file_path": path, "name": os.path.basename(path), "extension": ext, "kind": kind, "size_bytes": stat.st_size, "modified_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)), "warnings": []}
+            if kind == "model":
+                fmt = ext.lstrip(".")
+                supported = self.get_supported_asset_formats()["import_formats"].get(fmt, {"supported": False, "operator": None})
+                result["import_support"] = supported
+            if kind == "blend" and inspect_blend_contents:
+                contents = {}
+                with bpy.data.libraries.load(path, link=False) as (data_from, _data_to):
+                    for attr in ["objects", "collections", "materials", "node_groups", "worlds", "actions"]:
+                        contents[attr] = list(getattr(data_from, attr, []) or [])
+                result["blend_contents"] = contents
+            if kind == "texture":
+                image = None
+                try:
+                    image = bpy.data.images.load(path, check_existing=False)
+                    result["image"] = {"size": list(image.size), "source": image.source}
+                finally:
+                    if image:
+                        bpy.data.images.remove(image)
+            return result
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def list_scene_assets(self, include_objects=True, include_meshes=True, include_materials=True, include_images=True, include_libraries=True, include_actions=True, include_collections=True):
+        result = {"status": "success", "counts": {}, "warnings": []}
+        if include_objects:
+            result["objects"] = [{"name": o.name, "type": o.type, "library": o.library.filepath if o.library else None, "material_slots": [s.material.name for s in o.material_slots if s.material]} for o in bpy.data.objects]
+            result["counts"]["objects"] = len(result["objects"])
+        if include_meshes:
+            result["meshes"] = [{"name": m.name, "users": m.users, "library": m.library.filepath if m.library else None} for m in bpy.data.meshes]
+            result["counts"]["meshes"] = len(result["meshes"])
+        if include_materials:
+            result["materials"] = [{"name": m.name, "users": m.users, "library": m.library.filepath if m.library else None} for m in bpy.data.materials]
+            result["counts"]["materials"] = len(result["materials"])
+        if include_images:
+            images = []
+            for image in bpy.data.images:
+                path = bpy.path.abspath(image.filepath) if image.filepath else ""
+                images.append({"name": image.name, "filepath": path, "packed_file": bool(image.packed_file), "source": image.source, "users": image.users, "missing": bool(path and not os.path.exists(path))})
+            result["images"] = images
+            result["counts"]["images"] = len(images)
+        if include_libraries:
+            result["libraries"] = [{"filepath": lib.filepath, "name": lib.name} for lib in bpy.data.libraries]
+            result["counts"]["libraries"] = len(result["libraries"])
+        if include_actions:
+            result["actions"] = [{"name": a.name, "users": a.users, "frame_range": list(a.frame_range)} for a in bpy.data.actions]
+            result["counts"]["actions"] = len(result["actions"])
+        if include_collections:
+            result["collections"] = [{"name": c.name, "object_count": len(c.objects), "child_count": len(c.children), "library": c.library.filepath if c.library else None} for c in bpy.data.collections]
+            result["counts"]["collections"] = len(result["collections"])
+        return result
+
+
+class AssetDependencyService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _path_record(datablock, filepath):
+        path = bpy.path.abspath(filepath) if filepath else ""
+        packed = bool(getattr(datablock, "packed_file", None))
+        return {"name": datablock.name, "filepath": path, "raw_filepath": filepath, "packed": packed, "missing": bool(path and not os.path.exists(path) and not packed), "absolute": bool(path and os.path.isabs(path)), "relative": str(filepath).startswith("//") if filepath else False, "users": getattr(datablock, "users", 0)}
+
+    def get_asset_dependency_report(self, include_images=True, include_libraries=True, include_fonts=True, include_movie_clips=True, include_sounds=True, write_manifest=True, artifact_root=None):
+        deps = {"images": [], "libraries": [], "fonts": [], "movie_clips": [], "sounds": []}
+        if include_images:
+            deps["images"] = [self._path_record(image, image.filepath) for image in bpy.data.images if image.filepath or image.packed_file]
+        if include_libraries:
+            deps["libraries"] = [{"name": lib.name, "filepath": bpy.path.abspath(lib.filepath), "raw_filepath": lib.filepath, "missing": bool(lib.filepath and not os.path.exists(bpy.path.abspath(lib.filepath))), "absolute": os.path.isabs(bpy.path.abspath(lib.filepath)) if lib.filepath else False, "relative": str(lib.filepath).startswith("//")} for lib in bpy.data.libraries]
+        if include_fonts:
+            deps["fonts"] = [self._path_record(font, font.filepath) for font in bpy.data.fonts if getattr(font, "filepath", "")]
+        if include_movie_clips:
+            deps["movie_clips"] = [self._path_record(clip, clip.filepath) for clip in bpy.data.movieclips if getattr(clip, "filepath", "")]
+        if include_sounds:
+            deps["sounds"] = [self._path_record(sound, sound.filepath) for sound in bpy.data.sounds if getattr(sound, "filepath", "")]
+        flat = [item for values in deps.values() for item in values]
+        summary = {"external_count": len(flat), "missing_count": sum(1 for item in flat if item.get("missing")), "absolute_path_count": sum(1 for item in flat if item.get("absolute")), "relative_path_count": sum(1 for item in flat if item.get("relative")), "packed_count": sum(1 for item in flat if item.get("packed"))}
+        result = {"status": "success", "dependencies": deps, "summary": summary, "manifest_path": None, "warnings": []}
+        if write_manifest:
+            result["manifest_path"] = AssetPathService.write_json(os.path.join(AssetPathService.workspace_path("dependency_reports", artifact_root=artifact_root), f"dependency_report_{RenderArtifactService.stamp()}.json"), result)
+        return result
+
+    def create_asset_manifest(self, label=None, include_scene_index=True, include_scene_assets=True, include_dependencies=True, include_materials=True, include_animation=True, include_render_settings=True, include_previews=False, artifact_root=None):
+        manifest = {"status": "success", "label": label or "asset_manifest", "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "warnings": []}
+        if include_scene_index:
+            manifest["scene_index"] = self.server.scene_intelligence_service.get_scene_index(max_objects=1000)
+        if include_scene_assets:
+            manifest["scene_assets"] = self.server.asset_library_intelligence_service.list_scene_assets(include_materials=include_materials, include_actions=include_animation)
+        if include_dependencies:
+            manifest["dependencies"] = self.get_asset_dependency_report(write_manifest=False)
+        if include_render_settings:
+            manifest["render_settings"] = self.server.render_settings_service.get_render_settings()
+        if include_previews:
+            manifest["preview"] = self.server.asset_preview_service.create_asset_preview(label=label or "asset_manifest_preview", artifact_root=artifact_root)
+        safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(label or "manifest")).strip("._-") or "manifest"
+        path = os.path.join(AssetPathService.workspace_path("assets", "manifests", artifact_root=artifact_root), f"{safe_label}_{RenderArtifactService.stamp()}.json")
+        manifest["manifest_path"] = AssetPathService.write_json(path, manifest)
+        return manifest
+
+    def collect_external_dependencies(self, target_dir=None, overwrite=False, include_packed=False, artifact_root=None):
+        target = target_dir or AssetPathService.workspace_path("assets", "dependencies", artifact_root=artifact_root)
+        target = AssetPathService.local_path(target, must_exist=False)
+        os.makedirs(target, exist_ok=True)
+        report = self.get_asset_dependency_report(write_manifest=False)
+        copied = []
+        warnings = []
+        for item in report["dependencies"].get("images", []):
+            src = item.get("filepath")
+            if not src or item.get("packed") and not include_packed or not os.path.exists(src):
+                continue
+            dst = os.path.join(target, os.path.basename(src))
+            if os.path.exists(dst) and not overwrite:
+                warnings.append(f"Skipped existing dependency: {dst}")
+                continue
+            shutil.copy2(src, dst)
+            copied.append({"source": src, "target": dst})
+        manifest_path = AssetPathService.write_json(os.path.join(target, "dependency_collection_manifest.json"), {"copied": copied, "warnings": warnings})
+        return {"status": "success", "target_dir": target, "copied": copied, "manifest_path": manifest_path, "warnings": warnings}
+
+    def validate_external_dependencies(self):
+        report = self.get_asset_dependency_report(write_manifest=False)
+        return {"status": "success", "portable": report["summary"]["missing_count"] == 0 and report["summary"]["absolute_path_count"] == 0, "dependency_report": report, "warnings": []}
+
+    def pack_external_data(self, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "pack_external_data requires confirm=True", "warnings": []}
+        try:
+            bpy.ops.file.pack_all()
+            return {"status": "success", "dependency_report": self.get_asset_dependency_report(write_manifest=False), "warnings": ["Packed external data into the current Blender session; save is not automatic"]}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def make_paths_relative(self, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "make_paths_relative requires confirm=True", "warnings": []}
+        try:
+            bpy.ops.file.make_paths_relative()
+            return {"status": "success", "dependency_report": self.get_asset_dependency_report(write_manifest=False), "warnings": ["Converted paths in the current Blender session; save is not automatic"]}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+
+class AssetImportService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _names():
+        return {"objects": {o.name for o in bpy.data.objects}, "materials": {m.name for m in bpy.data.materials}, "images": {i.name for i in bpy.data.images}, "actions": {a.name for a in bpy.data.actions}}
+
+    @staticmethod
+    def _created(before):
+        return {"created_objects": [o.name for o in bpy.data.objects if o.name not in before["objects"]], "created_materials": [m.name for m in bpy.data.materials if m.name not in before["materials"]], "created_images": [i.name for i in bpy.data.images if i.name not in before["images"]], "created_actions": [a.name for a in bpy.data.actions if a.name not in before["actions"]]}
+
+    def import_model_file(self, file_path, format_hint=None, collection_name=None, rename_prefix=None, import_materials=True, import_animations=True, import_cameras_lights=True, verify=True):
+        try:
+            path = AssetPathService.local_path(file_path)
+            fmt = str(format_hint or os.path.splitext(path)[1].lstrip(".")).lower()
+            _op_name, runner = self.server.asset_library_intelligence_service.choose_importer(fmt)
+            if not runner:
+                return {"status": "error", "message": f"Unsupported import format: {fmt}", "warnings": []}
+            collection = None
+            if collection_name:
+                collection = bpy.data.collections.get(collection_name) or bpy.data.collections.new(collection_name)
+                if collection.name not in bpy.context.scene.collection.children:
+                    bpy.context.scene.collection.children.link(collection)
+            before = self._names()
+            runner(path)
+            created = self._created(before)
+            for name in list(created["created_objects"]):
+                obj = bpy.data.objects.get(name)
+                if obj and rename_prefix:
+                    obj.name = f"{rename_prefix}{obj.name}"
+                if obj and collection:
+                    for col in list(obj.users_collection):
+                        col.objects.unlink(obj)
+                    collection.objects.link(obj)
+            if rename_prefix:
+                created = self._created(before)
+            verification = self.server.scene_intelligence_service.get_scene_index(max_objects=1000) if verify else None
+            manifest = {"status": "success", "file_path": path, "format": fmt, "collection_name": collection.name if collection else None, **created, "verification": verification, "warnings": []}
+            out = os.path.join(AssetPathService.workspace_path("imports", "phase5b"), f"import_manifest_{RenderArtifactService.stamp()}.json")
+            manifest["manifest_path"] = AssetPathService.write_json(out, manifest)
+            return manifest
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+
+class AssetExportService:
+    def __init__(self, server):
+        self.server = server
+
+    def _export(self, fmt, path, selected, overwrite):
+        if os.path.exists(path) and not overwrite:
+            return {"status": "error", "message": f"Output exists and overwrite=False: {path}", "warnings": []}
+        op_name, runner = self.server.asset_library_intelligence_service.choose_exporter(fmt)
+        if not runner:
+            return {"status": "error", "message": f"Unsupported export format: {fmt}", "warnings": []}
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        runner(path, selected)
+        return {"status": "success", "format": fmt, "operator": op_name, "output_path": path, "exists": os.path.exists(path), "bytes": os.path.getsize(path) if os.path.exists(path) else 0, "warnings": []}
+
+    def export_selected_objects(self, output_path=None, format_hint="glb", object_names=None, overwrite=False, artifact_root=None):
+        fmt = str(format_hint or "glb").lower()
+        ext = "glb" if fmt == "glb" else fmt
+        path = output_path or os.path.join(AssetPathService.workspace_path("exports", "selected", artifact_root=artifact_root), f"selected_{RenderArtifactService.stamp()}.{ext}")
+        path = AssetPathService.local_path(path, must_exist=False)
+        previous = list(bpy.context.selected_objects)
+        try:
+            if object_names:
+                bpy.ops.object.select_all(action="DESELECT")
+                for name in object_names:
+                    obj = bpy.data.objects.get(name)
+                    if obj:
+                        obj.select_set(True)
+            return self._export(fmt, path, True, overwrite)
+        finally:
+            bpy.ops.object.select_all(action="DESELECT")
+            for obj in previous:
+                if obj.name in bpy.data.objects:
+                    obj.select_set(True)
+
+    def export_scene(self, output_path=None, format_hint="glb", overwrite=False, artifact_root=None):
+        fmt = str(format_hint or "glb").lower()
+        path = output_path or os.path.join(AssetPathService.workspace_path("exports", "scenes", artifact_root=artifact_root), f"scene_{RenderArtifactService.stamp()}.{fmt}")
+        path = AssetPathService.local_path(path, must_exist=False)
+        return self._export(fmt, path, False, overwrite)
+
+
+class BlendLibraryService:
+    def __init__(self, server):
+        self.server = server
+
+    def append_blend_asset(self, blend_file_path, datablock_type, datablock_names, collection_name=None, link=False, rename_prefix=None, verify=True):
+        try:
+            path = AssetPathService.local_path(blend_file_path)
+            if not path.lower().endswith(".blend"):
+                return {"status": "error", "message": "append_blend_asset requires a .blend file", "warnings": []}
+            attr_map = {"Object": "objects", "Collection": "collections", "Material": "materials", "NodeTree": "node_groups", "World": "worlds", "Action": "actions"}
+            attr = attr_map.get(str(datablock_type))
+            if not attr:
+                return {"status": "error", "message": f"Unsupported datablock_type: {datablock_type}", "warnings": []}
+            requested = list(datablock_names or [])
+            with bpy.data.libraries.load(path, link=bool(link)) as (data_from, data_to):
+                available = set(getattr(data_from, attr) or [])
+                missing = [name for name in requested if name not in available]
+                if missing:
+                    return {"status": "error", "message": f"Datablocks not found: {missing}", "warnings": []}
+                setattr(data_to, attr, requested)
+            loaded = [block for block in getattr(data_to, attr) if block]
+            collection = None
+            if collection_name:
+                collection = bpy.data.collections.get(collection_name) or bpy.data.collections.new(collection_name)
+                if collection.name not in bpy.context.scene.collection.children:
+                    bpy.context.scene.collection.children.link(collection)
+            created = []
+            for block in loaded:
+                if rename_prefix:
+                    block.name = f"{rename_prefix}{block.name}"
+                created.append(block.name)
+                if collection and str(datablock_type) == "Object" and block.name not in collection.objects:
+                    collection.objects.link(block)
+            return {"status": "success", "blend_file_path": path, "datablock_type": datablock_type, "datablocks": created, "linked": bool(link), "collection_name": collection.name if collection else None, "dependency_report": self.server.asset_dependency_service.get_asset_dependency_report(write_manifest=False) if verify else None, "warnings": ["Linked blend assets create external dependencies"] if link else []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+
+class AssetPreviewService:
+    def __init__(self, server):
+        self.server = server
+
+    def create_asset_preview(self, object_names=None, label=None, artifact_root=None, camera_name=None, clamp_for_smoke=True):
+        filename = f"{re.sub(r'[^A-Za-z0-9_.-]+', '_', str(label or 'asset_preview'))}_{RenderArtifactService.stamp()}.png"
+        result = self.server.render_artifact_service.render_still(artifact_root=artifact_root, filename=filename, camera_name=camera_name, clamp_for_smoke=clamp_for_smoke)
+        result["object_names"] = object_names or []
+        return result
+
+    def create_asset_contact_sheet(self, object_names=None, label=None, artifact_root=None, views=None, camera_name=None, clamp_for_smoke=True):
+        filename = f"{re.sub(r'[^A-Za-z0-9_.-]+', '_', str(label or 'asset_contact'))}_{RenderArtifactService.stamp()}.json"
+        return self.server.render_artifact_service.render_contact_sheet(object_names=object_names, camera_name=camera_name, views=views, artifact_root=artifact_root, filename=filename, clamp_for_smoke=clamp_for_smoke)
+
+
+class SceneKitService:
+    def __init__(self, server):
+        self.server = server
+
+    def _kit_dir(self, kit_id, artifact_root=None):
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(kit_id)).strip("._-") or f"kit_{RenderArtifactService.stamp()}"
+        return os.path.join(AssetPathService.workspace_path("scene_kits", artifact_root=artifact_root), safe)
+
+    def create_scene_kit(self, kit_id=None, label=None, collection_name=None, object_names=None, export_format="glb", include_preview=True, include_scene_export=True, overwrite=False, artifact_root=None):
+        kit_id = kit_id or f"scene_kit_{RenderArtifactService.stamp()}"
+        kit_dir = self._kit_dir(kit_id, artifact_root)
+        if os.path.exists(os.path.join(kit_dir, "manifest.json")) and not overwrite:
+            return {"status": "error", "message": f"Scene kit exists and overwrite=False: {kit_dir}", "warnings": []}
+        os.makedirs(os.path.join(kit_dir, "previews"), exist_ok=True)
+        os.makedirs(os.path.join(kit_dir, "exports"), exist_ok=True)
+        manifest = {"status": "success", "kit_id": os.path.basename(kit_dir), "label": label, "collection_name": collection_name, "object_names": object_names or [], "warnings": []}
+        manifest["scene_index_path"] = AssetPathService.write_json(os.path.join(kit_dir, "scene_index.json"), self.server.scene_intelligence_service.get_scene_index(max_objects=1000))
+        manifest["scene_health_path"] = AssetPathService.write_json(os.path.join(kit_dir, "scene_health.json"), self.server.scene_intelligence_service.get_scene_health())
+        manifest["dependencies_path"] = AssetPathService.write_json(os.path.join(kit_dir, "dependencies.json"), self.server.asset_dependency_service.get_asset_dependency_report(write_manifest=False))
+        if include_preview:
+            manifest["preview"] = self.server.asset_preview_service.create_asset_preview(object_names=object_names, label=kit_id, artifact_root=artifact_root)
+        if include_scene_export:
+            export_path = os.path.join(kit_dir, "exports", f"{os.path.basename(kit_dir)}.{export_format}")
+            if object_names:
+                manifest["export"] = self.server.asset_export_service.export_selected_objects(export_path, export_format, object_names, overwrite=True)
+            else:
+                manifest["export"] = self.server.asset_export_service.export_scene(export_path, export_format, overwrite=True)
+        manifest["manifest_path"] = AssetPathService.write_json(os.path.join(kit_dir, "manifest.json"), manifest)
+        return manifest
+
+    def validate_scene_kit(self, kit_path):
+        try:
+            path = AssetPathService.local_path(kit_path)
+            manifest = os.path.join(path, "manifest.json") if os.path.isdir(path) else path
+            if not os.path.exists(manifest):
+                return {"status": "error", "message": "Scene kit manifest not found", "warnings": []}
+            with open(manifest, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            required = ["scene_index_path", "scene_health_path", "dependencies_path"]
+            missing = [key for key in required if not data.get(key) or not os.path.exists(data.get(key))]
+            return {"status": "success", "kit_path": os.path.dirname(manifest), "valid": not missing, "missing": missing, "manifest": data, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def list_scene_kits(self, artifact_root=None):
+        root = AssetPathService.workspace_path("scene_kits", artifact_root=artifact_root)
+        kits = []
+        for name in sorted(os.listdir(root)):
+            manifest = os.path.join(root, name, "manifest.json")
+            if os.path.exists(manifest):
+                kits.append({"kit_id": name, "path": os.path.join(root, name), "manifest_path": manifest})
+        return {"status": "success", "kits": kits, "warnings": []}
+
+    def import_scene_kit(self, kit_path, collection_name=None, rename_prefix=None):
+        validation = self.validate_scene_kit(kit_path)
+        if validation.get("status") != "success" or not validation.get("valid"):
+            return validation
+        export = validation["manifest"].get("export") or {}
+        output_path = export.get("output_path")
+        if not output_path:
+            return {"status": "error", "message": "Scene kit has no importable export artifact", "warnings": []}
+        return self.server.asset_import_service.import_model_file(output_path, collection_name=collection_name, rename_prefix=rename_prefix)
+
+
+class AssetWorkflowBatchService:
+    ALLOWED_COMMANDS = {"get_supported_asset_formats", "scan_asset_folder", "list_scene_assets", "get_asset_file_info", "get_asset_dependency_report", "create_asset_manifest", "import_model_file", "export_selected_objects", "export_scene", "create_asset_preview", "create_asset_contact_sheet", "collect_external_dependencies", "validate_external_dependencies", "create_scene_kit", "validate_scene_kit", "list_scene_kits"}
+    DESTRUCTIVE_COMMANDS = {"pack_external_data", "make_paths_relative", "cleanup_asset_artifacts"}
+
+    def __init__(self, server):
+        self.server = server
+
+    def cleanup_asset_artifacts(self, prefix, confirm=False, cleanup_scene_data=True, cleanup_files=False, artifact_root=None):
+        if not confirm:
+            return {"status": "error", "message": "cleanup_asset_artifacts requires confirm=True", "warnings": []}
+        prefix = str(prefix or "")
+        if len(prefix) < 8:
+            return {"status": "error", "message": "A longer cleanup prefix is required", "warnings": []}
+        deleted = {"objects": [], "collections": [], "materials": [], "images": [], "actions": [], "files": []}
+        if cleanup_scene_data:
+            for obj in list(bpy.data.objects):
+                if obj.name.startswith(prefix):
+                    deleted["objects"].append(obj.name)
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            for col in list(bpy.data.collections):
+                if col.name.startswith(prefix) and len(col.objects) == 0 and len(col.children) == 0:
+                    deleted["collections"].append(col.name)
+                    bpy.data.collections.remove(col)
+            for mat in list(bpy.data.materials):
+                if mat.name.startswith(prefix):
+                    deleted["materials"].append(mat.name)
+                    bpy.data.materials.remove(mat)
+            for image in list(bpy.data.images):
+                if image.name.startswith(prefix):
+                    deleted["images"].append(image.name)
+                    bpy.data.images.remove(image)
+            for action in list(bpy.data.actions):
+                if action.name.startswith(prefix):
+                    deleted["actions"].append(action.name)
+                    bpy.data.actions.remove(action)
+        if cleanup_files:
+            root = os.path.join(AssetPathService.artifact_root(artifact_root), ".overtli_blender")
+            for current_root, _dirs, files in os.walk(root):
+                for filename in files:
+                    if filename.startswith(prefix):
+                        path = os.path.join(current_root, filename)
+                        os.remove(path)
+                        deleted["files"].append(path)
+        return {"status": "success", "prefix": prefix, "deleted": deleted, "warnings": []}
+
+    def run_asset_workflow_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=40, batch_allow_file_writes=True, batch_allow_destructive=False, artifact_root=None):
+        operations = operations or []
+        if len(operations) > max(1, min(int(max_operations), 80)):
+            return {"status": "error", "message": "Too many batch operations", "warnings": []}
+        batch_id = f"asset_batch_{RenderArtifactService.stamp()}"
+        before = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_id}_before", include_screenshots=False, artifact_root=artifact_root) if create_before_snapshot else None
+        results = []
+        errors = []
+        handlers = self.server._build_command_handlers()
+        for op in operations:
+            command = op.get("command")
+            params = dict(op.get("params") or {})
+            if command not in self.ALLOWED_COMMANDS and command not in self.DESTRUCTIVE_COMMANDS:
+                errors.append({"command": command, "message": "Command is not allowed in asset workflow batches"})
+                if stop_on_error:
+                    break
+                continue
+            if command in self.DESTRUCTIVE_COMMANDS and not (batch_allow_destructive and params.get("confirm") is True):
+                errors.append({"command": command, "message": "Destructive batch operation requires batch_allow_destructive=True and operation confirm=True"})
+                if stop_on_error:
+                    break
+                continue
+            if command not in self.DESTRUCTIVE_COMMANDS and not batch_allow_file_writes and command not in {"get_supported_asset_formats", "list_scene_assets", "get_asset_file_info", "get_asset_dependency_report", "validate_external_dependencies", "validate_scene_kit", "list_scene_kits"}:
+                errors.append({"command": command, "message": "File-writing/import/export command blocked by batch_allow_file_writes=False"})
+                if stop_on_error:
+                    break
+                continue
+            params.setdefault("artifact_root", artifact_root)
+            try:
+                result = handlers[command](**params)
+            except Exception as exc:
+                result = {"status": "error", "message": str(exc), "warnings": []}
+            results.append({"command": command, "params": params, "result": result})
+            if result.get("status") == "error":
+                errors.append({"command": command, "message": result.get("message")})
+                if stop_on_error:
+                    break
+        after = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_id}_after", include_screenshots=False, artifact_root=artifact_root) if create_after_snapshot else None
+        batch_dir = AssetPathService.workspace_path("assets", "batches", batch_id, artifact_root=artifact_root)
+        manifest_path = AssetPathService.write_json(os.path.join(batch_dir, "manifest.json"), {"batch_id": batch_id, "label": label, "before_snapshot": before, "after_snapshot": after, "operation_results": results, "errors": errors})
+        return {"status": "partial" if errors else "success", "batch_id": batch_id, "label": label, "before_snapshot": before, "after_snapshot": after, "operation_results": results, "artifacts": [manifest_path], "errors": errors, "warnings": []}
+
+
+class RiggingSimulationService:
+    def __init__(self, server):
+        self.server = server
+
+    def inspect_rigging(self, object_name=None):
+        objects = [bpy.data.objects.get(object_name)] if object_name else list(bpy.data.objects)
+        rigs = []
+        for obj in [o for o in objects if o]:
+            if obj.type == "ARMATURE":
+                rigs.append({"name": obj.name, "type": "ARMATURE", "bones": [b.name for b in obj.data.bones], "pose_bones": [b.name for b in obj.pose.bones] if obj.pose else []})
+            elif obj.type == "MESH":
+                armature_mods = [m.name for m in obj.modifiers if m.type == "ARMATURE"]
+                if armature_mods or obj.vertex_groups:
+                    rigs.append({"name": obj.name, "type": "MESH", "armature_modifiers": armature_mods, "vertex_groups": [g.name for g in obj.vertex_groups]})
+        return {"status": "success", "rigging": rigs, "warnings": []}
+
+    def create_armature(self, armature_name=None, bones=None, collection_name=None, location=None):
+        name = armature_name or f"OVERTLI_ARMATURE_{RenderArtifactService.stamp()}"
+        arm_data = bpy.data.armatures.new(name)
+        arm_obj = bpy.data.objects.new(name, arm_data)
+        collection = bpy.data.collections.get(collection_name) if collection_name else bpy.context.scene.collection
+        if collection_name and collection is None:
+            collection = bpy.data.collections.new(collection_name)
+            bpy.context.scene.collection.children.link(collection)
+        collection.objects.link(arm_obj)
+        arm_obj.location = location or [0, 0, 0]
+        bpy.context.view_layer.objects.active = arm_obj
+        arm_obj.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            first = (bones or [{"name": "Root", "head": [0, 0, 0], "tail": [0, 0, 1]}])[0]
+            default = arm_data.edit_bones[0] if arm_data.edit_bones else arm_data.edit_bones.new(first.get("name", "Root"))
+            default.name = first.get("name", "Root")
+            default.head = first.get("head", [0, 0, 0])
+            default.tail = first.get("tail", [0, 0, 1])
+            for spec in (bones or [])[1:]:
+                bone = arm_data.edit_bones.new(spec.get("name", "Bone"))
+                bone.head = spec.get("head", [0, 0, 0])
+                bone.tail = spec.get("tail", [0, 0, 1])
+                if spec.get("parent"):
+                    bone.parent = arm_data.edit_bones.get(spec["parent"])
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        return {"status": "success", "armature": {"name": arm_obj.name, "bones": [b.name for b in arm_data.bones]}, "warnings": []}
+
+    def parent_mesh_to_armature(self, mesh_name, armature_name, add_modifier=True, create_vertex_groups=True):
+        mesh = bpy.data.objects.get(mesh_name)
+        arm = bpy.data.objects.get(armature_name)
+        if not mesh or mesh.type != "MESH" or not arm or arm.type != "ARMATURE":
+            return {"status": "error", "message": "Mesh and armature objects are required", "warnings": []}
+        mesh.parent = arm
+        if add_modifier and not any(m.type == "ARMATURE" and m.object == arm for m in mesh.modifiers):
+            mod = mesh.modifiers.new(f"{arm.name}_Armature", "ARMATURE")
+            mod.object = arm
+        if create_vertex_groups:
+            for bone in arm.data.bones:
+                if not mesh.vertex_groups.get(bone.name):
+                    mesh.vertex_groups.new(name=bone.name)
+        return {"status": "success", "mesh_name": mesh.name, "armature_name": arm.name, "vertex_groups": [g.name for g in mesh.vertex_groups], "warnings": []}
+
+    def pose_bone_transform(self, armature_name, bone_name, location=None, rotation=None, scale=None, keyframe_frame=None):
+        arm = bpy.data.objects.get(armature_name)
+        if not arm or arm.type != "ARMATURE" or not arm.pose or bone_name not in arm.pose.bones:
+            return {"status": "error", "message": "Armature pose bone not found", "warnings": []}
+        bone = arm.pose.bones[bone_name]
+        if location is not None:
+            bone.location = location
+            if keyframe_frame is not None:
+                bone.keyframe_insert("location", frame=int(keyframe_frame))
+        if rotation is not None:
+            bone.rotation_euler = rotation
+            if keyframe_frame is not None:
+                bone.keyframe_insert("rotation_euler", frame=int(keyframe_frame))
+        if scale is not None:
+            bone.scale = scale
+            if keyframe_frame is not None:
+                bone.keyframe_insert("scale", frame=int(keyframe_frame))
+        return {"status": "success", "armature_name": arm.name, "bone_name": bone.name, "warnings": []}
+
+    def add_driver(self, target_type, target_name, data_path, expression="var", variables=None, array_index=-1):
+        target = bpy.data.objects.get(target_name) if target_type == "object" else bpy.data.materials.get(target_name)
+        if not target:
+            return {"status": "error", "message": "Driver target not found", "warnings": []}
+        try:
+            fcurve = target.driver_add(data_path, int(array_index)) if int(array_index) >= 0 else target.driver_add(data_path)
+            fcurves = fcurve if isinstance(fcurve, list) else [fcurve]
+            for fc in fcurves:
+                fc.driver.type = "SCRIPTED"
+                fc.driver.expression = str(expression)
+                for spec in variables or []:
+                    var = fc.driver.variables.new()
+                    var.name = spec.get("name", "var")
+                    var.targets[0].id = bpy.data.objects.get(spec.get("object_name")) if spec.get("object_name") else target
+                    var.targets[0].data_path = spec.get("data_path", "location.x")
+            return {"status": "success", "target_type": target_type, "target_name": target.name, "data_path": data_path, "driver_count": len(fcurves), "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def remove_driver(self, target_type, target_name, data_path, array_index=-1, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "remove_driver requires confirm=True", "warnings": []}
+        target = bpy.data.objects.get(target_name) if target_type == "object" else bpy.data.materials.get(target_name)
+        if not target:
+            return {"status": "error", "message": "Driver target not found", "warnings": []}
+        try:
+            target.driver_remove(data_path, int(array_index)) if int(array_index) >= 0 else target.driver_remove(data_path)
+            return {"status": "success", "target_type": target_type, "target_name": target.name, "data_path": data_path, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def add_physics_basic(self, object_name, physics_type="cloth", settings=None):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        physics_type = str(physics_type).lower()
+        settings = settings or {}
+        try:
+            if physics_type == "cloth":
+                mod = obj.modifiers.new(settings.get("name", "Overtli Cloth"), "CLOTH")
+            elif physics_type == "collision":
+                mod = obj.modifiers.new(settings.get("name", "Overtli Collision"), "COLLISION")
+            elif physics_type == "soft_body":
+                mod = obj.modifiers.new(settings.get("name", "Overtli Soft Body"), "SOFT_BODY")
+            elif physics_type == "rigid_body":
+                bpy.context.view_layer.objects.active = obj
+                obj.select_set(True)
+                bpy.ops.rigidbody.object_add(type=settings.get("body_type", "ACTIVE"))
+                mod = None
+            elif physics_type == "particle_hair":
+                mod = obj.modifiers.new(settings.get("name", "Overtli Hair"), "PARTICLE_SYSTEM")
+                ps = obj.particle_systems[-1].settings
+                ps.type = "HAIR"
+                ps.count = max(1, min(int(settings.get("count", 100)), 10000))
+                ps.hair_length = max(0.001, min(float(settings.get("hair_length", 1.0)), 100.0))
+            else:
+                return {"status": "error", "message": f"Unsupported physics_type: {physics_type}", "warnings": []}
+            return {"status": "success", "object_name": obj.name, "physics_type": physics_type, "modifier_name": mod.name if mod else None, "warnings": ["Simulation cache is not baked by this command"]}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+
 class ModifierService:
     SUPPORTED_MODIFIERS = {"BEVEL", "SUBSURF", "SOLIDIFY", "MIRROR", "ARRAY", "WEIGHTED_NORMAL", "TRIANGULATE", "DECIMATE"}
     ALLOWED_PROPERTIES = {
@@ -6037,6 +6784,15 @@ class BlenderMCPServer:
         self.render_artifact_service = RenderArtifactService(self)
         self.compositor_pass_service = CompositorPassService(self)
         self.presentation_workflow_batch_service = PresentationWorkflowBatchService(self)
+        self.asset_library_intelligence_service = AssetLibraryIntelligenceService(self)
+        self.asset_dependency_service = AssetDependencyService(self)
+        self.asset_import_service = AssetImportService(self)
+        self.asset_export_service = AssetExportService(self)
+        self.blend_library_service = BlendLibraryService(self)
+        self.scene_kit_service = SceneKitService(self)
+        self.asset_preview_service = AssetPreviewService(self)
+        self.asset_workflow_batch_service = AssetWorkflowBatchService(self)
+        self.rigging_simulation_service = RiggingSimulationService(self)
         self.modifier_service = ModifierService(self)
         self.collection_organization_service = CollectionOrganizationService(self)
         self.verified_edit_batch_service = VerifiedEditBatchService(self)
@@ -6157,6 +6913,36 @@ class BlenderMCPServer:
         self.set_render_passes = self.compositor_pass_service.set_render_passes
         self.run_presentation_workflow_batch = self.presentation_workflow_batch_service.run_presentation_workflow_batch
         self.cleanup_presentation_artifacts = self.presentation_workflow_batch_service.cleanup_presentation_artifacts
+        self.get_supported_asset_formats = self.asset_library_intelligence_service.get_supported_asset_formats
+        self.scan_asset_folder = self.asset_library_intelligence_service.scan_asset_folder
+        self.list_asset_libraries = self.asset_library_intelligence_service.list_asset_libraries
+        self.list_scene_assets = self.asset_library_intelligence_service.list_scene_assets
+        self.get_asset_file_info = self.asset_library_intelligence_service.get_asset_file_info
+        self.get_asset_dependency_report = self.asset_dependency_service.get_asset_dependency_report
+        self.create_asset_manifest = self.asset_dependency_service.create_asset_manifest
+        self.collect_external_dependencies = self.asset_dependency_service.collect_external_dependencies
+        self.validate_external_dependencies = self.asset_dependency_service.validate_external_dependencies
+        self.pack_external_data = self.asset_dependency_service.pack_external_data
+        self.make_paths_relative = self.asset_dependency_service.make_paths_relative
+        self.append_blend_asset = self.blend_library_service.append_blend_asset
+        self.import_model_file = self.asset_import_service.import_model_file
+        self.export_selected_objects = self.asset_export_service.export_selected_objects
+        self.export_scene = self.asset_export_service.export_scene
+        self.create_asset_preview = self.asset_preview_service.create_asset_preview
+        self.create_asset_contact_sheet = self.asset_preview_service.create_asset_contact_sheet
+        self.create_scene_kit = self.scene_kit_service.create_scene_kit
+        self.import_scene_kit = self.scene_kit_service.import_scene_kit
+        self.validate_scene_kit = self.scene_kit_service.validate_scene_kit
+        self.list_scene_kits = self.scene_kit_service.list_scene_kits
+        self.cleanup_asset_artifacts = self.asset_workflow_batch_service.cleanup_asset_artifacts
+        self.run_asset_workflow_batch = self.asset_workflow_batch_service.run_asset_workflow_batch
+        self.inspect_rigging = self.rigging_simulation_service.inspect_rigging
+        self.create_armature = self.rigging_simulation_service.create_armature
+        self.parent_mesh_to_armature = self.rigging_simulation_service.parent_mesh_to_armature
+        self.pose_bone_transform = self.rigging_simulation_service.pose_bone_transform
+        self.add_driver = self.rigging_simulation_service.add_driver
+        self.remove_driver = self.rigging_simulation_service.remove_driver
+        self.add_physics_basic = self.rigging_simulation_service.add_physics_basic
         self.add_object_modifier = self.modifier_service.add_object_modifier
         self.update_object_modifier = self.modifier_service.update_object_modifier
         self.remove_object_modifier = self.modifier_service.remove_object_modifier
@@ -6460,6 +7246,36 @@ class BlenderMCPServer:
             "set_render_passes": self.set_render_passes,
             "run_presentation_workflow_batch": self.run_presentation_workflow_batch,
             "cleanup_presentation_artifacts": self.cleanup_presentation_artifacts,
+            "get_supported_asset_formats": self.get_supported_asset_formats,
+            "scan_asset_folder": self.scan_asset_folder,
+            "list_asset_libraries": self.list_asset_libraries,
+            "list_scene_assets": self.list_scene_assets,
+            "get_asset_file_info": self.get_asset_file_info,
+            "get_asset_dependency_report": self.get_asset_dependency_report,
+            "create_asset_manifest": self.create_asset_manifest,
+            "append_blend_asset": self.append_blend_asset,
+            "import_model_file": self.import_model_file,
+            "export_selected_objects": self.export_selected_objects,
+            "export_scene": self.export_scene,
+            "create_asset_preview": self.create_asset_preview,
+            "create_asset_contact_sheet": self.create_asset_contact_sheet,
+            "create_scene_kit": self.create_scene_kit,
+            "import_scene_kit": self.import_scene_kit,
+            "validate_scene_kit": self.validate_scene_kit,
+            "list_scene_kits": self.list_scene_kits,
+            "collect_external_dependencies": self.collect_external_dependencies,
+            "validate_external_dependencies": self.validate_external_dependencies,
+            "pack_external_data": self.pack_external_data,
+            "make_paths_relative": self.make_paths_relative,
+            "cleanup_asset_artifacts": self.cleanup_asset_artifacts,
+            "run_asset_workflow_batch": self.run_asset_workflow_batch,
+            "inspect_rigging": self.inspect_rigging,
+            "create_armature": self.create_armature,
+            "parent_mesh_to_armature": self.parent_mesh_to_armature,
+            "pose_bone_transform": self.pose_bone_transform,
+            "add_driver": self.add_driver,
+            "remove_driver": self.remove_driver,
+            "add_physics_basic": self.add_physics_basic,
             "add_object_modifier": self.add_object_modifier,
             "update_object_modifier": self.update_object_modifier,
             "remove_object_modifier": self.remove_object_modifier,

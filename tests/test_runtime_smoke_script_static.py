@@ -88,6 +88,17 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--phase3-full",
         "--phase4a-full",
         "--phase4b-full",
+        "--phase5a-full",
+        "--include-asset-formats",
+        "--include-asset-scan",
+        "--include-scene-assets",
+        "--include-dependency-report",
+        "--include-asset-manifest",
+        "--include-import-export",
+        "--include-scene-kit",
+        "--include-asset-preview",
+        "--include-asset-workflow-batch",
+        "--phase5b-full",
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
@@ -222,3 +233,36 @@ def test_runtime_smoke_phase4b_full_cleans_up_and_avoids_forbidden_commands() ->
         "create_rodin_job",
     ]:
         assert text not in phase4b_block
+
+
+def test_runtime_smoke_phase5b_full_cleans_up_and_avoids_forbidden_commands() -> None:
+    phase5b_start = SMOKE_TEXT.index("def run_phase5b_full_smoke")
+    phase5b_end = SMOKE_TEXT.index("def build_parser")
+    phase5b_block = SMOKE_TEXT[phase5b_start:phase5b_end]
+    for text in [
+        "OVERTLI_PHASE5B_",
+        ".overtli_blender",
+        "exports",
+        "scene_kits",
+        "get_supported_asset_formats",
+        "scan_asset_folder",
+        "list_scene_assets",
+        "get_asset_dependency_report",
+        "create_asset_manifest",
+        "create_asset_preview",
+        "export_selected_objects",
+        "import_model_file",
+        "create_scene_kit",
+        "validate_scene_kit",
+        "run_asset_workflow_batch",
+        "cleanup_asset_artifacts",
+        '"confirm": True',
+    ]:
+        assert text in phase5b_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in phase5b_block
