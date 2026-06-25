@@ -142,6 +142,8 @@ Success criteria:
 - `--phase6b-full` runs a contained Phase 6B addon and knowledge workflow: it checks addon management status, lists addons, inspects one addon, inspects the local Blender Python API docs mirror, builds a public-safe API index, searches API topics, creates and validates a metadata-only verified snippet, creates and validates a local skill pack, exports and validates a privacy-filtered review package, and runs a non-destructive advanced knowledge batch.
 - Phase 6B smoke writes generated files under `.overtli_blender/knowledge/`, `.overtli_blender/addon_dev/`, and `.overtli_blender/review_packages/`.
 - Phase 6B smoke uses the local docs mirror if present, does not install addons by default, does not enable/disable/remove addons, does not execute snippets by default, does not publish private docs, does not run raw code, and does not run provider downloads.
+- `--phase7b-full` runs Phase 7B governance checks: status, tool pack discovery, keyword tool search, tool spec lookup, permission profile, capability validation, metadata-only approval prepare/approve/deny, pending approvals, operation status/list, log status, and command registry coverage.
+- Phase 7B smoke is metadata/status-only. It does not run raw code, provider downloads, or destructive execution, and it does not mutate user data.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.

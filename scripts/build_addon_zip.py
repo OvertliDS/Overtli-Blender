@@ -36,27 +36,7 @@ def source_commit() -> str | None:
         return None
 
 
-def build_addon_zip(output_dir: Path = DEFAULT_OUTPUT_ROOT, overwrite: bool = False) -> tuple[Path, Path]:
-    addon = ROOT / "addon.py"
-    if not addon.is_file():
-        raise FileNotFoundError("addon.py not found")
-
-    version = read_version()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / f"overtli_blender_addon_{version}.zip"
-    manifest_path = zip_path.with_suffix(".manifest.json")
-    if (zip_path.exists() or manifest_path.exists()) and not overwrite:
-        raise FileExistsError(f"{zip_path} already exists; pass --overwrite")
-
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(addon, "addon.py")
-        readme = ROOT / "README.md"
-        if readme.is_file():
-            archive.write(readme, "README.md")
-        install_doc = ROOT / "docs" / "addon_install.md"
-        if install_doc.is_file():
-            archive.write(install_doc, "addon_install.md")
-
+def _write_manifest(zip_path: Path, manifest_path: Path, version: str, layout: str) -> None:
     included = []
     with zipfile.ZipFile(zip_path) as archive:
         for info in archive.infolist():
@@ -64,6 +44,7 @@ def build_addon_zip(output_dir: Path = DEFAULT_OUTPUT_ROOT, overwrite: bool = Fa
 
     manifest = {
         "artifact_type": "blender_addon_zip",
+        "layout": layout,
         "version": version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_commit": source_commit(),
@@ -83,21 +64,59 @@ def build_addon_zip(output_dir: Path = DEFAULT_OUTPUT_ROOT, overwrite: bool = Fa
         ],
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def build_addon_zip(output_dir: Path = DEFAULT_OUTPUT_ROOT, overwrite: bool = False, layout: str = "legacy") -> tuple[Path, Path]:
+    addon = ROOT / "addon.py"
+    if not addon.is_file():
+        raise FileNotFoundError("addon.py not found")
+
+    version = read_version()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    zip_name = f"overtli_blender_packaged_experimental_{version}.zip" if layout == "packaged" else f"overtli_blender_addon_{version}.zip"
+    zip_path = output_dir / zip_name
+    manifest_path = zip_path.with_suffix(".manifest.json")
+    if (zip_path.exists() or manifest_path.exists()) and not overwrite:
+        raise FileExistsError(f"{zip_path} already exists; pass --overwrite")
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        if layout == "packaged":
+            package_root = ROOT / "overtli_blender_addon"
+            if not package_root.is_dir():
+                raise FileNotFoundError("overtli_blender_addon package scaffold not found")
+            for path in package_root.rglob("*"):
+                if path.is_file() and "__pycache__" not in path.parts:
+                    archive.write(path, path.relative_to(ROOT).as_posix())
+            archive.writestr("EXPERIMENTAL_PACKAGE_LAYOUT.txt", "experimental_package_layout\nCurrent addon.py remains the stable install target.\n")
+        else:
+            archive.write(addon, "addon.py")
+        readme = ROOT / "README.md"
+        if readme.is_file():
+            archive.write(readme, "README.md")
+        install_doc = ROOT / "docs" / "addon_install.md"
+        if install_doc.is_file():
+            archive.write(install_doc, "addon_install.md")
+
+    _write_manifest(zip_path, manifest_path, version, layout)
     return zip_path, manifest_path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the public-safe Overtli-Blender single-file addon zip.")
+    parser = argparse.ArgumentParser(description="Build public-safe Overtli-Blender addon zips.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", default=True, help="Overwrite existing generated addon zips; default for repeatable local validation.")
+    parser.add_argument("--no-overwrite", action="store_false", dest="overwrite", help="Fail if the generated addon zip already exists.")
+    parser.add_argument("--layout", choices=["legacy", "packaged", "both"], default="both")
     args = parser.parse_args()
     try:
-        zip_path, manifest_path = build_addon_zip(args.output_dir, args.overwrite)
+        layouts = ["legacy", "packaged"] if args.layout == "both" else [args.layout]
+        built = [build_addon_zip(args.output_dir, args.overwrite, layout=layout) for layout in layouts]
     except Exception as exc:
         print(f"FAIL build_addon_zip: {exc}", file=sys.stderr)
         return 1
-    print(f"created {zip_path}")
-    print(f"created {manifest_path}")
+    for zip_path, manifest_path in built:
+        print(f"created {zip_path}")
+        print(f"created {manifest_path}")
     return 0
 
 

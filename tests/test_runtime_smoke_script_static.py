@@ -102,8 +102,46 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
+        "--include-governance-status",
+        "--include-tool-discovery",
+        "--include-approval-flow",
+        "--include-operation-runtime",
+        "--include-capability-policy",
+        "--include-log-status",
+        "--phase7b-full",
     ]:
         assert text in SMOKE_TEXT
+
+
+def test_runtime_smoke_phase7b_full_is_metadata_only() -> None:
+    phase7b_start = SMOKE_TEXT.index("def run_phase7b_governance_smoke")
+    phase7b_end = SMOKE_TEXT.index("def build_parser")
+    phase7b_block = SMOKE_TEXT[phase7b_start:phase7b_end]
+    for text in [
+        "get_system_status",
+        "discover_tool_packs",
+        "search_tools",
+        "get_tool_spec",
+        "get_permission_profile",
+        "validate_command_capabilities",
+        "prepare_operation",
+        "approve_operation",
+        "deny_operation",
+        "get_pending_approvals",
+        "list_recent_operations",
+        "get_operation_status",
+        "get_log_status",
+        "get_command_registry_report",
+    ]:
+        assert text in phase7b_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+        "execute_approved_operation",
+    ]:
+        assert text not in phase7b_block
 
 
 def test_runtime_smoke_phase2_full_avoids_dangerous_optional_flows() -> None:

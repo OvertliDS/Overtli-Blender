@@ -16,6 +16,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 5A presentation workflows: timeline and animation inspection, transform/material/light/shape-key animation, camera creation/framing, active camera control, light and studio setup tools, render settings, still/contact-sheet/preview artifacts, turntable setup, compositor/pass presets, presentation workflow batches, and exact-prefix cleanup
 - Phase 5B asset workflows: runtime import/export format detection, bounded local folder scans, scene asset inventory, asset file inspection, dependency reports, asset manifests, `.blend` append/link, local model import/export, asset previews/contact sheets, reusable scene kits, external dependency validation/collection, and asset workflow batches
 - Phase 8 basics: driver add/remove, armature creation/inspection, mesh-to-armature parenting with vertex groups, pose-bone transforms, and basic cloth/hair/soft-body/rigid-body/collision setup
+- Phase 7B runtime governance: command registry, tool packs, approval records, capability profiles, operation status/cancel skeletons, structured log status, and packaged addon migration scaffold
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -32,6 +33,10 @@ Raw code execution can run Blender Python inside the current session, so treat i
 - `audit` keeps behavior but adds safety metadata
 - `strict` blocks the high-risk command set
 - Provider and asset download tools may involve network access or API keys
+
+Runtime governance adds command discovery, tool specs, permission profiles, and
+two-phase approval metadata on top of the existing safety policy. Existing
+socket command names remain stable.
 
 ## Install
 
@@ -74,6 +79,11 @@ Package and release helper docs:
 
 - [docs/release_check.md](docs/release_check.md)
 - [docs/development.md](docs/development.md)
+- [docs/runtime_governance.md](docs/runtime_governance.md)
+- [docs/command_registry.md](docs/command_registry.md)
+- [docs/tool_packs.md](docs/tool_packs.md)
+- [docs/approval_runtime.md](docs/approval_runtime.md)
+- [docs/packaged_addon_migration.md](docs/packaged_addon_migration.md)
 
 Phase 2 verification smoke:
 

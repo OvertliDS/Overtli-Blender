@@ -123,7 +123,7 @@ def check_privacy_scan() -> None:
         for match in SECRET_RE.finditer(text):
             line = text.count("\n", 0, match.start()) + 1
             context = text[max(0, match.start() - 80): match.end() + 80]
-            if "subtype=\"PASSWORD\"" in context or "PHASE6B_SECRET_RE" in context or "SECRET_RE" in context:
+            if "subtype=\"PASSWORD\"" in context or "PHASE6B_SECRET_RE" in context or "SECRET_RE" in context or "REDACTION_KEYS" in context:
                 continue
             hits.append(f"{rel}:{line}:{match.group(0)}")
     if hits:
@@ -154,6 +154,49 @@ def check_smoke_script_static() -> None:
     text = (ROOT / "scripts" / "smoke_blender_addon_socket.py").read_text(encoding="utf-8")
     if "import bpy" in text:
         raise RuntimeError("smoke script must not import bpy")
+
+
+def check_phase7b_governance_static() -> None:
+    from overtli_blender.runtime.command_registry import build_command_registry, command_registry_report
+    from overtli_blender.runtime.tool_packs import TOOL_PACK_DEFINITIONS
+
+    registry = build_command_registry()
+    required = [
+        "discover_tool_packs",
+        "search_tools",
+        "get_tool_spec",
+        "prepare_operation",
+        "get_pending_approvals",
+        "approve_operation",
+        "deny_operation",
+        "execute_approved_operation",
+        "get_operation_status",
+        "list_recent_operations",
+        "cancel_operation",
+        "get_permission_profile",
+        "get_capability_policy",
+        "validate_command_capabilities",
+        "get_log_status",
+    ]
+    missing = [name for name in required if name not in registry]
+    if missing:
+        raise RuntimeError(f"missing governance command specs: {missing}")
+    if "core" not in TOOL_PACK_DEFINITIONS or "geometry_nodes" not in TOOL_PACK_DEFINITIONS:
+        raise RuntimeError("tool pack definitions incomplete")
+    if not (ROOT / "src" / "overtli_blender" / "runtime" / "approval.py").is_file():
+        raise RuntimeError("approval runtime missing")
+    if not (ROOT / "src" / "overtli_blender" / "runtime" / "operation_response.py").is_file():
+        raise RuntimeError("operation response helper missing")
+    if not (ROOT / "overtli_blender_addon" / "registration.py").is_file():
+        raise RuntimeError("packaged addon scaffold missing")
+    if not (ROOT / "docs" / "packaged_addon_migration.md").is_file():
+        raise RuntimeError("packaged addon migration docs missing")
+    registry_text = (ROOT / "src" / "overtli_blender" / "tools" / "registry.py").read_text(encoding="utf-8")
+    if "register_governance_tools" not in registry_text:
+        raise RuntimeError("governance tools are not registered")
+    report = command_registry_report()
+    if report["command_count"] < 100:
+        raise RuntimeError("command registry unexpectedly small")
 
 
 def run_full_checks(checks: dict[str, str], args: argparse.Namespace, warnings: list[str]) -> None:
@@ -208,6 +251,7 @@ def main() -> int:
         record(checks, "stale_identity_scan", check_stale_identity_scan)
     record(checks, "addon_entrypoint", check_addon_entrypoint)
     record(checks, "smoke_script_static", check_smoke_script_static)
+    record(checks, "phase7b_governance_static", check_phase7b_governance_static)
     if args.full:
         run_full_checks(checks, args, warnings)
 

@@ -1030,6 +1030,74 @@ def run_phase6b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     print("PASS phase6b full smoke completed without addon lifecycle or snippet execution")
 
 
+def _unwrap_governance_envelope(name: str, response: dict) -> dict:
+    result = assert_success(name, response)
+    if "result" in result and isinstance(result["result"], dict):
+        return result["result"]
+    return result
+
+
+def run_phase7b_governance_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    _unwrap_governance_envelope("get_system_status", send_command(sock, timeout_seconds, "get_system_status"))
+
+    packs = _unwrap_governance_envelope("discover_tool_packs", send_command(sock, timeout_seconds, "discover_tool_packs"))
+    if packs.get("status") != "success" or not packs.get("tool_packs"):
+        raise RuntimeError(f"discover_tool_packs: {packs}")
+
+    for query in ["material", "bake", "geometry nodes", "approval", "project workspace"]:
+        result = _unwrap_governance_envelope("search_tools", send_command(sock, timeout_seconds, "search_tools", {"query": query, "risk_max": "HIGH"}))
+        if result.get("status") != "success" or not isinstance(result.get("results"), list):
+            raise RuntimeError(f"search_tools {query}: {result}")
+
+    spec = _unwrap_governance_envelope("get_tool_spec", send_command(sock, timeout_seconds, "get_tool_spec", {"name": "delete_objects"}))
+    if spec.get("status") != "success" or spec.get("tool", {}).get("name") != "delete_objects":
+        raise RuntimeError(f"get_tool_spec: {spec}")
+
+    profile = _unwrap_governance_envelope("get_permission_profile", send_command(sock, timeout_seconds, "get_permission_profile"))
+    if profile.get("status") != "success" or "profile" not in profile:
+        raise RuntimeError(f"get_permission_profile: {profile}")
+
+    readonly = _unwrap_governance_envelope("validate_command_capabilities", send_command(sock, timeout_seconds, "validate_command_capabilities", {"command_name": "get_scene_info", "profile": "read_only"}))
+    if readonly.get("status") != "success":
+        raise RuntimeError(f"validate read-only capabilities: {readonly}")
+
+    high_risk = _unwrap_governance_envelope("validate_command_capabilities", send_command(sock, timeout_seconds, "validate_command_capabilities", {"command_name": "delete_objects", "profile": "read_only"}))
+    if high_risk.get("allowed") is True:
+        raise RuntimeError(f"validate high-risk capabilities should not allow read_only profile: {high_risk}")
+
+    approval = _unwrap_governance_envelope("prepare_operation", send_command(sock, timeout_seconds, "prepare_operation", {"command_name": "delete_objects", "params": {"object_names": [], "confirm": True}}))
+    if approval.get("status") != "requires_approval" or not approval.get("approval", {}).get("approval_id"):
+        raise RuntimeError(f"prepare_operation: {approval}")
+    approval_id = approval["approval"]["approval_id"]
+
+    approved = _unwrap_governance_envelope("approve_operation", send_command(sock, timeout_seconds, "approve_operation", {"approval_id": approval_id}))
+    if approved.get("status") != "success":
+        raise RuntimeError(f"approve_operation: {approved}")
+
+    denied_prepare = _unwrap_governance_envelope("prepare_operation deny", send_command(sock, timeout_seconds, "prepare_operation", {"command_name": "remove_object_modifier", "params": {"object_name": "NOOP", "modifier_name": "NOOP", "confirm": True}}))
+    deny_id = denied_prepare.get("approval", {}).get("approval_id")
+    denied = _unwrap_governance_envelope("deny_operation", send_command(sock, timeout_seconds, "deny_operation", {"approval_id": deny_id, "reason": "phase7b smoke metadata-only"}))
+    if denied.get("status") != "success":
+        raise RuntimeError(f"deny_operation: {denied}")
+
+    pending = _unwrap_governance_envelope("get_pending_approvals", send_command(sock, timeout_seconds, "get_pending_approvals"))
+    if pending.get("status") != "success" or not isinstance(pending.get("approvals"), list):
+        raise RuntimeError(f"get_pending_approvals: {pending}")
+
+    operations = _unwrap_governance_envelope("list_recent_operations", send_command(sock, timeout_seconds, "list_recent_operations", {"limit": 5}))
+    if operations.get("status") != "success":
+        raise RuntimeError(f"list_recent_operations: {operations}")
+    _unwrap_governance_envelope("get_operation_status", send_command(sock, timeout_seconds, "get_operation_status"))
+
+    logs = _unwrap_governance_envelope("get_log_status", send_command(sock, timeout_seconds, "get_log_status"))
+    if logs.get("status") != "success" or "redaction_keys" not in logs:
+        raise RuntimeError(f"get_log_status: {logs}")
+
+    registry = _unwrap_governance_envelope("get_command_registry_report", send_command(sock, timeout_seconds, "get_command_registry_report"))
+    if registry.get("status") != "success" or registry.get("command_count", 0) < 100:
+        raise RuntimeError(f"get_command_registry_report: {registry}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1134,6 +1202,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-skill-pack", action="store_true", help="Run the Phase 6B skill pack metadata smoke.")
     parser.add_argument("--include-review-package", action="store_true", help="Run the Phase 6B review package smoke.")
     parser.add_argument("--include-advanced-knowledge-batch", action="store_true", help="Run the Phase 6B advanced knowledge batch smoke.")
+    parser.add_argument("--include-governance-status", action="store_true", help="Run the Phase 7B governance status smoke.")
+    parser.add_argument("--include-tool-discovery", action="store_true", help="Run the Phase 7B tool discovery smoke.")
+    parser.add_argument("--include-approval-flow", action="store_true", help="Run the Phase 7B metadata-only approval flow smoke.")
+    parser.add_argument("--include-operation-runtime", action="store_true", help="Run the Phase 7B operation runtime smoke.")
+    parser.add_argument("--include-capability-policy", action="store_true", help="Run the Phase 7B capability policy smoke.")
+    parser.add_argument("--include-log-status", action="store_true", help="Run the Phase 7B log status smoke.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1173,6 +1247,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase6b-full",
         action="store_true",
         help="Run a contained Phase 6B addon status, docs, snippets, skill pack, review package, and knowledge batch scenario.",
+    )
+    parser.add_argument(
+        "--phase7b-full",
+        action="store_true",
+        help="Run Phase 7B governance, discovery, approvals, operation runtime, capabilities, and log status checks.",
     )
     return parser
 
@@ -1365,6 +1444,17 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_advanced_knowledge_batch
             ):
                 run_phase6b_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase7b_full
+                or args.include_governance_status
+                or args.include_tool_discovery
+                or args.include_approval_flow
+                or args.include_operation_runtime
+                or args.include_capability_policy
+                or args.include_log_status
+            ):
+                run_phase7b_governance_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

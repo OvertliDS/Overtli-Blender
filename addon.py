@@ -16,6 +16,8 @@ import os
 import shutil
 import zipfile
 import re
+import hashlib
+from uuid import uuid4
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty
 import io
 from contextlib import redirect_stdout, suppress
@@ -41,6 +43,25 @@ try:
         build_command_safety_map,
     )
     from overtli_blender.common.permissions import RiskLevel
+    from overtli_blender.runtime.approval import DEFAULT_APPROVAL_RUNTIME, canonical_params_hash
+    from overtli_blender.runtime.capabilities import (
+        get_capability_policy as runtime_get_capability_policy,
+        get_permission_profile as runtime_get_permission_profile,
+        set_permission_profile as runtime_set_permission_profile,
+        validate_command_capabilities as runtime_validate_command_capabilities,
+    )
+    from overtli_blender.runtime.command_registry import command_registry_report, get_command_spec
+    from overtli_blender.runtime.logging import export_operation_log as runtime_export_operation_log
+    from overtli_blender.runtime.logging import get_log_status as runtime_get_log_status
+    from overtli_blender.runtime.operation_response import build_operation_response
+    from overtli_blender.runtime.operations import DEFAULT_OPERATION_RUNTIME
+    from overtli_blender.runtime.tool_packs import (
+        discover_tool_packs as runtime_discover_tool_packs,
+        get_recommended_tools_for_task as runtime_get_recommended_tools_for_task,
+        get_tool_pack as runtime_get_tool_pack,
+        get_tool_spec as runtime_get_tool_spec,
+        search_tools as runtime_search_tools,
+    )
 except ModuleNotFoundError:
     class RiskLevel(str, Enum):
         LOW = "LOW"
@@ -54,6 +75,293 @@ except ModuleNotFoundError:
     SAFETY_POLICY_VERSION = "1.0"
     DEFAULT_SAFETY_MODE = SAFETY_MODE_COMPAT
     AVAILABLE_SAFETY_MODES = [SAFETY_MODE_COMPAT, SAFETY_MODE_AUDIT, SAFETY_MODE_STRICT]
+
+    _FALLBACK_APPROVAL_RECORDS = {}
+
+    def _fallback_metadata_value(metadata, key, default=None):
+        value = getattr(metadata, key, default)
+        return value.value if hasattr(value, "value") else value
+
+    def _fallback_category(name, operation_type):
+        lowered = name.lower()
+        if name in {
+            "get_system_status", "get_project_status", "discover_tool_packs", "get_tool_pack",
+            "search_tools", "get_tool_spec", "get_recommended_tools_for_task", "prepare_operation",
+            "get_pending_approvals", "approve_operation", "deny_operation", "execute_approved_operation",
+            "expire_approval", "get_operation_status", "list_recent_operations", "cancel_operation",
+            "get_operation_log", "get_permission_profile", "set_permission_profile",
+            "get_capability_policy", "validate_command_capabilities", "get_log_status",
+            "export_operation_log", "get_command_registry_report",
+        }:
+            return "core"
+        if "geometry_node" in lowered or operation_type == "GEOMETRY_NODES":
+            return "geometry_nodes"
+        if "material" in lowered or "shader" in lowered:
+            return "materials"
+        if "asset" in lowered or "import" in lowered or "export" in lowered:
+            return "assets"
+        if "addon" in lowered:
+            return "addon_management"
+        if "workspace" in lowered or "todo" in lowered or "journal" in lowered or "snapshot" in lowered:
+            return "workspace"
+        if operation_type == "VERIFY":
+            return "verification"
+        return "scene" if operation_type == "OBSERVE" else "editing"
+
+    def _fallback_pack(category):
+        if category in {"core", "workspace", "verification"}:
+            return "core" if category != "verification" else "scene_intelligence"
+        if category in {"materials", "textures"}:
+            return "materials"
+        if category == "geometry_nodes":
+            return "geometry_nodes"
+        if category in {"assets", "files"}:
+            return "asset_workflows"
+        if category in {"addon_management", "knowledge"}:
+            return "addon_knowledge"
+        return "verified_editing"
+
+    def _fallback_command_specs():
+        specs = {}
+        for command_name, metadata in build_command_safety_map().items():
+            operation_type = _fallback_metadata_value(metadata, "operation_type", "VERIFY")
+            risk_level = _fallback_metadata_value(metadata, "risk_level", "LOW")
+            category = _fallback_category(command_name, operation_type)
+            pack = _fallback_pack(category)
+            strict_blocked = bool(_fallback_metadata_value(metadata, "strict_blocked", False))
+            high_risk = risk_level in {"HIGH", "DESTRUCTIVE"}
+            can_mutate = bool(_fallback_metadata_value(metadata, "can_mutate_scene", False))
+            can_write = bool(_fallback_metadata_value(metadata, "can_write_files", False))
+            can_network = bool(_fallback_metadata_value(metadata, "can_call_network", False))
+            can_code = bool(_fallback_metadata_value(metadata, "can_execute_code", False))
+            caps = ["scene.write" if can_mutate else "scene.read"]
+            if high_risk or strict_blocked:
+                caps.append("scene.destructive")
+            if can_write:
+                caps.append("filesystem.project.write")
+            if can_network:
+                caps.append("network.providers")
+            if can_code:
+                caps.append("raw_python")
+            specs[command_name] = {
+                "name": command_name,
+                "title": command_name.replace("_", " ").title(),
+                "description": f"{command_name} command.",
+                "category": category,
+                "tool_pack": pack,
+                "service_name": "BlenderCommandServer",
+                "handler_method": command_name,
+                "operation_type": operation_type,
+                "risk_level": risk_level,
+                "read_only": not (can_mutate or can_write or can_network or can_code),
+                "destructive": high_risk or strict_blocked or "delete" in command_name or "remove" in command_name,
+                "idempotent": not (can_mutate or can_write or can_network or can_code),
+                "requires_approval": high_risk or strict_blocked,
+                "requires_confirmation": high_risk or strict_blocked,
+                "supports_progress": can_write,
+                "supports_cancel": can_write,
+                "timeout_seconds": 30,
+                "rollback_strategy": "scene_snapshot" if can_mutate else None,
+                "allowed_capabilities": sorted(set(caps)),
+                "filesystem_access": "project_write" if can_write else "none",
+                "network_access": "provider" if can_network else "none",
+                "blender_version_notes": "single-file fallback metadata",
+                "input_schema_ref": f"socket:{command_name}:input",
+                "output_schema_ref": f"socket:{command_name}:output",
+                "smoke_flags": ["--phase7b-full"] if command_name.startswith(("get_", "discover_", "search_", "prepare_", "approve_", "deny_")) else [],
+                "mcp_tool_module": None,
+                "public": True,
+                "deprecated": False,
+                "tags": [command_name.replace("_", " "), category, pack, "bake" if category in {"materials", "textures"} else ""],
+            }
+        return specs
+
+    class _FallbackApprovalRuntime:
+        def __init__(self):
+            self.records = {}
+
+        def prepare_operation(self, command_name, params=None, scene_revision=None):
+            payload = json.dumps({"command_name": command_name, "params": params or {}}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            approval_id = f"appr_{uuid4().hex[:16]}"
+            record = {
+                "approval_id": approval_id,
+                "command_name": command_name,
+                "params_hash": hashlib.sha256(payload).hexdigest(),
+                "target_summary": [],
+                "path_summary": [],
+                "risk_level": "HIGH",
+                "destructive": True,
+                "created_at": time.time(),
+                "expires_at": time.time() + 600,
+                "scene_revision": scene_revision,
+                "required_capabilities": [],
+                "rollback_strategy": "scene_snapshot",
+                "status": "pending",
+            }
+            self.records[approval_id] = record
+            return {"status": "requires_approval", "approval_required": True, "approval": record}
+
+        def get_pending_approvals(self):
+            return {"status": "success", "approvals": [record for record in self.records.values() if record["status"] == "pending"]}
+
+        def approve_operation(self, approval_id):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            record["status"] = "approved"
+            return {"status": "success", "approval": record}
+
+        def deny_operation(self, approval_id, reason=None):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            record["status"] = "denied"
+            return {"status": "success", "approval": record, "reason": reason}
+
+        def expire_approval(self, approval_id=None):
+            return {"status": "success", "expired": []}
+
+        def execute_approved_operation(self, approval_id, command_name, params=None):
+            return {"status": "not_implemented", "message": "Approved execution dispatch is staged for migrated operations.", "approval_id": approval_id, "command_name": command_name}
+
+    DEFAULT_APPROVAL_RUNTIME = _FallbackApprovalRuntime()
+
+    def canonical_params_hash(command_name, params=None):
+        payload = json.dumps({"command_name": command_name, "params": params or {}}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def runtime_get_permission_profile():
+        return {"status": "success", "profile": "standard", "capabilities": ["scene.read", "scene.write"]}
+
+    def runtime_set_permission_profile(profile, confirm=False):
+        return {"status": "requires_approval" if not confirm else "success", "profile": profile}
+
+    def runtime_get_capability_policy():
+        return {
+            "status": "success",
+            "capabilities": [
+                "scene.read", "scene.write", "scene.destructive",
+                "filesystem.project.read", "filesystem.project.write",
+                "network.providers", "addon.inspect", "addon.manage",
+                "raw_python", "knowledge.read", "knowledge.write", "release.export",
+            ],
+            "profiles": {
+                "read_only": ["scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read"],
+                "standard": ["scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write"],
+                "trusted_project": ["scene.read", "scene.write", "scene.destructive", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "release.export"],
+                "developer": [
+                    "scene.read", "scene.write", "scene.destructive",
+                    "filesystem.project.read", "filesystem.project.write",
+                    "network.providers", "addon.inspect", "addon.manage",
+                    "raw_python", "knowledge.read", "knowledge.write", "release.export",
+                ],
+            },
+            "active_profile": "standard",
+        }
+
+    def runtime_validate_command_capabilities(command_name, profile=None):
+        spec = _fallback_command_specs().get(command_name)
+        if not spec:
+            return {"status": "error", "message": f"Unknown command: {command_name}"}
+        policy = runtime_get_capability_policy()
+        profile_name = profile or policy["active_profile"]
+        allowed_capabilities = set(policy["profiles"].get(profile_name, []))
+        required_capabilities = set(spec.get("allowed_capabilities", []))
+        missing = sorted(required_capabilities - allowed_capabilities)
+        return {
+            "status": "success" if not missing else "error",
+            "command_name": command_name,
+            "profile": profile_name,
+            "allowed": not missing,
+            "required_capabilities": sorted(required_capabilities),
+            "missing_capabilities": missing,
+        }
+
+    def command_registry_report():
+        specs = _fallback_command_specs()
+        return {
+            "status": "success",
+            "command_count": len(specs),
+            "categories": sorted({spec["category"] for spec in specs.values()}),
+            "tool_packs": sorted({spec["tool_pack"] for spec in specs.values()}),
+            "governance_commands": [name for name in specs if name in {
+                "get_system_status", "discover_tool_packs", "search_tools", "get_tool_spec",
+                "prepare_operation", "approve_operation", "deny_operation", "get_log_status",
+            }],
+            "response_envelope_migration": {"applied_to": [], "migration_pending": sorted(specs)},
+        }
+
+    def get_command_spec(name):
+        return _fallback_command_specs().get(name)
+
+    def runtime_get_log_status():
+        return {"status": "success", "log_dir": ".overtli_blender/logs", "redaction_keys": ["api_key", "token", "secret", "password", "credential", "auth"]}
+
+    def runtime_export_operation_log(operation_id=None):
+        return {"status": "success", "events": [], "operation_id": operation_id}
+
+    def build_operation_response(**kwargs):
+        return {"status": kwargs.get("status", "success"), "tool": kwargs.get("tool"), "result": kwargs.get("result", {})}
+
+    class _FallbackOperationRuntime:
+        def get_operation_status(self, operation_id=None):
+            return {"status": "success", "operations": [], "operation_id": operation_id}
+        def list_recent_operations(self, limit=20):
+            return {"status": "success", "operations": []}
+        def cancel_operation(self, operation_id):
+            return {"status": "not_implemented", "operation_id": operation_id}
+        def get_operation_log(self, operation_id=None):
+            return {"status": "success", "operations": [], "operation_id": operation_id}
+
+    DEFAULT_OPERATION_RUNTIME = _FallbackOperationRuntime()
+
+    def runtime_discover_tool_packs():
+        specs = _fallback_command_specs()
+        packs = {}
+        descriptions = {
+            "core": "Status, permissions, approvals, operations, and discovery.",
+            "scene_intelligence": "Scene inspection and verification.",
+            "verified_editing": "Structured editing and recovery.",
+            "materials": "Material, shader, texture, and future baking workflows.",
+            "geometry_nodes": "Geometry Nodes workflows.",
+            "asset_workflows": "Assets and import/export workflows.",
+            "addon_knowledge": "Addon and knowledge workflows.",
+        }
+        for spec in specs.values():
+            pack = spec["tool_pack"]
+            packs.setdefault(pack, {"name": pack, "title": pack.replace("_", " ").title(), "description": descriptions.get(pack, ""), "categories": set(), "command_count": 0})
+            packs[pack]["categories"].add(spec["category"])
+            packs[pack]["command_count"] += 1
+        return {"status": "success", "tool_packs": [{**pack, "categories": sorted(pack["categories"])} for pack in packs.values()]}
+    def runtime_get_tool_pack(name):
+        specs = _fallback_command_specs()
+        commands = [spec for spec in specs.values() if spec["tool_pack"] == name]
+        if not commands:
+            return {"status": "error", "message": f"Unknown tool pack: {name}"}
+        return {"status": "success", "tool_pack": {"name": name, "title": name.replace("_", " ").title()}, "commands": commands}
+    def runtime_search_tools(query, category=None, tool_pack=None, risk_max=None, limit=20):
+        terms = [term.lower() for term in str(query).split() if term.strip()]
+        risk_order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "DESTRUCTIVE": 4}
+        risk_limit = risk_order.get(str(risk_max or "DESTRUCTIVE").upper(), 4)
+        results = []
+        for spec in _fallback_command_specs().values():
+            if category and spec["category"] != category:
+                continue
+            if tool_pack and spec["tool_pack"] != tool_pack:
+                continue
+            if risk_order.get(spec["risk_level"], 99) > risk_limit:
+                continue
+            haystack = " ".join([spec["name"], spec["title"], spec["description"], spec["category"], spec["tool_pack"], " ".join(spec["tags"]), " ".join(spec["allowed_capabilities"])]).lower()
+            if not terms or any(term in haystack for term in terms):
+                results.append(spec)
+        return {"status": "success", "query": query, "results": results[: max(1, min(int(limit), 50))]}
+    def runtime_get_tool_spec(name):
+        spec = _fallback_command_specs().get(name)
+        if not spec:
+            return {"status": "error", "message": f"Unknown tool: {name}"}
+        return {"status": "success", "tool": spec}
+    def runtime_get_recommended_tools_for_task(task, limit=8):
+        return runtime_search_tools(task, limit=limit)
 
     @dataclass(frozen=True)
     class _FallbackCommandSafetyMetadata:
@@ -8310,6 +8618,30 @@ class BlenderMCPServer:
             "rollback_to_scene_snapshot": self.rollback_to_scene_snapshot,
             "undo_last_blender_operation": self.undo_last_blender_operation,
             "get_safety_status": self.get_safety_status,
+            "get_system_status": self.get_system_status,
+            "get_project_status": self.get_project_status,
+            "discover_tool_packs": self.discover_tool_packs,
+            "get_tool_pack": self.get_tool_pack,
+            "search_tools": self.search_tools,
+            "get_tool_spec": self.get_tool_spec,
+            "get_recommended_tools_for_task": self.get_recommended_tools_for_task,
+            "prepare_operation": self.prepare_operation,
+            "get_pending_approvals": self.get_pending_approvals,
+            "approve_operation": self.approve_operation,
+            "deny_operation": self.deny_operation,
+            "execute_approved_operation": self.execute_approved_operation,
+            "expire_approval": self.expire_approval,
+            "get_operation_status": self.get_operation_status,
+            "list_recent_operations": self.list_recent_operations,
+            "cancel_operation": self.cancel_operation,
+            "get_operation_log": self.get_operation_log,
+            "get_permission_profile": self.get_permission_profile,
+            "set_permission_profile": self.set_permission_profile,
+            "get_capability_policy": self.get_capability_policy,
+            "validate_command_capabilities": self.validate_command_capabilities,
+            "get_log_status": self.get_log_status,
+            "export_operation_log": self.export_operation_log,
+            "get_command_registry_report": self.get_command_registry_report,
             "execute_code": self.execute_code,
             "get_polyhaven_status": self.get_polyhaven_status,
             "get_hyper3d_status": self.get_hyper3d_status,
@@ -8458,6 +8790,99 @@ class BlenderMCPServer:
             return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
 
 
+
+    def get_system_status(self):
+        return build_operation_response(
+            status="success",
+            tool="get_system_status",
+            result={
+                "addon": "Overtli-Blender",
+                "safety_mode": self.safety_policy_service.mode,
+                "blender_version": ".".join(str(part) for part in bpy.app.version),
+                "governance": "phase7b",
+            },
+        )
+
+    def get_project_status(self):
+        return build_operation_response(
+            status="success",
+            tool="get_project_status",
+            result={
+                "workspace_root": ".overtli_blender",
+                "runtime_governance": "available",
+                "packaged_addon_layout": "experimental_package_layout",
+            },
+        )
+
+    def discover_tool_packs(self):
+        return build_operation_response(status="success", tool="discover_tool_packs", result=runtime_discover_tool_packs())
+
+    def get_tool_pack(self, name):
+        return build_operation_response(status="success", tool="get_tool_pack", result=runtime_get_tool_pack(name))
+
+    def search_tools(self, query, category=None, tool_pack=None, risk_max=None, limit=20):
+        return build_operation_response(status="success", tool="search_tools", result=runtime_search_tools(query, category=category, tool_pack=tool_pack, risk_max=risk_max, limit=limit))
+
+    def get_tool_spec(self, name):
+        return build_operation_response(status="success", tool="get_tool_spec", result=runtime_get_tool_spec(name))
+
+    def get_recommended_tools_for_task(self, task, limit=8):
+        return build_operation_response(status="success", tool="get_recommended_tools_for_task", result=runtime_get_recommended_tools_for_task(task, limit=limit))
+
+    def prepare_operation(self, command_name, params=None):
+        return build_operation_response(status="requires_approval", tool="prepare_operation", result=DEFAULT_APPROVAL_RUNTIME.prepare_operation(command_name, params or {}, scene_revision=len(getattr(bpy.context.scene, "objects", []))))
+
+    def get_pending_approvals(self):
+        return build_operation_response(status="success", tool="get_pending_approvals", result=DEFAULT_APPROVAL_RUNTIME.get_pending_approvals())
+
+    def approve_operation(self, approval_id):
+        return build_operation_response(status="success", tool="approve_operation", result=DEFAULT_APPROVAL_RUNTIME.approve_operation(approval_id))
+
+    def deny_operation(self, approval_id, reason=None):
+        return build_operation_response(status="success", tool="deny_operation", result=DEFAULT_APPROVAL_RUNTIME.deny_operation(approval_id, reason=reason))
+
+    def execute_approved_operation(self, approval_id, command_name, params=None):
+        result = DEFAULT_APPROVAL_RUNTIME.execute_approved_operation(approval_id, command_name, params or {})
+        return build_operation_response(status=result.get("status", "not_implemented"), tool="execute_approved_operation", result=result)
+
+    def expire_approval(self, approval_id=None):
+        return build_operation_response(status="success", tool="expire_approval", result=DEFAULT_APPROVAL_RUNTIME.expire_approval(approval_id))
+
+    def get_operation_status(self, operation_id=None):
+        return build_operation_response(status="success", tool="get_operation_status", result=DEFAULT_OPERATION_RUNTIME.get_operation_status(operation_id))
+
+    def list_recent_operations(self, limit=20):
+        return build_operation_response(status="success", tool="list_recent_operations", result=DEFAULT_OPERATION_RUNTIME.list_recent_operations(limit))
+
+    def cancel_operation(self, operation_id):
+        result = DEFAULT_OPERATION_RUNTIME.cancel_operation(operation_id)
+        return build_operation_response(status=result.get("status", "success"), tool="cancel_operation", result=result)
+
+    def get_operation_log(self, operation_id=None):
+        return build_operation_response(status="success", tool="get_operation_log", result=DEFAULT_OPERATION_RUNTIME.get_operation_log(operation_id))
+
+    def get_permission_profile(self):
+        return build_operation_response(status="success", tool="get_permission_profile", result=runtime_get_permission_profile())
+
+    def set_permission_profile(self, profile, confirm=False):
+        result = runtime_set_permission_profile(profile, confirm=confirm)
+        return build_operation_response(status=result.get("status", "success"), tool="set_permission_profile", result=result)
+
+    def get_capability_policy(self):
+        return build_operation_response(status="success", tool="get_capability_policy", result=runtime_get_capability_policy())
+
+    def validate_command_capabilities(self, command_name, profile=None):
+        result = runtime_validate_command_capabilities(command_name, profile=profile)
+        return build_operation_response(status=result.get("status", "success"), tool="validate_command_capabilities", result=result)
+
+    def get_log_status(self):
+        return build_operation_response(status="success", tool="get_log_status", result=runtime_get_log_status())
+
+    def export_operation_log(self, operation_id=None):
+        return build_operation_response(status="success", tool="export_operation_log", result=runtime_export_operation_log(operation_id))
+
+    def get_command_registry_report(self):
+        return build_operation_response(status="success", tool="get_command_registry_report", result=command_registry_report())
 
     def get_scene_info(self):
         """Get information about the current Blender scene"""

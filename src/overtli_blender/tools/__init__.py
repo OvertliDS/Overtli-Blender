@@ -18,6 +18,7 @@ from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tool
 from .geometry_nodes_template_tools import register_geometry_nodes_template_tools
 from .geometry_nodes_tools import register_geometry_nodes_tools
 from .geometry_nodes_workflow_tools import register_geometry_nodes_workflow_tools
+from .governance_tools import register_governance_tools
 from .hyper3d_tools import register_hyper3d_tools
 from .import_export_tools import register_import_export_tools
 from .lattice_tools import register_lattice_tools
@@ -75,6 +76,7 @@ __all__ = [
     "register_geometry_nodes_template_tools",
     "register_geometry_nodes_tools",
     "register_geometry_nodes_workflow_tools",
+    "register_governance_tools",
     "register_hyper3d_tools",
     "register_import_export_tools",
     "register_lattice_tools",

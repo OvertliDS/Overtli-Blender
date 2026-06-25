@@ -24,6 +24,7 @@ from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tool
 from .geometry_nodes_template_tools import register_geometry_nodes_template_tools
 from .geometry_nodes_tools import register_geometry_nodes_tools
 from .geometry_nodes_workflow_tools import register_geometry_nodes_workflow_tools
+from .governance_tools import register_governance_tools
 from .hyper3d_tools import register_hyper3d_tools
 from .import_export_tools import register_import_export_tools
 from .lattice_tools import register_lattice_tools
@@ -63,6 +64,7 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     """Register all MCP tool groups."""
 
     register_context_tools(mcp, get_blender_connection)
+    register_governance_tools(mcp, get_blender_connection)
     register_observation_tools(mcp, get_blender_connection)
     register_scene_intelligence_tools(mcp, get_blender_connection)
     register_scene_edit_tools(mcp, get_blender_connection)

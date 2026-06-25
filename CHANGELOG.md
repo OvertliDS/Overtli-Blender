@@ -4,6 +4,12 @@ All notable public Overtli-Blender changes are summarized here. Private planning
 
 ## Unreleased / Current Development
 
+### Phase 7B - Runtime Governance, Tool Packs, and Packaged Addon Scaffold
+- Added a source-owned `CommandSpec` registry for existing socket commands and governance commands.
+- Added tool pack discovery/search, permission profiles, two-phase approval records, operation response envelopes, operation runtime skeletons, and structured log helpers.
+- Added governance MCP wrappers and socket command support without renaming existing tools.
+- Added Phase 7B smoke flags, release-check gates, public governance docs, and an experimental packaged addon scaffold/build layout.
+
 ### Phase 7A - Release Hardening and Distribution Readiness
 - Added local release readiness checks through `scripts/release_check.py`.
 - Added public-safe single-file addon zip packaging through `scripts/build_addon_zip.py`.
