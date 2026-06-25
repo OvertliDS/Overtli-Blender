@@ -77,9 +77,17 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-shader-graph",
         "--include-material-preview",
         "--include-material-workflow-batch",
+        "--include-selection-deep-info",
+        "--include-vertex-group-ops",
+        "--include-shape-key-ops",
+        "--include-lattice-ops",
+        "--include-deformation-modifier-ops",
+        "--include-region-deformation",
+        "--include-deformation-workflow-batch",
         "--phase2-full",
         "--phase3-full",
         "--phase4a-full",
+        "--phase4b-full",
         "--include-geometry-nodes-status",
         "--include-code-execution",
         "--expect-strict-blocks",
@@ -134,7 +142,7 @@ def test_runtime_smoke_phase3_full_avoids_forbidden_commands() -> None:
 
 def test_runtime_smoke_phase4a_full_cleans_up_and_avoids_forbidden_commands() -> None:
     phase4a_start = SMOKE_TEXT.index("def run_phase4a_full_smoke")
-    phase4a_end = SMOKE_TEXT.index("def run_optional_modifier_ops_smoke")
+    phase4a_end = SMOKE_TEXT.index("def run_phase4b_full_smoke")
     phase4a_block = SMOKE_TEXT[phase4a_start:phase4a_end]
     for text in [
         "OVERTLI_PHASE4A_SMOKE_",
@@ -159,3 +167,58 @@ def test_runtime_smoke_phase4a_full_cleans_up_and_avoids_forbidden_commands() ->
         "create_rodin_job",
     ]:
         assert text not in phase4a_block
+
+
+def test_runtime_smoke_phase4b_full_cleans_up_and_avoids_forbidden_commands() -> None:
+    phase4b_start = SMOKE_TEXT.index("def run_phase4b_full_smoke")
+    phase4b_end = SMOKE_TEXT.index("def run_optional_modifier_ops_smoke")
+    phase4b_block = SMOKE_TEXT[phase4b_start:phase4b_end]
+    for text in [
+        "OVERTLI_PHASE4B_SMOKE_",
+        "OVERTLI_PHASE4B_MESH_",
+        "OVERTLI_PHASE4B_MAT_",
+        "OVERTLI_PHASE4B_TOP_",
+        "OVERTLI_PHASE4B_SHAPE_",
+        "OVERTLI_PHASE4B_LATTICE_",
+        "get_selection_deep_info",
+        "get_mesh_component_summary",
+        "get_method_plan",
+        "list_operation_playbooks",
+        "get_tricks_knowledge_base",
+        "get_anti_pattern_rules",
+        "get_modifier_recipes",
+        "score_selection_confidence",
+        "scan_blender_asset_libraries",
+        "preview_asset",
+        "create_style_material",
+        "create_paintable_texture",
+        "delete_images",
+        "list_uv_maps",
+        "measure_object",
+        "create_proportional_deformation",
+        "get_sculpt_status",
+        "create_sculpt_mask_from_vertex_group",
+        "run_shape_key_sculpt_workflow",
+        "create_vertex_group",
+        "edit_shape_key_offsets",
+        "create_lattice_deformer",
+        "update_lattice_deformer",
+        "add_deformation_modifier",
+        "create_region_deformation",
+        "run_deformation_workflow_batch",
+        "delete_vertex_groups",
+        "delete_shape_keys",
+        "remove_lattice_deformer",
+        "delete_objects",
+        "delete_materials",
+        "delete_collection",
+        '"confirm": True',
+    ]:
+        assert text in phase4b_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in phase4b_block

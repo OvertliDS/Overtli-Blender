@@ -6,7 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
 COLLECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/collection_tools.py").read_text(encoding="utf-8")
+DEFORMATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/deformation_tools.py").read_text(encoding="utf-8")
 OBSERVATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/observation_tools.py").read_text(encoding="utf-8")
+LATTICE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/lattice_tools.py").read_text(encoding="utf-8")
 MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_tools.py").read_text(encoding="utf-8")
 MATERIAL_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_intelligence_tools.py").read_text(encoding="utf-8")
 ADVANCED_MATERIAL_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/advanced_material_tools.py").read_text(encoding="utf-8")
@@ -17,7 +19,11 @@ MODIFIER_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/modifier_tools.py").rea
 SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py").read_text(encoding="utf-8")
 SCENE_EDIT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_edit_tools.py").read_text(encoding="utf-8")
 SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
+SELECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/selection_tools.py").read_text(encoding="utf-8")
+SHAPE_KEY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/shape_key_tools.py").read_text(encoding="utf-8")
 VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
+VERTEX_GROUP_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/vertex_group_tools.py").read_text(encoding="utf-8")
+WORKFLOW_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/workflow_intelligence_tools.py").read_text(encoding="utf-8")
 WORKSPACE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/workspace_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
 CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
@@ -143,6 +149,12 @@ def test_registry_module_references_all_tool_registration_helpers() -> None:
         "register_shader_graph_tools",
         "register_material_texture_tools",
         "register_material_preview_tools",
+        "register_selection_tools",
+        "register_vertex_group_tools",
+        "register_shape_key_tools",
+        "register_lattice_tools",
+        "register_deformation_tools",
+        "register_workflow_intelligence_tools",
         "register_modifier_tools",
         "register_collection_tools",
         "register_workspace_tools",
@@ -277,6 +289,20 @@ def test_phase4a_material_tool_modules_exist_and_register_tools() -> None:
             assert f"def {name}(" in source or f"def {name}_" in source
 
 
+def test_phase4b_tool_modules_exist_and_register_tools() -> None:
+    expected = {
+        SELECTION_TOOLS_TEXT: ["register_selection_tools", "get_selection_deep_info", "get_mesh_component_summary"],
+        VERTEX_GROUP_TOOLS_TEXT: ["register_vertex_group_tools", "create_vertex_group", "update_vertex_group_weights", "list_vertex_groups", "delete_vertex_groups"],
+        SHAPE_KEY_TOOLS_TEXT: ["register_shape_key_tools", "create_shape_key", "update_shape_key_value", "edit_shape_key_offsets", "list_shape_keys", "delete_shape_keys"],
+        LATTICE_TOOLS_TEXT: ["register_lattice_tools", "create_lattice_deformer", "update_lattice_deformer", "apply_lattice_to_object", "remove_lattice_deformer"],
+        DEFORMATION_TOOLS_TEXT: ["register_deformation_tools", "add_deformation_modifier", "update_deformation_modifier", "create_region_deformation", "run_deformation_workflow_batch"],
+        WORKFLOW_INTELLIGENCE_TOOLS_TEXT: ["register_workflow_intelligence_tools", "get_method_plan", "list_operation_playbooks", "get_tricks_knowledge_base", "get_anti_pattern_rules", "get_modifier_recipes", "score_selection_confidence", "scan_blender_asset_libraries", "preview_asset", "import_texture_folder", "create_style_material", "create_paintable_texture", "delete_images", "list_uv_maps", "create_vertex_group_from_uv_island", "measure_object", "measure_distance", "create_proportional_deformation", "get_sculpt_status", "configure_sculpt_brush", "create_sculpt_mask_from_vertex_group", "run_shape_key_sculpt_workflow"],
+    }
+    for source, names in expected.items():
+        for name in names:
+            assert f"def {name}(" in source
+
+
 def test_server_imports_and_registers_context_tools() -> None:
     assert "from overtli_blender.tools.registry import register_all_tools" in SERVER_TEXT
     assert "register_all_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
@@ -316,6 +342,46 @@ def test_addon_command_strings_are_still_present() -> None:
         "create_basic_material",
         "assign_material",
         "update_material_properties",
+        "get_selection_deep_info",
+        "get_mesh_component_summary",
+        "create_vertex_group",
+        "update_vertex_group_weights",
+        "list_vertex_groups",
+        "delete_vertex_groups",
+        "create_shape_key",
+        "update_shape_key_value",
+        "edit_shape_key_offsets",
+        "list_shape_keys",
+        "delete_shape_keys",
+        "create_lattice_deformer",
+        "update_lattice_deformer",
+        "apply_lattice_to_object",
+        "remove_lattice_deformer",
+        "add_deformation_modifier",
+        "update_deformation_modifier",
+        "create_region_deformation",
+        "run_deformation_workflow_batch",
+        "get_method_plan",
+        "list_operation_playbooks",
+        "get_tricks_knowledge_base",
+        "get_anti_pattern_rules",
+        "get_modifier_recipes",
+        "score_selection_confidence",
+        "scan_blender_asset_libraries",
+        "preview_asset",
+        "import_texture_folder",
+        "create_style_material",
+        "create_paintable_texture",
+        "delete_images",
+        "list_uv_maps",
+        "create_vertex_group_from_uv_island",
+        "measure_object",
+        "measure_distance",
+        "create_proportional_deformation",
+        "get_sculpt_status",
+        "configure_sculpt_brush",
+        "create_sculpt_mask_from_vertex_group",
+        "run_shape_key_sculpt_workflow",
         "add_object_modifier",
         "update_object_modifier",
         "remove_object_modifier",

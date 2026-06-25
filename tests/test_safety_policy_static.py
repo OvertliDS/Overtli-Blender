@@ -150,6 +150,58 @@ def test_phase4a_destructive_material_commands_are_strict_blocked() -> None:
         assert "strict_blocked=True" in command_block
 
 
+def test_common_safety_module_classifies_phase4b_deformation_commands() -> None:
+    for text in [
+        '"get_selection_deep_info", OperationType.OBSERVE, RiskLevel.LOW',
+        '"get_mesh_component_summary", OperationType.OBSERVE, RiskLevel.LOW',
+        '"list_vertex_groups", OperationType.OBSERVE, RiskLevel.LOW',
+        '"list_shape_keys", OperationType.OBSERVE, RiskLevel.LOW',
+        '"create_vertex_group", OperationType.SELECT_REGION, RiskLevel.MEDIUM',
+        '"update_vertex_group_weights", OperationType.SELECT_REGION, RiskLevel.MEDIUM',
+        '"create_shape_key", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"update_shape_key_value", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"create_lattice_deformer", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"apply_lattice_to_object", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"add_deformation_modifier", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"update_deformation_modifier", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"create_region_deformation", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"run_deformation_workflow_batch", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"edit_shape_key_offsets", OperationType.DEFORM, RiskLevel.HIGH',
+        '"update_lattice_deformer", OperationType.DEFORM, RiskLevel.HIGH',
+        '"delete_vertex_groups", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"delete_shape_keys", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"remove_lattice_deformer", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"get_method_plan", OperationType.PLAN, RiskLevel.LOW',
+        '"list_operation_playbooks", OperationType.PLAN, RiskLevel.LOW',
+        '"get_tricks_knowledge_base", OperationType.PLAN, RiskLevel.LOW',
+        '"get_anti_pattern_rules", OperationType.PLAN, RiskLevel.LOW',
+        '"score_selection_confidence", OperationType.SELECT_REGION, RiskLevel.LOW',
+        '"scan_blender_asset_libraries", OperationType.ASSET_LIBRARY, RiskLevel.LOW',
+        '"preview_asset", OperationType.VERIFY, RiskLevel.MEDIUM',
+        '"import_texture_folder", OperationType.TEXTURE, RiskLevel.MEDIUM',
+        '"create_style_material", OperationType.MATERIAL, RiskLevel.MEDIUM',
+        '"create_paintable_texture", OperationType.TEXTURE, RiskLevel.MEDIUM',
+        '"list_uv_maps", OperationType.OBSERVE, RiskLevel.LOW',
+        '"measure_object", OperationType.VERIFY, RiskLevel.LOW',
+        '"measure_distance", OperationType.VERIFY, RiskLevel.LOW',
+        '"create_proportional_deformation", OperationType.DEFORM, RiskLevel.MEDIUM',
+        '"get_sculpt_status", OperationType.SCULPT, RiskLevel.LOW',
+        '"create_vertex_group_from_uv_island", OperationType.SELECT_REGION, RiskLevel.HIGH',
+        '"configure_sculpt_brush", OperationType.SCULPT, RiskLevel.HIGH',
+        '"create_sculpt_mask_from_vertex_group", OperationType.SCULPT, RiskLevel.HIGH',
+        '"run_shape_key_sculpt_workflow", OperationType.SCULPT, RiskLevel.HIGH',
+        '"delete_images", OperationType.CLEANUP, RiskLevel.HIGH',
+    ]:
+        assert text in SAFETY_TEXT
+
+
+def test_phase4b_high_risk_commands_are_strict_blocked() -> None:
+    for command in ["edit_shape_key_offsets", "update_lattice_deformer", "delete_vertex_groups", "delete_shape_keys", "remove_lattice_deformer", "create_vertex_group_from_uv_island", "configure_sculpt_brush", "create_sculpt_mask_from_vertex_group", "run_shape_key_sculpt_workflow", "delete_images"]:
+        command_index = SAFETY_TEXT.index(f'"{command}"')
+        command_block = SAFETY_TEXT[command_index:command_index + 500]
+        assert "strict_blocked=True" in command_block
+
+
 def test_smoke_script_exposes_safety_mode_flags() -> None:
     for text in [
         "--include-safety-status",

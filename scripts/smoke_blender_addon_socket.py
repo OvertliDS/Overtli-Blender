@@ -515,6 +515,97 @@ def run_phase4a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         print("PASS phase4a cleanup removed smoke objects, collection, and materials")
 
 
+def run_phase4b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = time.time_ns()
+    collection_name = f"OVERTLI_PHASE4B_SMOKE_{stamp}"
+    mesh_name = f"OVERTLI_PHASE4B_MESH_{stamp}"
+    material_name = f"OVERTLI_PHASE4B_MAT_{stamp}"
+    group_name = f"OVERTLI_PHASE4B_TOP_{stamp}"
+    shape_name = f"OVERTLI_PHASE4B_SHAPE_{stamp}"
+    region_shape_name = f"OVERTLI_PHASE4B_REGION_{stamp}"
+    sculpt_shape_name = f"OVERTLI_PHASE4B_SCULPT_SHAPE_{stamp}"
+    lattice_name = f"OVERTLI_PHASE4B_LATTICE_{stamp}"
+    modifier_name = f"OVERTLI_PHASE4B_SIMPLE_DEFORM_{stamp}"
+    style_material_name = f"OVERTLI_PHASE4B_STYLE_MAT_{stamp}"
+    paint_material_name = f"OVERTLI_PHASE4B_PAINT_MAT_{stamp}"
+    paint_image_name = f"OVERTLI_PHASE4B_PAINT_IMAGE_{stamp}"
+
+    try:
+        assert_success("get_method_plan phase4b", send_command(sock, timeout_seconds, "get_method_plan", {"intent": "make a selected region larger safely"}))
+        assert_success("list_operation_playbooks phase4b", send_command(sock, timeout_seconds, "list_operation_playbooks"))
+        assert_success("get_tricks_knowledge_base phase4b", send_command(sock, timeout_seconds, "get_tricks_knowledge_base", {"category": "deformation"}))
+        assert_success("get_anti_pattern_rules phase4b", send_command(sock, timeout_seconds, "get_anti_pattern_rules"))
+        assert_success("get_modifier_recipes phase4b", send_command(sock, timeout_seconds, "get_modifier_recipes"))
+        assert_success("scan_blender_asset_libraries phase4b", send_command(sock, timeout_seconds, "scan_blender_asset_libraries", {"max_items": 50}))
+        assert_success("create_collection phase4b", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        assert_success("create_basic_material phase4b", send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.25, 0.55, 0.95, 1.0], "replace_existing": True}))
+        created = assert_success("create_primitive_object phase4b mesh", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": mesh_name, "collection_name": collection_name, "material_name": material_name}))
+        mesh_name = created.get("object_name", mesh_name)
+        assert_success("create_style_material phase4b", send_command(sock, timeout_seconds, "create_style_material", {"style_name": "sci_fi", "material_name": style_material_name, "assign_to_object": mesh_name, "verify": True}))
+        assert_success("create_paintable_texture phase4b", send_command(sock, timeout_seconds, "create_paintable_texture", {"object_name": mesh_name, "material_name": paint_material_name, "image_name": paint_image_name, "width": 64, "height": 64, "base_color": [0.1, 0.2, 0.3, 1.0], "verify": True}))
+        assert_success("preview_asset phase4b", send_command(sock, timeout_seconds, "preview_asset", {"asset_name": style_material_name, "asset_type": "material", "artifact_root": REPO_ROOT, "include_snapshot": True}))
+        assert_success("get_selection_deep_info phase4b", send_command(sock, timeout_seconds, "get_selection_deep_info", {"max_components": 128}))
+        summary = assert_success("get_mesh_component_summary phase4b", send_command(sock, timeout_seconds, "get_mesh_component_summary", {"object_name": mesh_name}))
+        if summary.get("mesh_stats", {}).get("vertices", 0) <= 0:
+            raise RuntimeError(f"get_mesh_component_summary missing vertices: {summary}")
+        assert_success("list_uv_maps phase4b", send_command(sock, timeout_seconds, "list_uv_maps", {"object_name": mesh_name}))
+        assert_success("measure_object phase4b", send_command(sock, timeout_seconds, "measure_object", {"object_name": mesh_name}))
+        assert_success("create_vertex_group phase4b", send_command(sock, timeout_seconds, "create_vertex_group", {"object_name": mesh_name, "group_name": group_name, "selection_mode": "by_axis", "rule": {"axis": "z", "operator": ">=", "threshold": 0.0}, "weight": 1.0, "replace_existing": True}))
+        groups = assert_success("list_vertex_groups phase4b", send_command(sock, timeout_seconds, "list_vertex_groups", {"object_name": mesh_name}))
+        if not any(group.get("name") == group_name for group in groups.get("vertex_groups", [])):
+            raise RuntimeError(f"list_vertex_groups missing smoke group: {groups}")
+        assert_success("score_selection_confidence phase4b", send_command(sock, timeout_seconds, "score_selection_confidence", {"object_name": mesh_name, "region": {"vertex_group": group_name}}))
+        assert_success("update_vertex_group_weights phase4b", send_command(sock, timeout_seconds, "update_vertex_group_weights", {"object_name": mesh_name, "group_name": group_name, "weight": 0.9, "mode": "replace", "rule": {"selection_mode": "by_axis", "axis": "z", "operator": ">=", "threshold": 0.0}}))
+        assert_success("create_shape_key phase4b", send_command(sock, timeout_seconds, "create_shape_key", {"object_name": mesh_name, "shape_key_name": shape_name, "replace_existing": True}))
+        assert_success("edit_shape_key_offsets phase4b", send_command(sock, timeout_seconds, "edit_shape_key_offsets", {"object_name": mesh_name, "shape_key_name": shape_name, "vertex_group_name": group_name, "deformation": {"mode": "inflate_along_normals", "amount": 0.05}, "confirm": True, "verify": True}))
+        assert_success("update_shape_key_value phase4b", send_command(sock, timeout_seconds, "update_shape_key_value", {"object_name": mesh_name, "shape_key_name": shape_name, "value": 0.75}))
+        keys = assert_success("list_shape_keys phase4b", send_command(sock, timeout_seconds, "list_shape_keys", {"object_name": mesh_name}))
+        if not any(key.get("name") == shape_name for key in keys.get("shape_keys", [])):
+            raise RuntimeError(f"list_shape_keys missing smoke key: {keys}")
+        lattice = assert_success("create_lattice_deformer phase4b", send_command(sock, timeout_seconds, "create_lattice_deformer", {"target_object_name": mesh_name, "lattice_name": lattice_name, "collection_name": collection_name, "resolution": [2, 2, 2], "padding": 0.1, "add_modifier": True, "verify": True}))
+        assert_success("update_lattice_deformer phase4b", send_command(sock, timeout_seconds, "update_lattice_deformer", {"lattice_name": lattice.get("lattice_name", lattice_name), "deformation": {"mode": "move_top", "amount": 0.03}, "confirm": True, "verify": True}))
+        assert_success("apply_lattice_to_object phase4b", send_command(sock, timeout_seconds, "apply_lattice_to_object", {"target_object_name": mesh_name, "lattice_name": lattice.get("lattice_name", lattice_name), "create_if_missing": True}))
+        assert_success("add_deformation_modifier phase4b", send_command(sock, timeout_seconds, "add_deformation_modifier", {"object_name": mesh_name, "modifier_type": "SIMPLE_DEFORM", "name": modifier_name, "properties": {"deform_method": "TAPER", "deform_axis": "Z", "factor": 0.05}, "vertex_group_name": group_name, "verify": True}))
+        assert_success("update_deformation_modifier phase4b", send_command(sock, timeout_seconds, "update_deformation_modifier", {"object_name": mesh_name, "modifier_name": modifier_name, "properties": {"factor": 0.04}, "vertex_group_name": group_name}))
+        assert_success("create_region_deformation phase4b", send_command(sock, timeout_seconds, "create_region_deformation", {"object_name": mesh_name, "region": {"selector": "vertex_group", "vertex_group": group_name}, "method": "shape_key", "name": region_shape_name, "deformation": {"mode": "translate", "vector": [0.0, 0.0, 0.04]}, "confirm": True, "verify": True}))
+        assert_success("create_proportional_deformation phase4b", send_command(sock, timeout_seconds, "create_proportional_deformation", {"object_name": mesh_name, "region": {"selector": "vertex_group", "vertex_group": group_name}, "method": "shape_key", "name": f"OVERTLI_PHASE4B_PROP_{stamp}", "deformation": {"mode": "translate", "vector": [0.0, 0.0, 0.02], "falloff": "smooth"}, "confirm": True, "verify": True}))
+        assert_success("get_sculpt_status phase4b", send_command(sock, timeout_seconds, "get_sculpt_status", {"object_name": mesh_name}))
+        assert_success("create_sculpt_mask_from_vertex_group phase4b", send_command(sock, timeout_seconds, "create_sculpt_mask_from_vertex_group", {"object_name": mesh_name, "vertex_group_name": group_name, "mask_name": f"OVERTLI_PHASE4B_MASK_{stamp}", "confirm": True}))
+        assert_success("run_shape_key_sculpt_workflow phase4b", send_command(sock, timeout_seconds, "run_shape_key_sculpt_workflow", {"object_name": mesh_name, "vertex_group_name": group_name, "shape_key_name": sculpt_shape_name, "brush_action": "inflate", "amount": 0.025, "confirm": True, "verify": True}))
+        batch = assert_success("run_deformation_workflow_batch phase4b", send_command(sock, timeout_seconds, "run_deformation_workflow_batch", {"label": f"phase4b_batch_{stamp}", "operations": [{"command": "get_mesh_component_summary", "params": {"object_name": mesh_name}}, {"command": "update_shape_key_value", "params": {"object_name": mesh_name, "shape_key_name": shape_name, "value": 0.5}}]}))
+        if batch.get("status") != "success":
+            raise RuntimeError(f"run_deformation_workflow_batch failed: {batch}")
+        assert_success("get_scene_health phase4b", send_command(sock, timeout_seconds, "get_scene_health"))
+        assert_success("get_scene_index phase4b", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 300}))
+    finally:
+        try:
+            send_command(sock, timeout_seconds, "remove_lattice_deformer", {"target_object_name": mesh_name, "lattice_name": lattice_name, "remove_modifier": True, "delete_lattice_object": True, "confirm": True})
+        except Exception as exc:
+            print(f"WARN phase4b lattice cleanup: {exc}")
+        try:
+            send_command(sock, timeout_seconds, "delete_shape_keys", {"object_name": mesh_name, "shape_key_names": [shape_name, region_shape_name, sculpt_shape_name, f"OVERTLI_PHASE4B_PROP_{stamp}"], "confirm": True, "allow_basis": False})
+        except Exception as exc:
+            print(f"WARN phase4b shape key cleanup: {exc}")
+        try:
+            send_command(sock, timeout_seconds, "delete_vertex_groups", {"object_name": mesh_name, "group_names": [group_name], "confirm": True})
+        except Exception as exc:
+            print(f"WARN phase4b vertex group cleanup: {exc}")
+        assert_success("delete_objects phase4b_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [mesh_name, lattice_name], "confirm": True, "allow_missing": True}))
+        assert_success("delete_materials phase4b_cleanup", send_command(sock, timeout_seconds, "delete_materials", {"material_names": [material_name, style_material_name, paint_material_name], "confirm": True, "allow_missing": True}))
+        assert_success("delete_images phase4b_cleanup", send_command(sock, timeout_seconds, "delete_images", {"image_names": [paint_image_name], "confirm": True, "allow_missing": True}))
+        assert_success("delete_collection phase4b_cleanup", send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection_name, "confirm": True, "require_empty": True}))
+        scene_index = assert_success("get_scene_index phase4b_cleanup_probe", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 500}))
+        materials = assert_success("list_materials_deep phase4b_cleanup_probe", send_command(sock, timeout_seconds, "list_materials_deep", {"max_materials": 500}))
+        assets = assert_success("scan_blender_asset_libraries phase4b_cleanup_probe", send_command(sock, timeout_seconds, "scan_blender_asset_libraries", {"max_items": 1000}))
+        object_leftovers = [obj.get("name") for obj in scene_index.get("objects", []) if str(obj.get("name", "")).startswith("OVERTLI_PHASE4B_")]
+        collection_leftovers = [col.get("name") for col in scene_index.get("collections", []) if str(col.get("name", "")).startswith("OVERTLI_PHASE4B_")]
+        material_leftovers = [mat.get("name") for mat in materials.get("materials", []) if str(mat.get("name", "")).startswith("OVERTLI_PHASE4B_")]
+        image_leftovers = [asset.get("name") for asset in assets.get("assets", []) if asset.get("type") == "image" and str(asset.get("name", "")).startswith("OVERTLI_PHASE4B_")]
+        if object_leftovers or collection_leftovers or material_leftovers or image_leftovers:
+            raise RuntimeError(f"Phase 4B cleanup leaked data: objects={object_leftovers}, collections={collection_leftovers}, materials={material_leftovers}, images={image_leftovers}")
+        print("PASS phase4b cleanup removed smoke objects, collection, materials, images, lattice, groups, and shape keys")
+
+
 def run_optional_modifier_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     stamp = str(int(time.time()))
     collection = f"OVERTLI_PHASE3_MOD_SMOKE_{stamp}"
@@ -716,6 +807,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-shader-graph", action="store_true", help="Run the Phase 4A shader graph path via the full contained scenario.")
     parser.add_argument("--include-material-preview", action="store_true", help="Run the Phase 4A material preview path via the full contained scenario.")
     parser.add_argument("--include-material-workflow-batch", action="store_true", help="Run the Phase 4A material workflow batch path via the full contained scenario.")
+    parser.add_argument("--include-selection-deep-info", action="store_true", help="Run the Phase 4B deep selection info smoke.")
+    parser.add_argument("--include-vertex-group-ops", action="store_true", help="Run Phase 4B vertex group operations via the full contained scenario.")
+    parser.add_argument("--include-shape-key-ops", action="store_true", help="Run Phase 4B shape key operations via the full contained scenario.")
+    parser.add_argument("--include-lattice-ops", action="store_true", help="Run Phase 4B lattice operations via the full contained scenario.")
+    parser.add_argument("--include-deformation-modifier-ops", action="store_true", help="Run Phase 4B deformation modifier operations via the full contained scenario.")
+    parser.add_argument("--include-region-deformation", action="store_true", help="Run Phase 4B region deformation via the full contained scenario.")
+    parser.add_argument("--include-deformation-workflow-batch", action="store_true", help="Run Phase 4B deformation workflow batch via the full contained scenario.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -730,6 +828,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase4a-full",
         action="store_true",
         help="Run a contained Phase 4A material intelligence, shader graph, texture slot, preview, batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase4b-full",
+        action="store_true",
+        help="Run a contained Phase 4B selection, vertex group, shape key, lattice, deformation modifier, batch, and cleanup scenario.",
     )
     return parser
 
@@ -832,6 +935,20 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_material_workflow_batch
             ):
                 run_phase4a_full_smoke(sock, args.timeout)
+
+            if args.include_selection_deep_info:
+                assert_success("get_selection_deep_info", send_command(sock, args.timeout, "get_selection_deep_info", {"max_components": 100}))
+
+            if (
+                args.phase4b_full
+                or args.include_vertex_group_ops
+                or args.include_shape_key_ops
+                or args.include_lattice_ops
+                or args.include_deformation_modifier_ops
+                or args.include_region_deformation
+                or args.include_deformation_workflow_batch
+            ):
+                run_phase4b_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0
