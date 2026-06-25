@@ -32,6 +32,11 @@ CATEGORIES = {
     "knowledge",
     "diagnostics",
     "release",
+    "cache_management",
+    "task_planning",
+    "references",
+    "spatial_measurement",
+    "rename",
 }
 
 TOOL_PACKS = {
@@ -44,11 +49,16 @@ TOOL_PACKS = {
     "asset_workflows",
     "addon_knowledge",
     "release_diagnostics",
+    "project_runtime",
+    "file_access",
+    "task_planning",
+    "references",
+    "spatial_measurement",
+    "cache_management",
 }
 
 GOVERNANCE_COMMANDS = {
     "get_system_status",
-    "get_project_status",
     "discover_tool_packs",
     "get_tool_pack",
     "search_tools",
@@ -125,6 +135,20 @@ def _title(name: str) -> str:
 
 def _category(name: str, operation_type: str) -> str:
     lowered = name.lower()
+    if any(marker in lowered for marker in ("reference", "landmark")):
+        return "references"
+    if any(marker in lowered for marker in ("distance", "angle", "area", "volume", "unit", "bounds", "raycast", "nearest", "intersection", "clearance", "alignment", "scale_ratio", "measurement")):
+        return "spatial_measurement"
+    if any(marker in lowered for marker in ("cache", "artifact", "orphan")):
+        return "cache_management"
+    if any(marker in lowered for marker in ("task", "revision", "session_time", "recent_operations", "changes_since", "operation_duration")):
+        return "task_planning"
+    if any(marker in lowered for marker in ("approved_root", "path_access", "project_text_file", "file_delete", "file_access_policy", "scan_project_files", "copy_file_into_project")):
+        return "files"
+    if any(marker in lowered for marker in ("project_workspace", "project_layout", "project_backup", "project_dependencies", "blend_file", "save_project_as", "register_blend_file")) or name == "get_project_status":
+        return "project"
+    if "rename" in lowered:
+        return "rename"
     if name in GOVERNANCE_COMMANDS:
         return "core"
     if "geometry_node" in lowered or operation_type == "GEOMETRY_NODES":
@@ -153,6 +177,18 @@ def _category(name: str, operation_type: str) -> str:
 
 
 def _tool_pack(category: str) -> str:
+    if category == "project":
+        return "project_runtime"
+    if category == "files":
+        return "file_access"
+    if category == "task_planning":
+        return "task_planning"
+    if category == "references":
+        return "references"
+    if category in {"spatial_measurement", "rename"}:
+        return "spatial_measurement"
+    if category == "cache_management":
+        return "cache_management"
     if category in {"core", "project", "workspace", "diagnostics"}:
         return "core"
     if category in {"scene", "verification", "selection", "deformation", "sculpting"}:

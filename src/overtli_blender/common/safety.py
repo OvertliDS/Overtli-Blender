@@ -51,7 +51,7 @@ def _spec(command_type: str, operation_type: OperationType, risk_level: RiskLeve
 
 
 def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
-    return {
+    command_map = {
         "get_scene_info": _spec("get_scene_info", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_object_info": _spec("get_object_info", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_shared_context": _spec("get_shared_context", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
@@ -419,6 +419,47 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
             warnings=("arbitrary-python-execution",),
         ),
     }
+    command_map.update(_phase7c_safety_map())
+    return command_map
+
+
+def _phase7c_safety_map() -> dict[str, CommandSafetyMetadata]:
+    low = [
+        "get_project_status", "resolve_project_workspace", "get_file_access_policy", "validate_path_access",
+        "list_approved_roots", "scan_project_files", "get_cache_status", "list_tasks", "get_task",
+        "get_task_graph", "detect_stale_tasks", "get_session_time", "get_scene_revision",
+        "get_recent_operations", "get_changes_since_revision", "list_reference_images",
+        "calculate_distance", "calculate_angle", "calculate_area", "calculate_volume", "convert_units",
+        "get_oriented_bounds",
+    ]
+    medium = [
+        "initialize_project_workspace", "validate_project_layout", "repair_project_layout", "register_blend_file",
+        "create_project_backup", "collect_project_dependencies", "add_approved_root", "remove_approved_root",
+        "write_project_text_file", "copy_file_into_project", "read_project_text_file", "plan_file_delete",
+        "plan_cache_cleanup", "pin_artifact", "unpin_artifact", "find_orphaned_artifacts",
+        "compact_operation_history", "create_task", "update_task", "set_task_status", "link_task_artifact",
+        "link_task_target", "mark_task_verified", "mark_task_stale", "archive_tasks",
+        "get_operation_duration", "create_scene_revision_marker", "import_reference_image",
+        "create_reference_set", "place_reference_view", "calibrate_reference_scale", "set_reference_opacity",
+        "set_reference_depth", "lock_reference", "set_reference_view_visibility", "add_reference_landmark",
+        "measure_reference_landmarks", "capture_reference_overlay", "relink_reference_image",
+        "calculate_curve_length", "calculate_clearance", "calculate_alignment", "calculate_scale_ratio",
+        "compare_measurements", "raycast_scene", "find_nearest_objects", "detect_object_intersections",
+        "measure_object_to_reference", "plan_rename", "batch_rename_datablocks",
+    ]
+    high = [
+        "save_project_as", "restore_project_backup", "set_file_access_policy", "execute_approved_file_delete",
+        "execute_cache_cleanup", "remove_reference_image", "execute_rename", "batch_rename_files",
+        "rename_project", "repair_references_after_rename",
+    ]
+    specs: dict[str, CommandSafetyMetadata] = {}
+    for name in low:
+        specs[name] = _spec(name, OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE)
+    for name in medium:
+        specs[name] = _spec(name, OperationType.UPDATE_KNOWLEDGE if "task" in name else OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=name in {"place_reference_view", "create_scene_revision_marker", "batch_rename_datablocks"}, can_write_files=any(marker in name for marker in ("workspace", "file", "cache", "task", "reference", "backup", "project", "artifact", "root")), warnings=("phase7c-project-scoped",))
+    for name in high:
+        specs[name] = _spec(name, OperationType.CLEANUP if "delete" in name or "cleanup" in name or "remove" in name else OperationType.EDIT, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=name in {"execute_rename", "rename_project", "repair_references_after_rename", "save_project_as", "restore_project_backup"}, can_write_files=True, strict_blocked=True, warnings=("explicit-approval-required", "phase7c-high-risk"))
+    return specs
 
 
 def get_command_safety(command_type: str) -> CommandSafetyMetadata | None:

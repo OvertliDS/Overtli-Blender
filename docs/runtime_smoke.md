@@ -1,5 +1,15 @@
 # Runtime Smoke
 
+## Phase 7C
+
+Run the contained Phase 7C project-runtime smoke after refreshing or reloading the Blender addon:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase7c-full
+```
+
+The scenario creates an ignored project-local workspace under `.overtli_blender/phase7c_smoke/`, initializes the standard project layout, checks file policy, writes and reads a project text file, creates and links a task, records a scene revision marker, imports a generated tiny reference PNG, calibrates reference landmarks, measures simple object geometry, plans a rename, and plans cache/file cleanup without destructive filesystem execution.
+
 Use this checklist after starting Blender with the Overtli-Blender addon enabled.
 The Python package and console command are `overtli-blender`.
 

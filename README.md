@@ -17,6 +17,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 5B asset workflows: runtime import/export format detection, bounded local folder scans, scene asset inventory, asset file inspection, dependency reports, asset manifests, `.blend` append/link, local model import/export, asset previews/contact sheets, reusable scene kits, external dependency validation/collection, and asset workflow batches
 - Phase 8 basics: driver add/remove, armature creation/inspection, mesh-to-armature parenting with vertex groups, pose-bone transforms, and basic cloth/hair/soft-body/rigid-body/collision setup
 - Phase 7B runtime governance: command registry, tool packs, approval records, capability profiles, operation status/cancel skeletons, structured log status, and packaged addon migration scaffold
+- Phase 7C project runtime foundation: saved/unsaved `.blend` workspace resolution, approved-root file access, cache retention planning, task graph and scene revision tracking, reference image calibration, spatial measurement, and safe rename planning
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -84,6 +85,12 @@ Package and release helper docs:
 - [docs/tool_packs.md](docs/tool_packs.md)
 - [docs/approval_runtime.md](docs/approval_runtime.md)
 - [docs/packaged_addon_migration.md](docs/packaged_addon_migration.md)
+- [docs/project_workspace.md](docs/project_workspace.md)
+- [docs/file_access_policy.md](docs/file_access_policy.md)
+- [docs/cache_retention.md](docs/cache_retention.md)
+- [docs/task_graph.md](docs/task_graph.md)
+- [docs/reference_images.md](docs/reference_images.md)
+- [docs/spatial_measurement.md](docs/spatial_measurement.md)
 
 Phase 2 verification smoke:
 

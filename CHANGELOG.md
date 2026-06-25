@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added Phase 7C project runtime foundations: project workspace resolution, approved-root file access policy, cache retention planning, task graph and scene revision tracking, reference image workflow scaffolding, spatial measurement commands, and safe rename planning.
+- Added Phase 7C MCP wrapper modules, command registry metadata, tool packs, smoke flags, and static tests.
+
 All notable public Overtli-Blender changes are summarized here. Private planning files, generated review packages, Memory Bank content, and local diagnostics are intentionally excluded from release artifacts.
 
 ## Unreleased / Current Development

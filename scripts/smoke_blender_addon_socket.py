@@ -1037,6 +1037,13 @@ def _unwrap_governance_envelope(name: str, response: dict) -> dict:
     return result
 
 
+def assert_command_success(name: str, response: dict) -> dict:
+    result = assert_success(name, response)
+    if result.get("status") != "success":
+        raise RuntimeError(f"{name}: nested command did not succeed: {result}")
+    return result
+
+
 def run_phase7b_governance_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     _unwrap_governance_envelope("get_system_status", send_command(sock, timeout_seconds, "get_system_status"))
 
@@ -1096,6 +1103,71 @@ def run_phase7b_governance_smoke(sock: socket.socket, timeout_seconds: float) ->
     registry = _unwrap_governance_envelope("get_command_registry_report", send_command(sock, timeout_seconds, "get_command_registry_report"))
     if registry.get("status") != "success" or registry.get("command_count", 0) < 100:
         raise RuntimeError(f"get_command_registry_report: {registry}")
+
+
+def run_phase7c_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    run_id = str(time.time_ns())
+    smoke_root = os.path.join(REPO_ROOT, ".overtli_blender", "phase7c_smoke", run_id)
+    os.makedirs(smoke_root, exist_ok=True)
+
+    project_status = _unwrap_governance_envelope("get_project_status phase7c", send_command(sock, timeout_seconds, "get_project_status"))
+    if project_status.get("status") != "success":
+        raise RuntimeError(f"get_project_status phase7c: {project_status}")
+
+    resolved = assert_command_success("resolve_project_workspace phase7c", send_command(sock, timeout_seconds, "resolve_project_workspace", {"preferred_root": smoke_root, "create_if_missing": False}))
+    if not resolved.get("workspace", {}).get("resolved"):
+        raise RuntimeError(f"resolve_project_workspace phase7c: {resolved}")
+
+    assert_command_success("initialize_project_workspace phase7c", send_command(sock, timeout_seconds, "initialize_project_workspace", {"project_root": smoke_root, "project_name": "Phase7C Smoke", "confirm": True}))
+    assert_command_success("validate_project_layout phase7c", send_command(sock, timeout_seconds, "validate_project_layout", {"project_root": smoke_root}))
+    assert_command_success("get_file_access_policy phase7c", send_command(sock, timeout_seconds, "get_file_access_policy"))
+    assert_command_success("add_approved_root phase7c", send_command(sock, timeout_seconds, "add_approved_root", {"root": smoke_root, "confirm": True}))
+
+    text_path = os.path.join(smoke_root, "assets", "phase7c-note.txt")
+    assert_command_success("write_project_text_file phase7c", send_command(sock, timeout_seconds, "write_project_text_file", {"path": text_path, "text": "phase7c smoke text"}))
+    read_back = assert_command_success("read_project_text_file phase7c", send_command(sock, timeout_seconds, "read_project_text_file", {"path": text_path}))
+    if "phase7c smoke text" not in read_back.get("text", ""):
+        raise RuntimeError(f"read_project_text_file phase7c: {read_back}")
+
+    task = assert_command_success("create_task phase7c", send_command(sock, timeout_seconds, "create_task", {"goal": "Phase 7C smoke task", "acceptance_criteria": ["file read/write", "reference calibration", "spatial measurement"]}))
+    task_id = task.get("task", {}).get("task_id")
+    if not task_id:
+        raise RuntimeError(f"create_task phase7c: {task}")
+    assert_command_success("link_task_artifact phase7c", send_command(sock, timeout_seconds, "link_task_artifact", {"task_id": task_id, "artifact_path": text_path}))
+    assert_command_success("set_task_status phase7c", send_command(sock, timeout_seconds, "set_task_status", {"task_id": task_id, "status": "completed_unverified"}))
+    assert_command_success("create_scene_revision_marker phase7c", send_command(sock, timeout_seconds, "create_scene_revision_marker", {"label": "phase7c-smoke"}))
+    assert_command_success("get_recent_operations phase7c", send_command(sock, timeout_seconds, "get_recent_operations", {"limit": 5}))
+
+    png_path = os.path.join(smoke_root, "references", "images", "phase7c-ref.png")
+    os.makedirs(os.path.dirname(png_path), exist_ok=True)
+    with open(png_path, "wb") as handle:
+        handle.write(bytes.fromhex("89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000D49444154789C6360F8FFFF3F0005FE02FEA73581E50000000049454E44AE426082"))
+    ref = assert_command_success("import_reference_image phase7c", send_command(sock, timeout_seconds, "import_reference_image", {"source_path": png_path, "reference_type": "front_orthographic", "copy_into_project": True, "name": "OVERTLI_PHASE7C_REF_" + run_id}))
+    ref_id = ref.get("reference", {}).get("reference_id")
+    if not ref_id:
+        raise RuntimeError(f"import_reference_image phase7c: {ref}")
+    assert_command_success("create_reference_set phase7c", send_command(sock, timeout_seconds, "create_reference_set", {"name": "OVERTLI_PHASE7C_SET_" + run_id, "reference_ids": [ref_id]}))
+    assert_command_success("calibrate_reference_scale phase7c", send_command(sock, timeout_seconds, "calibrate_reference_scale", {"reference_id": ref_id, "known_distance": 1.0}))
+    assert_command_success("add_reference_landmark phase7c a", send_command(sock, timeout_seconds, "add_reference_landmark", {"reference_id": ref_id, "name": "A", "point": [0, 0]}))
+    assert_command_success("add_reference_landmark phase7c b", send_command(sock, timeout_seconds, "add_reference_landmark", {"reference_id": ref_id, "name": "B", "point": [3, 4]}))
+    landmark_distance = assert_command_success("measure_reference_landmarks phase7c", send_command(sock, timeout_seconds, "measure_reference_landmarks", {"reference_id": ref_id, "from_landmark": "A", "to_landmark": "B"}))
+    if int(landmark_distance.get("distance_pixels", 0)) != 5:
+        raise RuntimeError(f"measure_reference_landmarks phase7c: {landmark_distance}")
+
+    a_name = "OVERTLI_PHASE7C_A_" + run_id
+    b_name = "OVERTLI_PHASE7C_B_" + run_id
+    assert_command_success("create_primitive_object phase7c a", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": a_name, "location": [0, 0, 0]}))
+    assert_command_success("create_primitive_object phase7c b", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": b_name, "location": [2, 0, 0]}))
+    assert_command_success("calculate_distance phase7c", send_command(sock, timeout_seconds, "calculate_distance", {"from_object": a_name, "to_object": b_name}))
+    assert_command_success("calculate_angle phase7c", send_command(sock, timeout_seconds, "calculate_angle", {"point_a": [1, 0, 0], "point_b": [0, 0, 0], "point_c": [0, 1, 0]}))
+    assert_command_success("get_oriented_bounds phase7c", send_command(sock, timeout_seconds, "get_oriented_bounds", {"object_name": a_name}))
+    rename_plan = assert_success("plan_rename phase7c", send_command(sock, timeout_seconds, "plan_rename", {"target_type": "objects", "old_name": a_name, "new_name": a_name + "_RENAMED"}))
+    if rename_plan.get("status") != "requires_approval":
+        raise RuntimeError(f"plan_rename phase7c: {rename_plan}")
+    assert_success("plan_cache_cleanup phase7c", send_command(sock, timeout_seconds, "plan_cache_cleanup", {"categories": ["smoke_artifacts"], "dry_run": True}))
+    assert_success("plan_file_delete phase7c", send_command(sock, timeout_seconds, "plan_file_delete", {"paths": [text_path]}))
+    assert_command_success("delete_objects phase7c cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [a_name, b_name], "confirm": True}))
+    print("PASS phase7c full smoke completed with project-local workspace and no destructive filesystem execution")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1208,6 +1280,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-operation-runtime", action="store_true", help="Run the Phase 7B operation runtime smoke.")
     parser.add_argument("--include-capability-policy", action="store_true", help="Run the Phase 7B capability policy smoke.")
     parser.add_argument("--include-log-status", action="store_true", help="Run the Phase 7B log status smoke.")
+    parser.add_argument("--include-project-workspace", action="store_true", help="Run Phase 7C project workspace smoke through --phase7c-full.")
+    parser.add_argument("--include-file-access-policy", action="store_true", help="Run Phase 7C file access policy smoke through --phase7c-full.")
+    parser.add_argument("--include-cache-management", action="store_true", help="Run Phase 7C cache management smoke through --phase7c-full.")
+    parser.add_argument("--include-task-graph", action="store_true", help="Run Phase 7C task graph smoke through --phase7c-full.")
+    parser.add_argument("--include-time-revision", action="store_true", help="Run Phase 7C time/revision smoke through --phase7c-full.")
+    parser.add_argument("--include-reference-images", action="store_true", help="Run Phase 7C reference image smoke through --phase7c-full.")
+    parser.add_argument("--include-spatial-measurement", action="store_true", help="Run Phase 7C spatial measurement smoke through --phase7c-full.")
+    parser.add_argument("--include-rename-planning", action="store_true", help="Run Phase 7C rename planning smoke through --phase7c-full.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1252,6 +1332,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase7b-full",
         action="store_true",
         help="Run Phase 7B governance, discovery, approvals, operation runtime, capabilities, and log status checks.",
+    )
+    parser.add_argument(
+        "--phase7c-full",
+        action="store_true",
+        help="Run Phase 7C project workspace, file access, cache, task graph, time/revision, references, spatial, and rename planning checks.",
     )
     return parser
 
@@ -1455,6 +1540,19 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_log_status
             ):
                 run_phase7b_governance_smoke(sock, args.timeout)
+
+            if (
+                args.phase7c_full
+                or args.include_project_workspace
+                or args.include_file_access_policy
+                or args.include_cache_management
+                or args.include_task_graph
+                or args.include_time_revision
+                or args.include_reference_images
+                or args.include_spatial_measurement
+                or args.include_rename_planning
+            ):
+                run_phase7c_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

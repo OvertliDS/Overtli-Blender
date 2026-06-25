@@ -34,6 +34,12 @@ TOOL_PACK_DEFINITIONS = {
     "asset_workflows": ToolPack("asset_workflows", "Asset Workflows", "Local asset library, import/export, dependency, scene kit, and file workflows.", ("assets", "files")),
     "addon_knowledge": ToolPack("addon_knowledge", "Addon and Knowledge", "Addon management, API knowledge, snippets, skill packs, and review packages.", ("addon_management", "knowledge")),
     "release_diagnostics": ToolPack("release_diagnostics", "Release Diagnostics", "Release, diagnostic, log, and packaging support.", ("release", "diagnostics")),
+    "project_runtime": ToolPack("project_runtime", "Project Runtime", "Saved/unsaved .blend status, project workspace layout, backups, and dependency collection.", ("project",)),
+    "file_access": ToolPack("file_access", "File Access", "Approved roots, canonical path validation, safe text reads/writes, project copies, and delete planning.", ("files",)),
+    "task_planning": ToolPack("task_planning", "Task Planning", "Task graph, stale detection, session time, scene revision, and recent operation tracking.", ("task_planning",)),
+    "references": ToolPack("references", "References", "Reference image import, placement, calibration, landmarks, and visibility controls.", ("references",)),
+    "spatial_measurement": ToolPack("spatial_measurement", "Spatial Measurement", "Distances, angles, bounds, units, raycasts, intersections, and rename planning.", ("spatial_measurement", "rename")),
+    "cache_management": ToolPack("cache_management", "Cache Management", "Cache status, cleanup planning, pinning, orphan scanning, and operation history compaction.", ("cache_management",)),
 }
 
 

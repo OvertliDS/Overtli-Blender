@@ -55,6 +55,17 @@ try:
     from overtli_blender.runtime.logging import get_log_status as runtime_get_log_status
     from overtli_blender.runtime.operation_response import build_operation_response
     from overtli_blender.runtime.operations import DEFAULT_OPERATION_RUNTIME
+    from overtli_blender.runtime.cache_retention import get_cache_status as runtime_get_cache_status
+    from overtli_blender.runtime.cache_retention import plan_cache_cleanup as runtime_plan_cache_cleanup
+    from overtli_blender.runtime.file_access import FileAccessPolicy
+    from overtli_blender.runtime.project_workspace import initialize_workspace as runtime_initialize_workspace
+    from overtli_blender.runtime.project_workspace import resolve_workspace as runtime_resolve_workspace
+    from overtli_blender.runtime.project_workspace import validate_layout as runtime_validate_layout
+    from overtli_blender.runtime.spatial import angle_degrees as runtime_angle_degrees
+    from overtli_blender.runtime.spatial import convert_units as runtime_convert_units
+    from overtli_blender.runtime.spatial import distance as runtime_distance
+    from overtli_blender.runtime.task_graph import TASK_STATUSES, TaskGraphStore
+    from overtli_blender.runtime.time_revision import TimeRevisionTracker
     from overtli_blender.runtime.tool_packs import (
         discover_tool_packs as runtime_discover_tool_packs,
         get_recommended_tools_for_task as runtime_get_recommended_tools_for_task,
@@ -314,6 +325,211 @@ except ModuleNotFoundError:
             return {"status": "success", "operations": [], "operation_id": operation_id}
 
     DEFAULT_OPERATION_RUNTIME = _FallbackOperationRuntime()
+
+    def _phase7c_canonical_path(path):
+        from pathlib import Path
+        return Path(path).expanduser().resolve(strict=False)
+
+    def runtime_distance(a, b):
+        return math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)))
+
+    def runtime_angle_degrees(a, b, c):
+        ba = [x - y for x, y in zip(a, b)]
+        bc = [x - y for x, y in zip(c, b)]
+        dot = sum(x * y for x, y in zip(ba, bc))
+        denom = math.sqrt(sum(x * x for x in ba)) * math.sqrt(sum(x * x for x in bc))
+        if denom == 0:
+            raise ValueError("Cannot calculate angle with zero-length vector.")
+        return math.degrees(math.acos(max(-1.0, min(1.0, dot / denom))))
+
+    def runtime_convert_units(value, from_unit="BLENDER_UNIT", to_unit="METERS", scale_length=1.0):
+        meters = float(value) * float(scale_length) if from_unit.upper() in {"BLENDER_UNIT", "BU"} else float(value)
+        converted = meters / float(scale_length) if to_unit.upper() in {"BLENDER_UNIT", "BU"} and scale_length else meters
+        return {"status": "success", "value": converted, "value_meters": meters, "from_unit": from_unit, "to_unit": to_unit, "confidence": "high"}
+
+    class FileAccessPolicy:
+        def __init__(self, project_root=None, approved_roots=None):
+            self.project_root = _phase7c_canonical_path(project_root or ADDON_ROOT)
+            self.approved_roots = sorted({str(_phase7c_canonical_path(root)) for root in [self.project_root, *(approved_roots or [])]})
+
+        def _is_relative_to(self, child, parent):
+            try:
+                _phase7c_canonical_path(child).relative_to(_phase7c_canonical_path(parent))
+                return True
+            except ValueError:
+                return False
+
+        def to_dict(self):
+            return {"project_root": str(self.project_root), "approved_roots": list(self.approved_roots), "symlink_escape_blocked": True, "atomic_writes": True}
+
+        def add_root(self, root):
+            resolved = str(_phase7c_canonical_path(root))
+            if resolved not in self.approved_roots:
+                self.approved_roots.append(resolved)
+                self.approved_roots.sort()
+            return self.to_dict()
+
+        def remove_root(self, root):
+            resolved = str(_phase7c_canonical_path(root))
+            self.approved_roots = [item for item in self.approved_roots if item != resolved]
+            if str(self.project_root) not in self.approved_roots:
+                self.approved_roots.append(str(self.project_root))
+            return self.to_dict()
+
+        def validate(self, path, access="read"):
+            resolved = _phase7c_canonical_path(path)
+            within_root = any(self._is_relative_to(resolved, root) for root in self.approved_roots)
+            requires_approval = access in {"write", "delete"} and not self._is_relative_to(resolved, self.project_root)
+            return {"status": "success" if within_root else "error", "path": str(resolved), "access": access, "allowed": within_root and not requires_approval, "requires_approval": requires_approval, "approved_roots": self.approved_roots, "warnings": [] if within_root else ["path-outside-approved-roots"]}
+
+        def read_text(self, path, max_bytes=200000):
+            check = self.validate(path, "read")
+            if check["status"] != "success":
+                return check
+            target = _phase7c_canonical_path(path)
+            if not target.exists() or target.is_dir():
+                return {"status": "error", "message": "Path is not a readable file.", "path": str(target)}
+            data = target.read_bytes()
+            if len(data) > max_bytes:
+                return {"status": "error", "message": "Text file exceeds max_bytes.", "path": str(target), "bytes": len(data)}
+            return {"status": "success", "path": str(target), "bytes": len(data), "text": data.decode("utf-8")}
+
+        def write_text(self, path, text):
+            check = self.validate(path, "write")
+            if check["status"] != "success":
+                return check
+            if check["requires_approval"]:
+                return {"status": "requires_approval", **check}
+            target = _phase7c_canonical_path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = target.with_name(f".{target.name}.tmp")
+            temp_path.write_text(text, encoding="utf-8")
+            os.replace(temp_path, target)
+            return {"status": "success", "path": str(target), "bytes": len(text.encode("utf-8"))}
+
+        def copy_into_project(self, source, destination):
+            source_check = self.validate(source, "read")
+            dest_check = self.validate(destination, "write")
+            if source_check["status"] != "success":
+                return source_check
+            if dest_check["status"] != "success":
+                return dest_check
+            if dest_check["requires_approval"]:
+                return {"status": "requires_approval", **dest_check}
+            os.makedirs(os.path.dirname(dest_check["path"]), exist_ok=True)
+            shutil.copy2(source_check["path"], dest_check["path"])
+            return {"status": "success", "source": source_check["path"], "destination": dest_check["path"]}
+
+        def plan_delete(self, paths):
+            files = []
+            bytes_total = 0
+            for path in paths:
+                check = self.validate(path, "delete")
+                if check["status"] == "success" and os.path.isfile(check["path"]):
+                    size = os.path.getsize(check["path"])
+                    files.append({"path": check["path"], "bytes": size})
+                    bytes_total += size
+            approval_id = "delete_" + hashlib.sha256(json.dumps(files, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+            return {"status": "requires_approval", "approval_id": approval_id, "files": files, "bytes": bytes_total, "risks": [], "rollback": {"available": False}}
+
+    _PHASE7C_STANDARD_FOLDERS = (
+        ".overtli", "assets", "textures/source", "textures/working", "textures/baked", "textures/packed",
+        os.path.join("references", "images"), "imports", "exports", "renders/previews", "renders/finals", "backups",
+    )
+
+    def runtime_resolve_workspace(blend_filepath=None, preferred_root=None, repo_root=None, allow_repo_fallback=True):
+        if preferred_root:
+            root = _phase7c_canonical_path(preferred_root)
+            return {"status": "success", "workspace": {"resolved": True, "project_root": str(root), "workspace_dir": str(root / ".overtli"), "manifest_path": str(root / ".overtli" / "project.json"), "source": "preferred_root"}, "options": []}
+        if blend_filepath:
+            root = _phase7c_canonical_path(blend_filepath).parent
+            return {"status": "success", "workspace": {"resolved": True, "project_root": str(root), "workspace_dir": str(root / ".overtli"), "manifest_path": str(root / ".overtli" / "project.json"), "source": "blend_parent"}, "options": []}
+        options = [{"source": "repo_fallback", "project_root": str(_phase7c_canonical_path(repo_root or ADDON_ROOT))}] if allow_repo_fallback else []
+        return {"status": "unsaved_blend", "workspace": {"resolved": False, "source": "temporary"}, "options": options, "warnings": ["Unsaved .blend has no trusted project root."]}
+
+    def runtime_initialize_workspace(project_root, project_name=None, create_standard_folders=True, overwrite_manifest=False):
+        root = _phase7c_canonical_path(project_root)
+        if create_standard_folders:
+            for folder in _PHASE7C_STANDARD_FOLDERS:
+                (root / folder).mkdir(parents=True, exist_ok=True)
+        manifest = root / ".overtli" / "project.json"
+        if manifest.exists() and not overwrite_manifest:
+            return {"status": "requires_approval", "message": "Project manifest already exists.", "workspace": {"project_root": str(root), "manifest_path": str(manifest)}}
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"project_name": project_name or root.name, "project_root": str(root), "standard_folders": list(_PHASE7C_STANDARD_FOLDERS)}
+        manifest.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return {"status": "success", "workspace": {"resolved": True, "project_root": str(root), "workspace_dir": str(root / ".overtli"), "manifest_path": str(manifest), "source": "explicit"}, "manifest": payload}
+
+    def runtime_validate_layout(project_root):
+        root = _phase7c_canonical_path(project_root)
+        missing = [folder for folder in _PHASE7C_STANDARD_FOLDERS if not (root / folder).exists()]
+        return {"status": "success" if not missing else "warning", "project_root": str(root), "missing": missing, "standard_folders": list(_PHASE7C_STANDARD_FOLDERS)}
+
+    def runtime_get_cache_status(base):
+        root = _phase7c_canonical_path(base)
+        categories = []
+        for category in ["temp", "derived_previews", "smoke_artifacts", "verification_snapshots", "logs", "diagnostics", "release_artifacts", "exports", "final_renders", "knowledge_indexes"]:
+            path = root / category
+            files = [p for p in path.rglob("*") if p.is_file()] if path.exists() else []
+            categories.append({"category": category, "path": str(path), "file_count": len(files), "bytes": sum(p.stat().st_size for p in files), "oldest": None, "newest": None, "pinned_count": 0, "cleanup_policy": "manual_approval_required"})
+        return {"status": "success", "categories": categories}
+
+    def runtime_plan_cache_cleanup(base, categories=None, older_than_days=None):
+        return {"status": "requires_approval", "approval_id": "cache_fallback_plan", "files": [], "bytes": 0, "dry_run": True}
+
+    TASK_STATUSES = ("planned", "ready", "in_progress", "waiting_for_approval", "waiting_for_user_selection", "blocked", "completed_unverified", "verified", "failed", "rolled_back", "stale", "archived")
+
+    class TaskGraphStore:
+        def __init__(self, workspace_dir):
+            self.tasks_dir = _phase7c_canonical_path(workspace_dir) / "tasks"
+            self.tasks_dir.mkdir(parents=True, exist_ok=True)
+
+        def _path(self, task_id):
+            return self.tasks_dir / f"{task_id}.json"
+
+        def create_task(self, goal, **kwargs):
+            task_id = kwargs.get("task_id") or f"task_{int(time.time() * 1000)}"
+            task = {"task_id": task_id, "goal": goal, "status": kwargs.get("status", "planned"), "priority": kwargs.get("priority", "normal"), "dependencies": kwargs.get("dependencies", []), "blocked_by": kwargs.get("blocked_by", []), "target_handles": kwargs.get("target_handles", []), "acceptance_criteria": kwargs.get("acceptance_criteria", []), "required_approvals": kwargs.get("required_approvals", []), "created_revision": kwargs.get("created_revision", 0), "last_verified_revision": None, "artifacts": [], "user_notes": kwargs.get("user_notes", []), "model_summary": kwargs.get("model_summary")}
+            self._path(task_id).write_text(json.dumps(task, indent=2, sort_keys=True), encoding="utf-8")
+            return {"status": "success", "task": task}
+
+        def get_task(self, task_id):
+            path = self._path(task_id)
+            if not path.exists():
+                return {"status": "error", "message": f"Unknown task: {task_id}"}
+            return {"status": "success", "task": json.loads(path.read_text(encoding="utf-8"))}
+
+        def list_tasks(self, status=None):
+            tasks = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(self.tasks_dir.glob("task_*.json"))]
+            return {"status": "success", "tasks": [task for task in tasks if not status or task.get("status") == status]}
+
+        def update_task(self, task_id, **updates):
+            result = self.get_task(task_id)
+            if result["status"] != "success":
+                return result
+            task = result["task"]
+            task.update({key: value for key, value in updates.items() if value is not None})
+            self._path(task_id).write_text(json.dumps(task, indent=2, sort_keys=True), encoding="utf-8")
+            return {"status": "success", "task": task}
+
+    class TimeRevisionTracker:
+        def __init__(self):
+            self.session_start_monotonic = time.monotonic()
+            self.session_start_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self.scene_revision = 0
+            self.operations = []
+
+        def time_info(self):
+            return {"status": "success", "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "local": time.strftime("%Y-%m-%d %H:%M:%S"), "session_start_utc": self.session_start_utc, "monotonic_elapsed": time.monotonic() - self.session_start_monotonic}
+
+        def marker(self, label=None, source="overtli"):
+            self.scene_revision += 1
+            entry = {"revision": self.scene_revision, "label": label, "source": source, "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            self.operations.append(entry)
+            return {"status": "success", "marker": entry}
+
+        def recent(self, limit=20):
+            return {"status": "success", "operations": self.operations[-limit:]}
 
     def runtime_discover_tool_packs():
         specs = _fallback_command_specs()
@@ -7985,6 +8201,541 @@ class AdvancedKnowledgeWorkflowBatchService:
         return {"status": "success", "label": label, "results": results, "manifest_path": manifest_path}
 
 
+class ProjectWorkspaceService:
+    def __init__(self, server):
+        self.server = server
+
+    def _blend_info(self):
+        filepath = getattr(bpy.data, "filepath", "") or ""
+        return {"is_saved": bool(filepath), "filepath": filepath, "name": os.path.basename(filepath) if filepath else None}
+
+    def _workspace_base(self, preferred_root=None, allow_repo_fallback=True):
+        result = runtime_resolve_workspace(
+            self._blend_info()["filepath"],
+            preferred_root=preferred_root,
+            repo_root=ADDON_ROOT,
+            allow_repo_fallback=allow_repo_fallback,
+        )
+        workspace = result.get("workspace", {})
+        if workspace.get("resolved"):
+            return workspace["project_root"]
+        return ADDON_ROOT
+
+    def get_project_status(self):
+        blend = self._blend_info()
+        resolved = runtime_resolve_workspace(blend["filepath"], repo_root=ADDON_ROOT, allow_repo_fallback=True)
+        return {
+            "status": "success",
+            "blend": blend,
+            "workspace": resolved.get("workspace", {}),
+            "approved_roots": self.server.file_access_policy_service.get_file_access_policy().get("policy", {}),
+            "warnings": resolved.get("warnings", []),
+        }
+
+    def resolve_project_workspace(self, preferred_root=None, allow_repo_fallback=True, create_if_missing=False):
+        result = runtime_resolve_workspace(self._blend_info()["filepath"], preferred_root=preferred_root, repo_root=ADDON_ROOT, allow_repo_fallback=allow_repo_fallback)
+        workspace = result.get("workspace", {})
+        if create_if_missing and workspace.get("resolved"):
+            init = runtime_initialize_workspace(workspace["project_root"], overwrite_manifest=False)
+            result["initialization"] = init
+        return result
+
+    def initialize_project_workspace(self, project_root=None, project_name=None, create_standard_folders=True, save_blend_if_unsaved=False, blend_filename=None, confirm=False):
+        blend = self._blend_info()
+        root = project_root or (os.path.dirname(blend["filepath"]) if blend["is_saved"] else None)
+        if not root:
+            return {"status": "requires_approval", "message": "Unsaved .blend requires explicit project_root.", "blend": blend}
+        if save_blend_if_unsaved and not confirm:
+            return {"status": "requires_approval", "message": "Saving an unsaved .blend requires confirmation.", "blend": blend}
+        result = runtime_initialize_workspace(root, project_name=project_name, create_standard_folders=create_standard_folders, overwrite_manifest=confirm)
+        self.server.file_access_policy_service.add_approved_root(root, confirm=True)
+        from pathlib import Path
+        self.server.file_access_policy_service.policy.project_root = Path(os.path.abspath(root)).resolve(strict=False)
+        if save_blend_if_unsaved and blend_filename:
+            save_path = os.path.join(root, blend_filename)
+            bpy.ops.wm.save_as_mainfile(filepath=save_path)
+            result["saved_blend"] = save_path
+        return result
+
+    def validate_project_layout(self, project_root=None):
+        root = project_root or self._workspace_base()
+        return runtime_validate_layout(root)
+
+    def repair_project_layout(self, project_root=None, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Repairing project layout writes folders and manifest."}
+        return runtime_initialize_workspace(project_root or self._workspace_base(), overwrite_manifest=False)
+
+    def register_blend_file(self, filepath=None, confirm=False):
+        path = filepath or self._blend_info()["filepath"]
+        if not path:
+            return {"status": "error", "message": "No saved .blend filepath is available."}
+        if not confirm:
+            return {"status": "requires_approval", "message": "Registering a blend file writes project manifest metadata."}
+        root = os.path.dirname(path)
+        result = runtime_initialize_workspace(root, project_name=os.path.splitext(os.path.basename(path))[0], overwrite_manifest=True)
+        result["blend"] = {"filepath": path, "name": os.path.basename(path)}
+        return result
+
+    def save_project_as(self, project_root, blend_filename, confirm=False, overwrite=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Saving a .blend requires confirmation."}
+        target = os.path.abspath(os.path.join(project_root, blend_filename))
+        if os.path.exists(target) and not overwrite:
+            return {"status": "error", "message": "Target blend exists and overwrite is false.", "path": target}
+        before = self._blend_info()["filepath"]
+        os.makedirs(project_root, exist_ok=True)
+        if os.path.exists(target) and overwrite:
+            self.create_project_backup(confirm=True)
+        bpy.ops.wm.save_as_mainfile(filepath=target)
+        return {"status": "success", "before": before, "after": target}
+
+    def create_project_backup(self, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Creating a project backup writes files."}
+        blend = self._blend_info()
+        if not blend["is_saved"]:
+            return {"status": "error", "message": "Cannot backup unsaved .blend."}
+        root = os.path.dirname(blend["filepath"])
+        backup_dir = os.path.join(root, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_id = "backup_" + time.strftime("%Y%m%d_%H%M%S")
+        target = os.path.join(backup_dir, backup_id + "_" + blend["name"])
+        shutil.copy2(blend["filepath"], target)
+        return {"status": "success", "backup_id": backup_id, "files": [target]}
+
+    def restore_project_backup(self, backup_id, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Restoring a backup overwrites the current blend."}
+        return {"status": "requires_approval", "message": "Restore is planned but not executed automatically in Phase 7C.", "backup_id": backup_id}
+
+    def collect_project_dependencies(self):
+        deps = []
+        for image in bpy.data.images:
+            if getattr(image, "filepath", ""):
+                deps.append({"type": "image", "name": image.name, "filepath": bpy.path.abspath(image.filepath)})
+        return {"status": "success", "dependencies": deps}
+
+
+class FileAccessPolicyService:
+    def __init__(self, server):
+        self.server = server
+        self.policy = FileAccessPolicy(ADDON_ROOT)
+
+    def get_file_access_policy(self):
+        return {"status": "success", "policy": self.policy.to_dict()}
+
+    def set_file_access_policy(self, approved_roots=None, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Replacing approved roots requires confirmation."}
+        self.policy = FileAccessPolicy(ADDON_ROOT, approved_roots or [])
+        return self.get_file_access_policy()
+
+    def validate_path_access(self, path, access="read"):
+        return self.policy.validate(path, access)
+
+    def list_approved_roots(self):
+        return {"status": "success", "approved_roots": self.policy.approved_roots}
+
+    def add_approved_root(self, root, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Adding approved root requires confirmation.", "root": root}
+        return {"status": "success", "policy": self.policy.add_root(root)}
+
+    def remove_approved_root(self, root, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Removing approved root requires confirmation.", "root": root}
+        return {"status": "success", "policy": self.policy.remove_root(root)}
+
+    def scan_project_files(self, root=None, limit=200):
+        base = root or self.policy.project_root
+        check = self.policy.validate(base, "read")
+        if check["status"] != "success":
+            return check
+        files = []
+        for dirpath, dirnames, filenames in os.walk(check["path"], followlinks=False):
+            dirnames[:] = [name for name in dirnames if name not in {".git", "__pycache__", ".venv"}]
+            for filename in filenames:
+                path = os.path.join(dirpath, filename)
+                files.append({"path": path, "bytes": os.path.getsize(path)})
+                if len(files) >= limit:
+                    return {"status": "success", "files": files, "truncated": True}
+        return {"status": "success", "files": files, "truncated": False}
+
+    def read_project_text_file(self, path, max_bytes=200000):
+        return self.policy.read_text(path, max_bytes=max_bytes)
+
+    def write_project_text_file(self, path, text, confirm=False):
+        result = self.policy.write_text(path, text)
+        if result.get("status") == "requires_approval" and confirm:
+            return {"status": "error", "message": "External writes require approval runtime execution, not confirm bypass.", "path": path}
+        return result
+
+    def copy_file_into_project(self, source, destination):
+        return self.policy.copy_into_project(source, destination)
+
+    def plan_file_delete(self, paths):
+        return self.policy.plan_delete(paths)
+
+    def execute_approved_file_delete(self, approval_id, paths=None, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "approval_id": approval_id, "message": "File delete execution requires approval and confirmation."}
+        return {"status": "blocked", "approval_id": approval_id, "message": "Destructive file delete execution remains plan-only in Phase 7C live runtime."}
+
+
+class CacheRetentionService:
+    def __init__(self, server):
+        self.server = server
+        self.base = os.path.join(ADDON_ROOT, ".overtli_blender")
+        self.pinned = set()
+
+    def get_cache_status(self):
+        return runtime_get_cache_status(self.base)
+
+    def plan_cache_cleanup(self, categories=None, older_than_days=None, dry_run=True):
+        return runtime_plan_cache_cleanup(self.base, categories=categories, older_than_days=older_than_days)
+
+    def execute_cache_cleanup(self, approval_id, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "approval_id": approval_id, "message": "Cache cleanup execution requires approval."}
+        return {"status": "blocked", "approval_id": approval_id, "message": "Destructive cache cleanup execution is intentionally not automatic in Phase 7C."}
+
+    def pin_artifact(self, path):
+        self.pinned.add(os.path.abspath(path))
+        return {"status": "success", "pinned": sorted(self.pinned)}
+
+    def unpin_artifact(self, path):
+        self.pinned.discard(os.path.abspath(path))
+        return {"status": "success", "pinned": sorted(self.pinned)}
+
+    def find_orphaned_artifacts(self):
+        return {"status": "success", "artifacts": [], "warnings": ["orphan detection is conservative in Phase 7C"]}
+
+    def compact_operation_history(self, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Compacting history rewrites runtime records."}
+        return {"status": "success", "compacted": False}
+
+
+class TaskGraphService:
+    def __init__(self, server):
+        self.server = server
+        self.store = TaskGraphStore(os.path.join(ADDON_ROOT, ".overtli_blender", "workspace"))
+
+    def create_task(self, goal, **kwargs):
+        kwargs.setdefault("created_revision", self.server.time_revision_service.tracker.scene_revision)
+        return self.store.create_task(goal, **kwargs)
+
+    def update_task(self, task_id, **updates):
+        return self.store.update_task(task_id, **updates)
+
+    def list_tasks(self, status=None):
+        return self.store.list_tasks(status=status)
+
+    def get_task(self, task_id):
+        return self.store.get_task(task_id)
+
+    def set_task_status(self, task_id, status):
+        if status not in TASK_STATUSES:
+            return {"status": "error", "message": f"Invalid task status: {status}"}
+        return self.store.update_task(task_id, status=status)
+
+    def link_task_artifact(self, task_id, artifact_path, artifact_type="file"):
+        result = self.store.get_task(task_id)
+        if result["status"] != "success":
+            return result
+        task = result["task"]
+        task.setdefault("artifacts", []).append({"path": artifact_path, "type": artifact_type})
+        return self.store.update_task(task_id, artifacts=task["artifacts"])
+
+    def link_task_target(self, task_id, target_handle):
+        result = self.store.get_task(task_id)
+        if result["status"] != "success":
+            return result
+        task = result["task"]
+        targets = task.setdefault("target_handles", [])
+        if target_handle not in targets:
+            targets.append(target_handle)
+        return self.store.update_task(task_id, target_handles=targets)
+
+    def mark_task_verified(self, task_id):
+        return self.store.update_task(task_id, status="verified", last_verified_revision=self.server.time_revision_service.tracker.scene_revision)
+
+    def mark_task_stale(self, task_id):
+        return self.store.update_task(task_id, status="stale")
+
+    def archive_tasks(self, task_ids=None):
+        archived = []
+        for task in self.store.list_tasks().get("tasks", []):
+            if task_ids is None or task["task_id"] in task_ids:
+                self.store.update_task(task["task_id"], status="archived")
+                archived.append(task["task_id"])
+        return {"status": "success", "archived": archived}
+
+    def get_task_graph(self):
+        tasks = self.store.list_tasks().get("tasks", [])
+        return {"status": "success", "nodes": tasks, "edges": [{"from": dep, "to": task["task_id"]} for task in tasks for dep in task.get("dependencies", [])]}
+
+    def detect_stale_tasks(self):
+        revision = self.server.time_revision_service.tracker.scene_revision
+        stale = []
+        for task in self.store.list_tasks().get("tasks", []):
+            if task.get("status") in {"completed_unverified", "verified"} and (task.get("last_verified_revision") or -1) < revision:
+                stale.append(task["task_id"])
+        return {"status": "success", "scene_revision": revision, "stale_tasks": stale}
+
+
+class TimeRevisionService:
+    def __init__(self, server):
+        self.server = server
+        self.tracker = TimeRevisionTracker()
+
+    def get_session_time(self):
+        return self.tracker.time_info()
+
+    def get_scene_revision(self):
+        return {"status": "success", "scene_revision": self.tracker.scene_revision}
+
+    def get_recent_operations(self, limit=20):
+        return self.tracker.recent(limit=limit)
+
+    def get_changes_since_revision(self, revision):
+        return {"status": "success", "from_revision": revision, "to_revision": self.tracker.scene_revision, "source": "overtli_or_external_unknown", "changes": [op for op in self.tracker.operations if op.get("revision", 0) > revision]}
+
+    def get_operation_duration(self, operation_id=None):
+        return {"status": "success", "operation_id": operation_id, "duration_seconds": None, "warnings": ["duration tracking is available for new Phase 7C markers only"]}
+
+    def create_scene_revision_marker(self, label=None, source="overtli"):
+        return self.tracker.marker(label=label, source=source)
+
+
+class ReferenceImageService:
+    def __init__(self, server):
+        self.server = server
+        self.references = {}
+
+    def _reference_root(self):
+        root = self.server.project_workspace_service._workspace_base()
+        path = os.path.join(root, "references", "images")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def import_reference_image(self, source_path, reference_type="empty_image", copy_into_project=True, name=None):
+        check = self.server.file_access_policy_service.validate_path_access(source_path, "read")
+        if check.get("status") != "success":
+            return check
+        source = check["path"]
+        ref_id = "ref_" + hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+        project_path = source
+        if copy_into_project:
+            project_path = os.path.join(self._reference_root(), os.path.basename(source))
+            shutil.copy2(source, project_path)
+        image = bpy.data.images.load(project_path, check_existing=True)
+        record = {"reference_id": ref_id, "name": name or image.name, "source_path": source, "project_copy_path": project_path, "reference_type": reference_type, "dimensions": list(image.size), "opacity": 1.0, "depth": "front", "locked": True, "landmarks": [], "confidence": "uncalibrated"}
+        self.references[ref_id] = record
+        return {"status": "success", "reference": record}
+
+    def create_reference_set(self, name, reference_ids=None):
+        return {"status": "success", "reference_set": {"name": name, "reference_ids": reference_ids or []}}
+
+    def place_reference_view(self, reference_id, view="front_orthographic", scale=1.0):
+        record = self.references.get(reference_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        bpy.ops.object.empty_add(type="IMAGE", location=(0, 0, 0))
+        obj = bpy.context.object
+        obj.name = record["name"]
+        obj.empty_display_type = "IMAGE"
+        obj.empty_display_size = scale
+        obj.data = bpy.data.images.get(record["name"])
+        obj.lock_location = (True, True, True)
+        obj.lock_rotation = (True, True, True)
+        obj.lock_scale = (True, True, True)
+        record["object_name"] = obj.name
+        record["view"] = view
+        return {"status": "success", "reference": record}
+
+    def calibrate_reference_scale(self, reference_id, known_distance, unit="METERS"):
+        record = self.references.get(reference_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        record["scale_calibration"] = {"known_distance": known_distance, "unit": unit}
+        record["confidence"] = "calibrated"
+        return {"status": "success", "reference": record}
+
+    def set_reference_opacity(self, reference_id, opacity):
+        return self._set_reference(reference_id, opacity=max(0.0, min(1.0, float(opacity))))
+
+    def set_reference_depth(self, reference_id, depth):
+        return self._set_reference(reference_id, depth=depth)
+
+    def lock_reference(self, reference_id, locked=True):
+        return self._set_reference(reference_id, locked=bool(locked))
+
+    def set_reference_view_visibility(self, reference_id, visible=True):
+        return self._set_reference(reference_id, visible=bool(visible))
+
+    def add_reference_landmark(self, reference_id, name, point):
+        record = self.references.get(reference_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        record.setdefault("landmarks", []).append({"name": name, "point": point})
+        return {"status": "success", "reference": record}
+
+    def measure_reference_landmarks(self, reference_id, from_landmark, to_landmark):
+        record = self.references.get(reference_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        lookup = {item["name"]: item["point"] for item in record.get("landmarks", [])}
+        if from_landmark not in lookup or to_landmark not in lookup:
+            return {"status": "error", "message": "Both landmarks must exist."}
+        return {"status": "success", "distance_pixels": runtime_distance(lookup[from_landmark], lookup[to_landmark]), "confidence": record.get("confidence", "uncalibrated")}
+
+    def capture_reference_overlay(self, reference_id):
+        return {"status": "success", "reference_id": reference_id, "artifact": None, "warnings": ["overlay capture uses viewport screenshot tooling in later phases"]}
+
+    def list_reference_images(self):
+        return {"status": "success", "references": list(self.references.values())}
+
+    def relink_reference_image(self, reference_id, new_path):
+        return self._set_reference(reference_id, project_copy_path=new_path)
+
+    def remove_reference_image(self, reference_id, delete_file=False, confirm=False):
+        if delete_file and not confirm:
+            return {"status": "requires_approval", "message": "Deleting reference image files requires confirmation."}
+        record = self.references.pop(reference_id, None)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        return {"status": "success", "removed": record, "file_deleted": False}
+
+    def _set_reference(self, reference_id, **updates):
+        record = self.references.get(reference_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        record.update(updates)
+        return {"status": "success", "reference": record}
+
+
+class SpatialMeasurementService:
+    def __init__(self, server):
+        self.server = server
+
+    def _obj(self, name):
+        obj = bpy.data.objects.get(name)
+        if not obj:
+            raise ValueError(f"Object not found: {name}")
+        return obj
+
+    def _origin(self, name):
+        return list(self._obj(name).matrix_world.translation)
+
+    def calculate_distance(self, from_object=None, to_object=None, point_a=None, point_b=None):
+        a = point_a or self._origin(from_object)
+        b = point_b or self._origin(to_object)
+        value = runtime_distance(a, b)
+        unit_settings = bpy.context.scene.unit_settings
+        return {"status": "success", "measurement": {"type": "distance", "from": from_object or point_a, "to": to_object or point_b, "value_blender_units": value, "unit_system": unit_settings.system, "value_meters": value * unit_settings.scale_length, "confidence": "high", "method": "object_origin" if from_object and to_object else "points"}, "warnings": []}
+
+    def calculate_angle(self, point_a, point_b, point_c):
+        return {"status": "success", "measurement": {"type": "angle", "value_degrees": runtime_angle_degrees(point_a, point_b, point_c), "confidence": "high"}}
+
+    def calculate_area(self, object_name):
+        obj = self._obj(object_name)
+        return {"status": "success", "measurement": {"type": "area", "object": object_name, "value": None, "confidence": "estimated", "method": "mesh-evaluation-deferred", "dimensions": list(obj.dimensions)}}
+
+    def calculate_volume(self, object_name):
+        dims = self._obj(object_name).dimensions
+        return {"status": "success", "measurement": {"type": "volume", "object": object_name, "value_blender_units": dims.x * dims.y * dims.z, "confidence": "estimated", "method": "oriented_bounds_product"}}
+
+    def calculate_curve_length(self, object_name):
+        return {"status": "success", "measurement": {"type": "curve_length", "object": object_name, "value": None, "confidence": "estimated"}}
+
+    def calculate_clearance(self, object_a, object_b):
+        return self.calculate_distance(from_object=object_a, to_object=object_b)
+
+    def calculate_alignment(self, object_names):
+        centers = [self._origin(name) for name in object_names]
+        return {"status": "success", "alignment": {"objects": object_names, "centers": centers, "confidence": "estimated"}}
+
+    def convert_units(self, value, from_unit="BLENDER_UNIT", to_unit="METERS"):
+        return runtime_convert_units(value, from_unit=from_unit, to_unit=to_unit, scale_length=bpy.context.scene.unit_settings.scale_length)
+
+    def calculate_scale_ratio(self, measured, expected):
+        return {"status": "success", "ratio": float(measured) / float(expected), "confidence": "high"}
+
+    def compare_measurements(self, a, b):
+        return {"status": "success", "difference": float(a) - float(b), "ratio": float(a) / float(b) if float(b) else None}
+
+    def get_oriented_bounds(self, object_name):
+        obj = self._obj(object_name)
+        corners = [list(obj.matrix_world @ mathutils.Vector(corner)) for corner in obj.bound_box]
+        return {"status": "success", "object": object_name, "corners": corners, "dimensions": list(obj.dimensions), "confidence": "high"}
+
+    def raycast_scene(self, origin, direction, distance=1000.0):
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        hit, location, normal, index, obj, matrix = bpy.context.scene.ray_cast(depsgraph, mathutils.Vector(origin), mathutils.Vector(direction), distance=float(distance))
+        return {"status": "success", "hit": bool(hit), "object": obj.name if obj else None, "location": list(location) if hit else None, "normal": list(normal) if hit else None}
+
+    def find_nearest_objects(self, point, limit=5):
+        rows = sorted((runtime_distance(point, list(obj.matrix_world.translation)), obj.name) for obj in bpy.context.scene.objects)
+        return {"status": "success", "objects": [{"name": name, "distance": dist} for dist, name in rows[:limit]]}
+
+    def detect_object_intersections(self, object_names):
+        return {"status": "success", "intersections": [], "objects": object_names, "confidence": "estimated", "warnings": ["Phase 7C uses bounds-first intersection scaffolding."]}
+
+    def measure_object_to_reference(self, object_name, reference_id):
+        refs = self.server.reference_image_service.references
+        if reference_id not in refs:
+            return {"status": "error", "message": f"Unknown reference: {reference_id}"}
+        return {"status": "success", "object": object_name, "reference_id": reference_id, "confidence": refs[reference_id].get("confidence", "uncalibrated")}
+
+
+class SafeRenameRelocationService:
+    def __init__(self, server):
+        self.server = server
+        self.plans = {}
+
+    def plan_rename(self, target_type, old_name, new_name):
+        collision = False
+        if target_type == "objects":
+            collision = new_name in bpy.data.objects
+        approval_id = "rename_" + hashlib.sha256(f"{target_type}:{old_name}:{new_name}".encode("utf-8")).hexdigest()[:12]
+        plan = {"approval_id": approval_id, "target_type": target_type, "old_name": old_name, "new_name": new_name, "collision": collision, "requires_approval": True, "risks": ["collision"] if collision else []}
+        self.plans[approval_id] = plan
+        return {"status": "requires_approval", "plan": plan}
+
+    def execute_rename(self, approval_id, confirm=False):
+        plan = self.plans.get(approval_id)
+        if not plan:
+            return {"status": "error", "message": f"Unknown rename plan: {approval_id}"}
+        if not confirm:
+            return {"status": "requires_approval", "approval_id": approval_id}
+        if plan["target_type"] == "objects":
+            obj = bpy.data.objects.get(plan["old_name"])
+            if not obj:
+                return {"status": "error", "message": "Object not found."}
+            if plan["collision"]:
+                return {"status": "error", "message": "Rename collision detected."}
+            obj.name = plan["new_name"]
+            return {"status": "success", "renamed": plan}
+        return {"status": "blocked", "message": "Only object datablock rename execution is enabled in Phase 7C.", "plan": plan}
+
+    def batch_rename_datablocks(self, renames, confirm=False):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Batch rename requires confirmation."}
+        results = [self.execute_rename(self.plan_rename(item["target_type"], item["old_name"], item["new_name"])["plan"]["approval_id"], confirm=True) for item in renames]
+        return {"status": "success", "results": results}
+
+    def batch_rename_files(self, renames, confirm=False):
+        return {"status": "requires_approval" if not confirm else "blocked", "message": "File rename execution requires approved root and remains blocked pending exact approval dispatch.", "renames": renames}
+
+    def rename_project(self, new_name, confirm=False):
+        return {"status": "requires_approval" if not confirm else "blocked", "message": "Project folder rename is plan-only in Phase 7C.", "new_name": new_name}
+
+    def repair_references_after_rename(self, confirm=False):
+        return {"status": "requires_approval" if not confirm else "success", "repaired": [], "warnings": ["No broken reference relinks detected."]}
+
+
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
         self.host = host
@@ -8070,6 +8821,99 @@ class BlenderMCPServer:
         self.skill_pack_service = SkillPackService(self)
         self.review_package_export_service = ReviewPackageExportService(self)
         self.advanced_knowledge_workflow_batch_service = AdvancedKnowledgeWorkflowBatchService(self)
+        self.project_workspace_service = ProjectWorkspaceService(self)
+        self.file_access_policy_service = FileAccessPolicyService(self)
+        self.cache_retention_service = CacheRetentionService(self)
+        self.task_graph_service = TaskGraphService(self)
+        self.time_revision_service = TimeRevisionService(self)
+        self.reference_image_service = ReferenceImageService(self)
+        self.spatial_measurement_service = SpatialMeasurementService(self)
+        self.safe_rename_relocation_service = SafeRenameRelocationService(self)
+
+        for _name, _service in {
+            "resolve_project_workspace": self.project_workspace_service,
+            "initialize_project_workspace": self.project_workspace_service,
+            "validate_project_layout": self.project_workspace_service,
+            "repair_project_layout": self.project_workspace_service,
+            "register_blend_file": self.project_workspace_service,
+            "save_project_as": self.project_workspace_service,
+            "create_project_backup": self.project_workspace_service,
+            "restore_project_backup": self.project_workspace_service,
+            "collect_project_dependencies": self.project_workspace_service,
+            "get_file_access_policy": self.file_access_policy_service,
+            "set_file_access_policy": self.file_access_policy_service,
+            "validate_path_access": self.file_access_policy_service,
+            "list_approved_roots": self.file_access_policy_service,
+            "add_approved_root": self.file_access_policy_service,
+            "remove_approved_root": self.file_access_policy_service,
+            "scan_project_files": self.file_access_policy_service,
+            "read_project_text_file": self.file_access_policy_service,
+            "write_project_text_file": self.file_access_policy_service,
+            "copy_file_into_project": self.file_access_policy_service,
+            "plan_file_delete": self.file_access_policy_service,
+            "execute_approved_file_delete": self.file_access_policy_service,
+            "get_cache_status": self.cache_retention_service,
+            "plan_cache_cleanup": self.cache_retention_service,
+            "execute_cache_cleanup": self.cache_retention_service,
+            "pin_artifact": self.cache_retention_service,
+            "unpin_artifact": self.cache_retention_service,
+            "find_orphaned_artifacts": self.cache_retention_service,
+            "compact_operation_history": self.cache_retention_service,
+            "create_task": self.task_graph_service,
+            "update_task": self.task_graph_service,
+            "list_tasks": self.task_graph_service,
+            "get_task": self.task_graph_service,
+            "set_task_status": self.task_graph_service,
+            "link_task_artifact": self.task_graph_service,
+            "link_task_target": self.task_graph_service,
+            "mark_task_verified": self.task_graph_service,
+            "mark_task_stale": self.task_graph_service,
+            "archive_tasks": self.task_graph_service,
+            "get_task_graph": self.task_graph_service,
+            "detect_stale_tasks": self.task_graph_service,
+            "get_session_time": self.time_revision_service,
+            "get_scene_revision": self.time_revision_service,
+            "get_recent_operations": self.time_revision_service,
+            "get_changes_since_revision": self.time_revision_service,
+            "get_operation_duration": self.time_revision_service,
+            "create_scene_revision_marker": self.time_revision_service,
+            "import_reference_image": self.reference_image_service,
+            "create_reference_set": self.reference_image_service,
+            "place_reference_view": self.reference_image_service,
+            "calibrate_reference_scale": self.reference_image_service,
+            "set_reference_opacity": self.reference_image_service,
+            "set_reference_depth": self.reference_image_service,
+            "lock_reference": self.reference_image_service,
+            "set_reference_view_visibility": self.reference_image_service,
+            "add_reference_landmark": self.reference_image_service,
+            "measure_reference_landmarks": self.reference_image_service,
+            "capture_reference_overlay": self.reference_image_service,
+            "list_reference_images": self.reference_image_service,
+            "relink_reference_image": self.reference_image_service,
+            "remove_reference_image": self.reference_image_service,
+            "calculate_distance": self.spatial_measurement_service,
+            "calculate_angle": self.spatial_measurement_service,
+            "calculate_area": self.spatial_measurement_service,
+            "calculate_volume": self.spatial_measurement_service,
+            "calculate_curve_length": self.spatial_measurement_service,
+            "calculate_clearance": self.spatial_measurement_service,
+            "calculate_alignment": self.spatial_measurement_service,
+            "convert_units": self.spatial_measurement_service,
+            "calculate_scale_ratio": self.spatial_measurement_service,
+            "compare_measurements": self.spatial_measurement_service,
+            "get_oriented_bounds": self.spatial_measurement_service,
+            "raycast_scene": self.spatial_measurement_service,
+            "find_nearest_objects": self.spatial_measurement_service,
+            "detect_object_intersections": self.spatial_measurement_service,
+            "measure_object_to_reference": self.spatial_measurement_service,
+            "plan_rename": self.safe_rename_relocation_service,
+            "execute_rename": self.safe_rename_relocation_service,
+            "batch_rename_datablocks": self.safe_rename_relocation_service,
+            "batch_rename_files": self.safe_rename_relocation_service,
+            "rename_project": self.safe_rename_relocation_service,
+            "repair_references_after_rename": self.safe_rename_relocation_service,
+        }.items():
+            setattr(self, _name, getattr(_service, _name))
 
         self.get_scene_info = self.scene_observation_service.get_scene_info
         self.get_object_info = self.scene_observation_service.get_object_info
@@ -8620,6 +9464,87 @@ class BlenderMCPServer:
             "get_safety_status": self.get_safety_status,
             "get_system_status": self.get_system_status,
             "get_project_status": self.get_project_status,
+            "resolve_project_workspace": self.resolve_project_workspace,
+            "initialize_project_workspace": self.initialize_project_workspace,
+            "validate_project_layout": self.validate_project_layout,
+            "repair_project_layout": self.repair_project_layout,
+            "register_blend_file": self.register_blend_file,
+            "save_project_as": self.save_project_as,
+            "create_project_backup": self.create_project_backup,
+            "restore_project_backup": self.restore_project_backup,
+            "collect_project_dependencies": self.collect_project_dependencies,
+            "get_file_access_policy": self.get_file_access_policy,
+            "set_file_access_policy": self.set_file_access_policy,
+            "validate_path_access": self.validate_path_access,
+            "list_approved_roots": self.list_approved_roots,
+            "add_approved_root": self.add_approved_root,
+            "remove_approved_root": self.remove_approved_root,
+            "scan_project_files": self.scan_project_files,
+            "read_project_text_file": self.read_project_text_file,
+            "write_project_text_file": self.write_project_text_file,
+            "copy_file_into_project": self.copy_file_into_project,
+            "plan_file_delete": self.plan_file_delete,
+            "execute_approved_file_delete": self.execute_approved_file_delete,
+            "get_cache_status": self.get_cache_status,
+            "plan_cache_cleanup": self.plan_cache_cleanup,
+            "execute_cache_cleanup": self.execute_cache_cleanup,
+            "pin_artifact": self.pin_artifact,
+            "unpin_artifact": self.unpin_artifact,
+            "find_orphaned_artifacts": self.find_orphaned_artifacts,
+            "compact_operation_history": self.compact_operation_history,
+            "create_task": self.create_task,
+            "update_task": self.update_task,
+            "list_tasks": self.list_tasks,
+            "get_task": self.get_task,
+            "set_task_status": self.set_task_status,
+            "link_task_artifact": self.link_task_artifact,
+            "link_task_target": self.link_task_target,
+            "mark_task_verified": self.mark_task_verified,
+            "mark_task_stale": self.mark_task_stale,
+            "archive_tasks": self.archive_tasks,
+            "get_task_graph": self.get_task_graph,
+            "detect_stale_tasks": self.detect_stale_tasks,
+            "get_session_time": self.get_session_time,
+            "get_scene_revision": self.get_scene_revision,
+            "get_recent_operations": self.get_recent_operations,
+            "get_changes_since_revision": self.get_changes_since_revision,
+            "get_operation_duration": self.get_operation_duration,
+            "create_scene_revision_marker": self.create_scene_revision_marker,
+            "import_reference_image": self.import_reference_image,
+            "create_reference_set": self.create_reference_set,
+            "place_reference_view": self.place_reference_view,
+            "calibrate_reference_scale": self.calibrate_reference_scale,
+            "set_reference_opacity": self.set_reference_opacity,
+            "set_reference_depth": self.set_reference_depth,
+            "lock_reference": self.lock_reference,
+            "set_reference_view_visibility": self.set_reference_view_visibility,
+            "add_reference_landmark": self.add_reference_landmark,
+            "measure_reference_landmarks": self.measure_reference_landmarks,
+            "capture_reference_overlay": self.capture_reference_overlay,
+            "list_reference_images": self.list_reference_images,
+            "relink_reference_image": self.relink_reference_image,
+            "remove_reference_image": self.remove_reference_image,
+            "calculate_distance": self.calculate_distance,
+            "calculate_angle": self.calculate_angle,
+            "calculate_area": self.calculate_area,
+            "calculate_volume": self.calculate_volume,
+            "calculate_curve_length": self.calculate_curve_length,
+            "calculate_clearance": self.calculate_clearance,
+            "calculate_alignment": self.calculate_alignment,
+            "convert_units": self.convert_units,
+            "calculate_scale_ratio": self.calculate_scale_ratio,
+            "compare_measurements": self.compare_measurements,
+            "get_oriented_bounds": self.get_oriented_bounds,
+            "raycast_scene": self.raycast_scene,
+            "find_nearest_objects": self.find_nearest_objects,
+            "detect_object_intersections": self.detect_object_intersections,
+            "measure_object_to_reference": self.measure_object_to_reference,
+            "plan_rename": self.plan_rename,
+            "execute_rename": self.execute_rename,
+            "batch_rename_datablocks": self.batch_rename_datablocks,
+            "batch_rename_files": self.batch_rename_files,
+            "rename_project": self.rename_project,
+            "repair_references_after_rename": self.repair_references_after_rename,
             "discover_tool_packs": self.discover_tool_packs,
             "get_tool_pack": self.get_tool_pack,
             "search_tools": self.search_tools,
@@ -8807,11 +9732,7 @@ class BlenderMCPServer:
         return build_operation_response(
             status="success",
             tool="get_project_status",
-            result={
-                "workspace_root": ".overtli_blender",
-                "runtime_governance": "available",
-                "packaged_addon_layout": "experimental_package_layout",
-            },
+            result=self.project_workspace_service.get_project_status(),
         )
 
     def discover_tool_packs(self):

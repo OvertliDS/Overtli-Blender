@@ -6,6 +6,7 @@ from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
 from .asset_workflow_tools import register_asset_workflow_tools
 from .camera_tools import register_camera_tools
+from .cache_tools import register_cache_tools
 from .code_execution_tools import register_code_execution_tools
 from .collection_tools import register_collection_tools
 from .compositor_tools import register_compositor_tools
@@ -13,6 +14,7 @@ from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
 from .advanced_material_tools import register_advanced_material_tools
+from .file_access_tools import register_file_access_tools
 from .geometry_nodes_intelligence_tools import register_geometry_nodes_intelligence_tools
 from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tools
 from .geometry_nodes_template_tools import register_geometry_nodes_template_tools
@@ -31,7 +33,9 @@ from .modifier_tools import register_modifier_tools
 from .polyhaven_tools import register_polyhaven_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
 from .procedural_asset_tools import register_procedural_asset_tools
+from .project_workspace_tools import register_project_workspace_tools
 from .provider_status_tools import register_provider_status_tools
+from .reference_tools import register_reference_tools
 from .observation_tools import register_observation_tools
 from .render_tools import register_render_tools
 from .rigging_simulation_tools import register_rigging_simulation_tools
@@ -39,6 +43,8 @@ from .safety_tools import register_safety_tools
 from .scene_edit_tools import register_scene_edit_tools
 from .scene_intelligence_tools import register_scene_intelligence_tools
 from .scene_kit_tools import register_scene_kit_tools
+from .spatial_tools import register_spatial_tools
+from .task_graph_tools import register_task_graph_tools
 from .selection_tools import register_selection_tools
 from .shape_key_tools import register_shape_key_tools
 from .shader_graph_tools import register_shader_graph_tools
@@ -64,6 +70,7 @@ __all__ = [
     "register_asset_library_tools",
     "register_asset_workflow_tools",
     "register_camera_tools",
+    "register_cache_tools",
     "register_code_execution_tools",
     "register_collection_tools",
     "register_compositor_tools",
@@ -71,6 +78,7 @@ __all__ = [
     "register_deformation_tools",
     "register_dependency_tools",
     "register_advanced_material_tools",
+    "register_file_access_tools",
     "register_geometry_nodes_intelligence_tools",
     "register_geometry_nodes_modifier_tools",
     "register_geometry_nodes_template_tools",
@@ -89,7 +97,9 @@ __all__ = [
     "register_polyhaven_tools",
     "register_presentation_workflow_tools",
     "register_procedural_asset_tools",
+    "register_project_workspace_tools",
     "register_provider_status_tools",
+    "register_reference_tools",
     "register_observation_tools",
     "register_render_tools",
     "register_rigging_simulation_tools",
@@ -97,6 +107,8 @@ __all__ = [
     "register_scene_edit_tools",
     "register_scene_intelligence_tools",
     "register_scene_kit_tools",
+    "register_spatial_tools",
+    "register_task_graph_tools",
     "register_selection_tools",
     "register_shape_key_tools",
     "register_shader_graph_tools",
