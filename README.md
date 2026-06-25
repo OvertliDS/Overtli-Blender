@@ -41,11 +41,15 @@ Use an editable install during development:
 python -m pip install -e .
 ```
 
+The Python distribution is `overtli-blender`, the import package lives at `src/overtli_blender`, and `addon.py` remains the single-file Blender addon entrypoint.
+
 The primary console command is:
 
 ```powershell
 overtli-blender
 ```
+
+See [docs/install.md](docs/install.md) and [docs/addon_install.md](docs/addon_install.md) for repeatable install steps.
 
 ## Blender Addon Setup
 
@@ -59,6 +63,17 @@ overtli-blender
 The addon socket smoke runs directly against Blender and does not require MCP client setup.
 
 See [docs/runtime_smoke.md](docs/runtime_smoke.md).
+
+Fast local release readiness check:
+
+```powershell
+.\.venv\Scripts\python scripts\release_check.py --fast
+```
+
+Package and release helper docs:
+
+- [docs/release_check.md](docs/release_check.md)
+- [docs/development.md](docs/development.md)
 
 Phase 2 verification smoke:
 

@@ -1,208 +1,49 @@
 # Changelog
 
-All notable changes to the blender-mcp project will be documented in this file.
+All notable public Overtli-Blender changes are summarized here. Private planning files, generated review packages, Memory Bank content, and local diagnostics are intentionally excluded from release artifacts.
 
-## [Enhanced] - 2025-01-17
+## Unreleased / Current Development
 
-### Added - MCP Enhancement: Persistent Context & Tool Chaining + Geometry Nodes Support
+### Phase 7A - Release Hardening and Distribution Readiness
+- Added local release readiness checks through `scripts/release_check.py`.
+- Added public-safe single-file addon zip packaging through `scripts/build_addon_zip.py`.
+- Added wheel/sdist build validation through `scripts/build_python_package.py`.
+- Added public-safe diagnostic bundle export through `scripts/export_diagnostic_bundle.py`.
+- Added install documentation checks through `scripts/check_install_docs.py`.
+- Added non-publishing GitHub Actions CI for static tests, package/import checks, and privacy checks.
+- Documented install, addon install, release checks, and development workflows.
 
-#### 🔄 **Shared Context Storage**
-- **Persistent Variables**: Variables now persist between `execute_blender_code` calls
-  - Access via `shared['variable_name']` in scripts
-  - Survives across multiple tool executions
-  - Automatic cleanup (keeps last 50 operations in history)
+## Phase 6B - Addon, Knowledge, Snippets, Skill Packs, and Review Export
+- Added safe addon management status/list/info surfaces and confirmation-gated addon lifecycle command surfaces.
+- Added addon development skeleton, static validation, and local addon zip packaging helpers.
+- Added local Blender API docs inspection, indexing, search, and topic lookup from a private docs mirror when present.
+- Added verified snippet metadata, local skill packs, privacy-filtered review package export/validation, and advanced knowledge workflow batches.
+- Verified static tests and live Phase 6B socket smoke after addon refresh.
 
-- **Object & Material Handles**: Reference Blender objects/materials across tool calls
-  - `get_object('handle_name')` - retrieve stored object references
-  - `get_material('handle_name')` - retrieve stored material references
-  - `store_object('handle', 'obj_name')` - store object by handle
-  - `store_material('handle', 'mat_name')` - store material by handle
+## Phase 6A - Geometry Nodes and Procedural Workflows
+- Added Geometry Nodes capability detection, node group/modifier inspection, template discovery, template-first node group creation, allowlisted recipes, modifier input updates, procedural generators, validation, previews, scene kits, and workflow batches.
 
-- **Operation History**: Track recent operations for debugging
-  - Automatic logging of all tool executions
-  - Timestamp and result tracking
-  - Configurable history length (default: 50 operations)
+## Phase 5B - Assets, Import/Export, Scene Kits, and Rigging Basics
+- Added asset format detection, bounded local asset scans, scene asset inventory, dependency reports, asset manifests, `.blend` append/link, local model import/export, previews/contact sheets, reusable scene kits, dependency validation/collection, and asset workflow batches.
+- Added static coverage for driver, armature, pose, and basic simulation command surfaces.
 
-#### 🛠️ **New MCP Tools**
-Added 7 new tools for better workflow composition:
+## Phase 5A - Animation and Presentation
+- Added timeline inspection, animation workflows, camera creation/framing, lighting setup, render settings, still/contact-sheet/preview artifacts, turntables, compositor/pass presets, and presentation workflow batches.
 
-1. **`get_shared_context`** - Inspect current shared state
-   - Shows all persistent variables, handles, and history count
-   - Useful for debugging and understanding current context
+## Phase 4B - Selection, Deformation, and Workflow Intelligence
+- Added method planning, operation playbooks, tricks knowledge, anti-pattern rules, modifier recipes, asset scans/previews, style/PBR material helpers, texture-folder import, paintable texture setup, UV map inspection, measurements, vertex groups, shape keys, lattices, proportional deformation, sculpt mask intent, shape-key sculpt workflow, and deformation workflow batches.
 
-2. **`clear_shared_context`** - Reset context selectively
-   - Clear all context or specific sections (variables, objects, materials, operations, history)
-   - Fresh start when needed
+## Phase 4A - Materials and Shaders
+- Added material channel schemas, templates, deep material inspection, shader graph inspection/editing, texture map slot binding, procedural/custom material creation, previews, material workflow batches, and confirmed material cleanup.
 
-3. **`get_operation_history`** - View recent operations
-   - Configurable count (default: 10 recent operations)
-   - Shows operation type, input, result, and timestamp
+## Phase 3 - Workspace, Safety, and Diff
+- Added task workspace, todo system, operation journal, scene snapshots, scene diff, user-change detection, rollback, and verified scene editing workflows.
 
-4. **`create_object_handle`** - Manually create object handles
-   - Map custom handle names to Blender objects
-   - Returns object info (type, location) for verification
+## Phase 2 - Scene Intelligence and Verification
+- Added richer scene/object/selection inspection, scene health diagnostics, screenshot packs, and verification snapshot manifests.
 
-5. **`create_material_handle`** - Manually create material handles
-   - Map custom handle names to Blender materials
-   - Returns material info (uses_nodes) for verification
+## Phase 1 - Foundation, Refactor, Safety, and Rebrand
+- Established the `overtli-blender` package, `overtli_blender` import path, `overtli-blender` console command, modular MCP tool registration, safety metadata framework, and public/private repository boundary.
 
-6. **`list_object_handles`** - List all object handles
-   - Shows handle → object mapping with details
-   - Current location, type, visibility status
-
-7. **`list_material_handles`** - List all material handles
-   - Shows handle → material mapping with details
-   - Node usage and reference count
-
-#### ⚡ **Enhanced Tool Chaining**
-- **Auto-Handle Creation**: Asset downloads now automatically create handles
-  - `download_polyhaven_asset` (models) → returns `object_handles` dict
-  - `download_polyhaven_asset` (textures) → returns `material_handle` string
-  - MCP responses show created handles for easy reference
-
-- **Enhanced Script Execution**: `execute_blender_code` improvements
-  - Pre-populated namespace with shared context and helper functions
-  - Returns list of current shared variables for debugging
-  - Better error handling with history tracking
-
-#### 📁 **Files Modified**
-- **`addon.py`**: Added shared context storage, new tool handlers, enhanced returns
-- **`src/overtli_blender/server.py`**: Added 7 new MCP tool endpoints, enhanced descriptions
-
-### Technical Details
-
-#### **Shared Context Structure**
-```python
-self.shared_context = {
-    'variables': {},  # User-defined variables (shared['key'] = value)
-    'objects': {},    # Object references by handle
-    'materials': {},  # Material references by handle
-    'operations': {}, # Operation results by ID
-    'history': []     # Operation history (last 50)
-}
-```
-
-#### **Enhanced Script Namespace**
-Scripts now have access to:
-```python
-{
-    "bpy": bpy,                                    # Standard Blender API
-    "shared": self.shared_context['variables'],    # Persistent variables
-    "get_object": lambda handle: ...,              # Retrieve object handles
-    "get_material": lambda handle: ...,            # Retrieve material handles
-    "store_object": self._store_object_handle,     # Store object handles
-    "store_material": self._store_material_handle, # Store material handles
-    "store_operation": self._store_operation_result # Store operation results
-}
-```
-
-#### **Backward Compatibility**
-- ✅ All existing functionality preserved
-- ✅ Existing scripts continue to work without modification
-- ✅ New features are additive only
-- ✅ No breaking changes to existing MCP tools
-
-#### **Geometry Nodes Integration**
-Enhanced with comprehensive procedural modeling capabilities:
-
-**New MCP Tools:**
-- **`complete_geometry_node`** - Create sophisticated geometry node networks for procedural modeling
-- **`get_geometry_nodes_status`** - Check Geometry Nodes availability and Blender version compatibility
-
-**Procedural Modeling Features:**
-- **AI-Driven Creation**: Claude can create complex parametric objects (tables, chairs, organic shapes)
-- **Node Network Construction**: Full geometry node network creation with custom inputs and properties
-- **Blender 4.x Support**: Automatic compatibility handling for Blender 3.x and 4.x interface differences
-- **Shared Context Integration**: Auto-creates object handles for seamless tool chaining
-
-**Example Usage:**
-```python
-# Create a procedural table with geometry nodes
-complete_geometry_node(
-    object_name="ProceduralTable",
-    nodes=[
-        {"type": "NodeGroupInput", "location": [0, 0]},
-        {"type": "GeometryNodeMeshCube", "location": [200, 200], "inputs": {"Size": [2, 0.1, 1]}},  # Table top
-        {"type": "GeometryNodeMeshCube", "location": [200, 0], "inputs": {"Size": [0.1, 1.8, 0.1]}},    # Table leg
-        {"type": "GeometryNodeJoinGeometry", "location": [400, 100]},
-        {"type": "NodeGroupOutput", "location": [600, 100]}
-    ],
-    links=[
-        {"from_node": 1, "from_socket": "Mesh", "to_node": 3, "to_socket": 0},
-        {"from_node": 2, "from_socket": "Mesh", "to_node": 3, "to_socket": 0},
-        {"from_node": 3, "from_socket": "Geometry", "to_node": 4, "to_socket": "Geometry"}
-    ]
-)
-# Returns: object_handle: "geometry_ProceduralTable" for easy script access
-
-# Use in subsequent operations
-execute_blender_code("table = get_object('geometry_ProceduralTable'); table.location.z = 1")
-```
-
-### Usage Examples
-
-#### **Persistent Variables**
-```python
-# Tool call 1: Store data
-execute_blender_code("shared['cube_count'] = 5")
-
-# Tool call 2: Use stored data
-execute_blender_code("for i in range(shared['cube_count']): bpy.ops.mesh.primitive_cube_add()")
-```
-
-#### **Object Handles**
-```python
-# Create handle manually
-create_object_handle("main_cube", "Cube")
-
-# Use handle in script
-execute_blender_code("cube = get_object('main_cube'); cube.location.z = 2")
-
-# Auto-handles from downloads
-download_polyhaven_asset(asset_id="chair", asset_type="models")
-# Returns: object_handles: {"imported_chair_0": "Chair_01"}
-execute_blender_code("chair = get_object('imported_chair_0'); chair.scale = (2,2,2)")
-```
-
-#### **Material Handles**
-```python
-# Download texture (auto-creates handle)
-download_polyhaven_asset(asset_id="wood_floor", asset_type="textures")
-# Returns: material_handle: "material_wood_floor"
-
-# Apply to object
-execute_blender_code("mat = get_material('material_wood_floor'); bpy.context.object.data.materials.append(mat)")
-```
-
-#### **Context Management**
-```python
-# Inspect current state
-get_shared_context()
-
-# View recent operations
-get_operation_history(count=5)
-
-# Start fresh
-clear_shared_context()
-```
-
-### Benefits
-
-1. **🔄 Multi-Step Workflows**: Build complex scenes across multiple tool calls
-2. **🔗 Tool Chaining**: Use results from one tool in subsequent operations
-3. **🏷️ Easy References**: Handle system makes object/material management simple
-4. **🐛 Better Debugging**: Operation history and context inspection tools
-5. **⚡ Improved Productivity**: No more repeating setup code in every script
-6. **🔒 Backward Compatible**: Existing workflows continue to work unchanged
-7. **🔧 Procedural Modeling**: AI-driven geometry nodes for sophisticated parametric objects
-8. **🎯 Blender 4.x Support**: Full compatibility with modern Blender geometry node workflows
-
----
-
-## Previous Versions
-
-### [Original] - Before 2025-01-17
-- Basic MCP server with isolated script execution
-- Individual tools for Blender operations
-- PolyHaven, Sketchfab, and Hyper3D integrations
-- No persistence between tool calls
+## Upstream
+- Overtli-Blender builds on the original BlenderMCP work by Siddharth Ahuja and the BlenderMCP community. Historical names are retained only for attribution or negative compatibility checks.

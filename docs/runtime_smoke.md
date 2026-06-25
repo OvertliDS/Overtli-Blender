@@ -1,6 +1,7 @@
 # Runtime Smoke
 
 Use this checklist after starting Blender with the Overtli-Blender addon enabled.
+The Python package and console command are `overtli-blender`.
 
 Prerequisite:
 - Open Blender.
@@ -11,6 +12,12 @@ Run from the repository root in PowerShell:
 
 ```powershell
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py
+```
+
+Fast non-Blender release gate:
+
+```powershell
+.\.venv\Scripts\python scripts\release_check.py --fast
 ```
 
 Optional checks:
