@@ -1221,6 +1221,56 @@ def run_phase8a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
             assert_command_success("delete_objects phase8a cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True}))
 
 
+def run_phase8b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    collection_name = f"OVERTLI_PHASE8B_SMOKE_{stamp}"
+    schema_obj = f"OVERTLI_PHASE8B_SCHEMA_OBJ_{stamp}"
+    profile_name = f"OVERTLI_PHASE8B_PROFILE_{stamp}"
+    panel_name = f"OVERTLI_PHASE8B_PANEL_{stamp}"
+    pipe_name = f"OVERTLI_PHASE8B_PIPE_{stamp}"
+    cloth_name = f"OVERTLI_PHASE8B_CLOTH_{stamp}"
+    created_objects = [schema_obj, profile_name, f"{profile_name}_Extrude", f"{profile_name}_Lathe", panel_name, pipe_name, cloth_name]
+    schema = {"vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]], "edges": [], "faces": [[0, 1, 2]], "metadata": {"smoke": True}}
+    profile_points = [[0, 0, 0], [0.5, 0, 0], [0.5, 0, 1], [0, 0, 1]]
+    try:
+        assert_command_success("get_modeling_capabilities", send_command(sock, timeout_seconds, "get_modeling_capabilities"))
+        assert_command_success("validate_mesh_schema phase8b", send_command(sock, timeout_seconds, "validate_mesh_schema", {"schema": schema}))
+        assert_command_success("create_mesh_from_schema phase8b", send_command(sock, timeout_seconds, "create_mesh_from_schema", {"object_name": schema_obj, "schema": schema, "collection_name": collection_name}))
+        assert_command_success("create_profile_curve phase8b", send_command(sock, timeout_seconds, "create_profile_curve", {"profile_name": profile_name, "points": profile_points, "collection_name": collection_name}))
+        assert_command_success("extrude_profile phase8b", send_command(sock, timeout_seconds, "extrude_profile", {"profile_object_name": profile_name, "extrude_vector": [0, 0, 0.25], "new_object_name": f"{profile_name}_Extrude"}))
+        lathe = send_command(sock, timeout_seconds, "lathe_profile", {"profile_object_name": profile_name, "segments": 12, "new_object_name": f"{profile_name}_Lathe"})
+        if lathe.get("status") not in {"success", "unsupported", "error"}:
+            raise RuntimeError(f"lathe_profile unexpected response: {lathe}")
+        assert_command_success("create_beveled_curve_object phase8b", send_command(sock, timeout_seconds, "create_beveled_curve_object", {"name": pipe_name, "points": [[0, 0, 0], [1, 0, 0], [1, 1, 0]], "radius": 0.025, "collection_name": collection_name}))
+        assert_command_success("create_hard_surface_panel phase8b", send_command(sock, timeout_seconds, "create_hard_surface_panel", {"panel_name": panel_name, "size": [1, 1, 0.05], "collection_name": collection_name}))
+        assert_command_success("create_modifier_stack phase8b", send_command(sock, timeout_seconds, "create_modifier_stack", {"object_name": schema_obj, "modifiers": [{"type": "BEVEL", "properties": {"width": 0.01, "segments": 1}}, {"type": "WEIGHTED_NORMAL"}]}))
+        assert_success("plan_reference_construction phase8b", send_command(sock, timeout_seconds, "plan_reference_construction", {"reference_set_id": "phase8b_smoke_reference", "target_description": "simple hard surface panel from calibrated reference"}))
+        assert_success("validate_reference_alignment phase8b", send_command(sock, timeout_seconds, "validate_reference_alignment", {"object_names": [schema_obj], "reference_set_id": "phase8b_smoke_reference"}))
+        assert_command_success("configure_sculpt_session phase8b", send_command(sock, timeout_seconds, "configure_sculpt_session", {"object_name": schema_obj, "use_shape_key": True}))
+        assert_command_success("create_shape_key_sculpt_variant phase8b", send_command(sock, timeout_seconds, "create_shape_key_sculpt_variant", {"object_name": schema_obj, "shape_key_name": f"OVERTLI_PHASE8B_SHAPE_{stamp}"}))
+        assert_command_success("create_sculpt_mask phase8b", send_command(sock, timeout_seconds, "create_sculpt_mask", {"object_name": schema_obj, "vertex_indices": [0, 1]}))
+        stroke = send_command(sock, timeout_seconds, "apply_sculpt_stroke_batch", {"object_name": schema_obj, "strokes": []})
+        stroke_result = stroke.get("result") if isinstance(stroke.get("result"), dict) else stroke
+        if stroke_result.get("status") != "requires_approval":
+            raise RuntimeError(f"apply_sculpt_stroke_batch should require approval: {stroke}")
+        assert_command_success("create_cloth_pattern_panel phase8b", send_command(sock, timeout_seconds, "create_cloth_pattern_panel", {"panel_name": cloth_name, "points": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], "collection_name": collection_name}))
+        assert_command_success("define_cloth_seam_pair phase8b", send_command(sock, timeout_seconds, "define_cloth_seam_pair", {"panel_a": cloth_name, "edge_a": [0, 1], "panel_b": cloth_name, "edge_b": [2, 3]}))
+        assert_command_success("create_cloth_pin_group phase8b", send_command(sock, timeout_seconds, "create_cloth_pin_group", {"object_name": cloth_name, "vertex_indices": [0, 1]}))
+        assert_command_success("create_cloth_setup phase8b", send_command(sock, timeout_seconds, "create_cloth_setup", {"object_name": cloth_name, "pin_group_name": "Overtli_Cloth_Pin"}))
+        assert_command_success("create_cloth_collision_setup phase8b", send_command(sock, timeout_seconds, "create_cloth_collision_setup", {"object_name": panel_name}))
+        preview = send_command(sock, timeout_seconds, "simulate_cloth_preview", {"object_name": cloth_name})
+        preview_result = preview.get("result") if isinstance(preview.get("result"), dict) else preview
+        if preview_result.get("status") != "requires_approval":
+            raise RuntimeError(f"simulate_cloth_preview should require approval: {preview}")
+        assert_command_success("validate_construction_geometry phase8b", send_command(sock, timeout_seconds, "validate_construction_geometry", {"object_names": [schema_obj, panel_name, pipe_name, cloth_name], "reference_set_id": "phase8b_smoke_reference"}))
+        cleanup = assert_command_success("plan_construction_cleanup phase8b", send_command(sock, timeout_seconds, "plan_construction_cleanup", {"workflow_id": f"phase8b_{stamp}"}))
+        if not cleanup.get("requires_approval"):
+            raise RuntimeError(f"plan_construction_cleanup should require approval: {cleanup}")
+        print("PASS phase8b full smoke completed with smoke-created data and gated sculpt/cloth actions")
+    finally:
+        send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1349,6 +1399,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-baked-material", action="store_true", help="Run Phase 8A baked material smoke through --phase8a-full.")
     parser.add_argument("--include-bake-cleanup-plan", action="store_true", help="Run Phase 8A bake cleanup planning smoke through --phase8a-full.")
     parser.add_argument("--include-verified-bake-workflow", action="store_true", help="Run Phase 8A verified bake workflow smoke through --phase8a-full.")
+    parser.add_argument("--include-modeling-capabilities", action="store_true", help="Run Phase 8B modeling capabilities smoke through --phase8b-full.")
+    parser.add_argument("--include-mesh-schema", action="store_true", help="Run Phase 8B mesh schema smoke through --phase8b-full.")
+    parser.add_argument("--include-profile-modeling", action="store_true", help="Run Phase 8B profile modeling smoke through --phase8b-full.")
+    parser.add_argument("--include-curve-construction", action="store_true", help="Run Phase 8B curve construction smoke through --phase8b-full.")
+    parser.add_argument("--include-modifier-construction", action="store_true", help="Run Phase 8B modifier construction smoke through --phase8b-full.")
+    parser.add_argument("--include-reference-construction", action="store_true", help="Run Phase 8B reference construction smoke through --phase8b-full.")
+    parser.add_argument("--include-sculpt-workflow", action="store_true", help="Run Phase 8B sculpt workflow smoke through --phase8b-full.")
+    parser.add_argument("--include-cloth-patterns", action="store_true", help="Run Phase 8B cloth pattern smoke through --phase8b-full.")
+    parser.add_argument("--include-construction-validation", action="store_true", help="Run Phase 8B construction validation smoke through --phase8b-full.")
+    parser.add_argument("--include-construction-cleanup-plan", action="store_true", help="Run Phase 8B construction cleanup planning smoke through --phase8b-full.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1403,6 +1463,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase8a-full",
         action="store_true",
         help="Run Phase 8A texture baking and image resource smoke with project-local generated data.",
+    )
+    parser.add_argument(
+        "--phase8b-full",
+        action="store_true",
+        help="Run Phase 8B advanced modeling, sculpt setup, cloth pattern, and validation smoke with smoke-created data.",
     )
     return parser
 
@@ -1634,6 +1699,21 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_verified_bake_workflow
             ):
                 run_phase8a_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase8b_full
+                or args.include_modeling_capabilities
+                or args.include_mesh_schema
+                or args.include_profile_modeling
+                or args.include_curve_construction
+                or args.include_modifier_construction
+                or args.include_reference_construction
+                or args.include_sculpt_workflow
+                or args.include_cloth_patterns
+                or args.include_construction_validation
+                or args.include_construction_cleanup_plan
+            ):
+                run_phase8b_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

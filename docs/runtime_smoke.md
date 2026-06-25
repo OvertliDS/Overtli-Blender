@@ -24,6 +24,30 @@ Phase 8A smoke flags:
 
 `--phase8a-full` creates smoke-scoped objects, materials, image targets, project-local texture folders, and cleanup plans under ignored `.overtli_blender/phase8a_smoke/`. Native bake execution is runtime-dependent and reports unsupported/error states honestly instead of claiming fake success.
 
+## Phase 8B
+
+Run the contained Phase 8B advanced modeling smoke after refreshing or reloading the Blender addon:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase8b-full
+```
+
+Phase 8B smoke flags:
+
+- `--include-modeling-capabilities`
+- `--include-mesh-schema`
+- `--include-profile-modeling`
+- `--include-curve-construction`
+- `--include-modifier-construction`
+- `--include-reference-construction`
+- `--include-sculpt-workflow`
+- `--include-cloth-patterns`
+- `--include-construction-validation`
+- `--include-construction-cleanup-plan`
+- `--phase8b-full`
+
+`--phase8b-full` creates only `OVERTLI_PHASE8B_*` smoke data and checks modeling capabilities, mesh schema validation/creation, profile extrusion/lathe, beveled curves, hard-surface panels, modifier stacks, reference construction planning, shape-key sculpt setup, cloth panels/pins/collision setup, construction validation, and cleanup planning. Sculpt stroke playback and cloth preview/cache commands are verified as approval-gated by default.
+
 ## Phase 7C
 
 Run the contained Phase 7C project-runtime smoke after refreshing or reloading the Blender addon:

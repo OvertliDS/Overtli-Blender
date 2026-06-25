@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added Phase 8B advanced modeling, sculpt setup, cloth pattern, reference construction, and construction validation command surfaces.
+- Added validated mesh schema creation, profile/curve workflows, non-destructive modifier construction, hard-surface panel and pipe helpers, and approval-gated sculpt/cloth/cache cleanup paths.
 - Added Phase 8A texture baking and image resource pipeline command surface.
 - Added bake preflight, target image creation, native/derived/approximated classification, channel packing metadata, baked texture validation, baked material variants, and approval-gated bake cleanup planning.
 - Added Phase 8A smoke flags and public docs for texture baking, image resources, and channel packing.

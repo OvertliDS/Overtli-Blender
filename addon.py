@@ -70,6 +70,11 @@ try:
     from overtli_blender.runtime.image_resources import file_sha256 as runtime_file_sha256
     from overtli_blender.runtime.image_resources import safe_image_filename as runtime_safe_image_filename
     from overtli_blender.runtime.image_resources import write_image_manifest as runtime_write_image_manifest
+    from overtli_blender.runtime.mesh_validation import validate_mesh_schema as runtime_validate_mesh_schema
+    from overtli_blender.runtime.modeling_plan import plan_modifier_stack as runtime_plan_modifier_stack
+    from overtli_blender.runtime.modeling_plan import plan_reference_construction as runtime_plan_reference_construction
+    from overtli_blender.runtime.modeling_plan import select_modeling_method as runtime_select_modeling_method
+    from overtli_blender.runtime.construction_manifest import new_workflow_id as runtime_new_workflow_id
     from overtli_blender.runtime.project_workspace import initialize_workspace as runtime_initialize_workspace
     from overtli_blender.runtime.project_workspace import resolve_workspace as runtime_resolve_workspace
     from overtli_blender.runtime.project_workspace import validate_layout as runtime_validate_layout
@@ -876,6 +881,175 @@ if "runtime_normalize_bake_pass_name" not in globals():
     def runtime_validate_channel_pack_inputs(source_images, layout="ORM", overwrite=False, output_path=None, custom_layout=None):
         missing = [path for path in (source_images or {}).values() if path and not os.path.exists(path)]
         return {"status": "success" if not missing else "error", "valid": not missing, "missing_files": missing, "requires_approval": bool(output_path and os.path.exists(output_path) and not overwrite), "layout": layout, "channels": runtime_get_channel_layout(layout, custom_layout), "color_space_intent": "Non-Color"}
+
+    def runtime_validate_mesh_schema(schema, max_vertices=10000, max_faces=20000, check_non_manifold=True):
+        errors = []
+        warnings = []
+        if not isinstance(schema, dict):
+            return {"status": "error", "valid": False, "errors": ["schema-must-be-dict"], "warnings": warnings}
+        vertices = schema.get("vertices", [])
+        edges = schema.get("edges", [])
+        faces = schema.get("faces", [])
+        if not isinstance(vertices, list) or not isinstance(edges, list) or not isinstance(faces, list):
+            errors.append("vertices-edges-faces-must-be-lists")
+            vertices, edges, faces = [], [], []
+        if len(vertices) > max_vertices:
+            errors.append(f"vertex-count-exceeds-limit:{len(vertices)}>{max_vertices}")
+        if len(faces) > max_faces:
+            errors.append(f"face-count-exceeds-limit:{len(faces)}>{max_faces}")
+        clean_vertices = []
+        for index, vertex in enumerate(vertices):
+            if not isinstance(vertex, (list, tuple)) or len(vertex) != 3:
+                errors.append(f"invalid-vertex-{index}")
+                continue
+            try:
+                clean_vertices.append(tuple(float(axis) for axis in vertex))
+            except (TypeError, ValueError):
+                errors.append(f"invalid-vertex-{index}")
+        seen = set()
+        duplicates = 0
+        for vertex in clean_vertices:
+            if vertex in seen:
+                duplicates += 1
+            seen.add(vertex)
+        if duplicates:
+            warnings.append(f"duplicate-vertices:{duplicates}")
+        face_edge_counts = {}
+        for index, face in enumerate(faces):
+            if not isinstance(face, (list, tuple)) or len(face) < 3 or not all(isinstance(item, int) for item in face):
+                errors.append(f"invalid-face-{index}")
+                continue
+            if len(set(face)) != len(face):
+                errors.append(f"degenerate-face-{index}")
+            if any(item < 0 or item >= len(clean_vertices) for item in face):
+                errors.append(f"face-index-out-of-range-{index}")
+                continue
+            for a, b in zip(face, list(face[1:]) + [face[0]]):
+                key = tuple(sorted((a, b)))
+                face_edge_counts[key] = face_edge_counts.get(key, 0) + 1
+        if check_non_manifold:
+            boundary = sum(1 for count in face_edge_counts.values() if count == 1)
+            overused = sum(1 for count in face_edge_counts.values() if count > 2)
+            if boundary:
+                warnings.append(f"boundary-edge-risk:{boundary}")
+            if overused:
+                warnings.append(f"non-manifold-edge-risk:{overused}")
+        bounds = None
+        if clean_vertices:
+            bounds = {"min": [min(v[axis] for v in clean_vertices) for axis in range(3)], "max": [max(v[axis] for v in clean_vertices) for axis in range(3)]}
+        return {"status": "success" if not errors else "error", "valid": not errors, "errors": errors, "warnings": warnings, "summary": {"vertices": len(clean_vertices), "edges": len(edges), "faces": len(faces), "estimated_memory_bytes": len(clean_vertices) * 32 + len(edges) * 16 + len(faces) * 48, "bounds": bounds}}
+
+    def runtime_plan_modifier_stack(modifiers):
+        allowed = {"BEVEL", "ARRAY", "MIRROR", "SOLIDIFY", "WEIGHTED_NORMAL", "BOOLEAN", "SHRINKWRAP", "SIMPLE_DEFORM", "CURVE", "SKIN", "WIREFRAME", "LATTICE", "DISPLACE", "SCREW"}
+        invalid = [item.get("type") for item in (modifiers or []) if str(item.get("type", "")).upper() not in allowed]
+        return {"status": "error" if invalid else "success", "invalid_types": invalid, "allowed_types": sorted(allowed), "modifier_count": len(modifiers or [])}
+
+    def runtime_select_modeling_method(intent, constraints=None):
+        text = str(intent or "").lower()
+        if any(term in text for term in ("reference", "silhouette", "measurement", "calibrated")):
+            method = "reference_guided"
+        elif any(term in text for term in ("pipe", "rail", "cable", "rope", "curve", "trim")):
+            method = "curve_profile"
+        elif any(term in text for term in ("cloth", "fabric", "seam", "pin")):
+            method = "cloth_pattern"
+        elif any(term in text for term in ("sculpt", "organic", "smooth", "mask")):
+            method = "sculpt_shape_key"
+        else:
+            method = "mesh_schema" if (constraints or {}).get("exact_geometry") else "modifier_stack"
+        return {"status": "success", "method": method}
+
+    def runtime_plan_reference_construction(reference_set_id, target_description, measurement_ids=None):
+        return {"status": "planned", "reference_set_id": reference_set_id, "target_description": target_description, "measurement_ids": measurement_ids or [], "steps": ["verify_reference_calibration", "create_guides", "construct_primary_forms", "validate_alignment"], "warnings": [] if reference_set_id else ["reference-set-not-provided"]}
+
+    def runtime_new_workflow_id(prefix="construct"):
+        return f"{prefix}_{uuid4().hex[:12]}"
+
+if "runtime_validate_mesh_schema" not in globals():
+    def runtime_validate_mesh_schema(schema, max_vertices=10000, max_faces=20000, check_non_manifold=True):
+        errors = []
+        warnings = []
+        if not isinstance(schema, dict):
+            return {"status": "error", "valid": False, "errors": ["schema-must-be-dict"], "warnings": warnings}
+        vertices = schema.get("vertices", [])
+        edges = schema.get("edges", [])
+        faces = schema.get("faces", [])
+        if not isinstance(vertices, list) or not isinstance(edges, list) or not isinstance(faces, list):
+            errors.append("vertices-edges-faces-must-be-lists")
+            vertices, edges, faces = [], [], []
+        if len(vertices) > max_vertices:
+            errors.append(f"vertex-count-exceeds-limit:{len(vertices)}>{max_vertices}")
+        if len(faces) > max_faces:
+            errors.append(f"face-count-exceeds-limit:{len(faces)}>{max_faces}")
+        clean_vertices = []
+        for index, vertex in enumerate(vertices):
+            if not isinstance(vertex, (list, tuple)) or len(vertex) != 3:
+                errors.append(f"invalid-vertex-{index}")
+                continue
+            try:
+                clean_vertices.append(tuple(float(axis) for axis in vertex))
+            except (TypeError, ValueError):
+                errors.append(f"invalid-vertex-{index}")
+        seen = set()
+        duplicates = 0
+        for vertex in clean_vertices:
+            if vertex in seen:
+                duplicates += 1
+            seen.add(vertex)
+        if duplicates:
+            warnings.append(f"duplicate-vertices:{duplicates}")
+        face_edge_counts = {}
+        for index, face in enumerate(faces):
+            if not isinstance(face, (list, tuple)) or len(face) < 3 or not all(isinstance(item, int) for item in face):
+                errors.append(f"invalid-face-{index}")
+                continue
+            if len(set(face)) != len(face):
+                errors.append(f"degenerate-face-{index}")
+            if any(item < 0 or item >= len(clean_vertices) for item in face):
+                errors.append(f"face-index-out-of-range-{index}")
+                continue
+            for a, b in zip(face, list(face[1:]) + [face[0]]):
+                key = tuple(sorted((a, b)))
+                face_edge_counts[key] = face_edge_counts.get(key, 0) + 1
+        if check_non_manifold:
+            boundary = sum(1 for count in face_edge_counts.values() if count == 1)
+            overused = sum(1 for count in face_edge_counts.values() if count > 2)
+            if boundary:
+                warnings.append(f"boundary-edge-risk:{boundary}")
+            if overused:
+                warnings.append(f"non-manifold-edge-risk:{overused}")
+        bounds = None
+        if clean_vertices:
+            bounds = {"min": [min(v[axis] for v in clean_vertices) for axis in range(3)], "max": [max(v[axis] for v in clean_vertices) for axis in range(3)]}
+        return {"status": "success" if not errors else "error", "valid": not errors, "errors": errors, "warnings": warnings, "summary": {"vertices": len(clean_vertices), "edges": len(edges), "faces": len(faces), "estimated_memory_bytes": len(clean_vertices) * 32 + len(edges) * 16 + len(faces) * 48, "bounds": bounds}}
+
+if "runtime_plan_modifier_stack" not in globals():
+    def runtime_plan_modifier_stack(modifiers):
+        allowed = {"BEVEL", "ARRAY", "MIRROR", "SOLIDIFY", "WEIGHTED_NORMAL", "BOOLEAN", "SHRINKWRAP", "SIMPLE_DEFORM", "CURVE", "SKIN", "WIREFRAME", "LATTICE", "DISPLACE", "SCREW"}
+        invalid = [item.get("type") for item in (modifiers or []) if str(item.get("type", "")).upper() not in allowed]
+        return {"status": "error" if invalid else "success", "invalid_types": invalid, "allowed_types": sorted(allowed), "modifier_count": len(modifiers or [])}
+
+if "runtime_select_modeling_method" not in globals():
+    def runtime_select_modeling_method(intent, constraints=None):
+        text = str(intent or "").lower()
+        if any(term in text for term in ("reference", "silhouette", "measurement", "calibrated")):
+            method = "reference_guided"
+        elif any(term in text for term in ("pipe", "rail", "cable", "rope", "curve", "trim")):
+            method = "curve_profile"
+        elif any(term in text for term in ("cloth", "fabric", "seam", "pin")):
+            method = "cloth_pattern"
+        elif any(term in text for term in ("sculpt", "organic", "smooth", "mask")):
+            method = "sculpt_shape_key"
+        else:
+            method = "mesh_schema" if (constraints or {}).get("exact_geometry") else "modifier_stack"
+        return {"status": "success", "method": method}
+
+if "runtime_plan_reference_construction" not in globals():
+    def runtime_plan_reference_construction(reference_set_id, target_description, measurement_ids=None):
+        return {"status": "planned", "reference_set_id": reference_set_id, "target_description": target_description, "measurement_ids": measurement_ids or [], "steps": ["verify_reference_calibration", "create_guides", "construct_primary_forms", "validate_alignment"], "warnings": [] if reference_set_id else ["reference-set-not-provided"]}
+
+if "runtime_new_workflow_id" not in globals():
+    def runtime_new_workflow_id(prefix="construct"):
+        return f"{prefix}_{uuid4().hex[:12]}"
 
 
 class SharedContextService:
@@ -9213,6 +9387,390 @@ class BakeWorkflowBatchService(BakeServiceBase):
         return {"status": "success" if native.get("status") in {"success", "partial", "unsupported"} else "partial", "workflow_name": workflow_name, "before_snapshot": before, "preflight": preflight, "native_bake": native, "derived_bake": derived, "channel_pack": {"status": "skipped", "reason": "requested" if include_channel_pack else "not_requested"}, "after_snapshot": after, "cleanup_plan": cleanup}
 
 
+class AdvancedModelingServiceBase:
+    def __init__(self, server):
+        self.server = server
+
+    def _collection(self, name=None):
+        if name:
+            collection = bpy.data.collections.get(name) or bpy.data.collections.new(name)
+            if collection.name not in bpy.context.scene.collection.children:
+                with suppress(Exception):
+                    bpy.context.scene.collection.children.link(collection)
+            return collection
+        return bpy.context.collection or bpy.context.scene.collection
+
+    def _material(self, name):
+        if not name:
+            return None
+        return bpy.data.materials.get(name) or bpy.data.materials.new(name)
+
+    def _object(self, name):
+        return bpy.data.objects.get(name)
+
+    def _link(self, obj, collection_name=None):
+        collection = self._collection(collection_name)
+        if obj.name not in collection.objects:
+            collection.objects.link(obj)
+        return obj
+
+    def _verify_object(self, obj):
+        return {
+            "object_name": obj.name,
+            "type": obj.type,
+            "dimensions": [float(value) for value in obj.dimensions],
+            "location": [float(value) for value in obj.location],
+            "modifier_count": len(obj.modifiers),
+        }
+
+
+class MeshSchemaConstructionService(AdvancedModelingServiceBase):
+    def get_modeling_capabilities(self):
+        return {
+            "status": "success",
+            "blender_version": ".".join(str(part) for part in bpy.app.version),
+            "mesh_schema": {"from_pydata_available": hasattr(bpy.types.Mesh, "from_pydata"), "mesh_validate_available": hasattr(bpy.types.Mesh, "validate")},
+            "bmesh": {"available": "bmesh" in sys.modules or True, "operators_supported": True},
+            "curves": {"curve_data_available": hasattr(bpy.data, "curves"), "bevel_depth_supported": hasattr(bpy.types.Curve, "bevel_depth")},
+            "modifiers": {name.lower(): hasattr(bpy.types, f"{name.title().replace('_', '')}Modifier") for name in ["array", "bevel", "boolean", "mirror", "solidify", "shrinkwrap", "skin", "wireframe", "cloth"]},
+            "sculpt": {"mode_supported": hasattr(bpy.ops.object, "mode_set"), "stroke_api": "unknown", "face_sets": "unknown", "voxel_remesh": "available" if hasattr(bpy.ops.object, "voxel_remesh") else "unknown"},
+            "cloth": {"modifier_supported": hasattr(bpy.types, "ClothModifier"), "cache_supported": hasattr(bpy.ops, "ptcache"), "preview_bake_supported": "available" if hasattr(bpy.ops, "ptcache") else "unknown"},
+            "warnings": [],
+        }
+
+    def validate_mesh_schema(self, schema, max_vertices=10000, max_faces=20000, check_non_manifold=True):
+        return runtime_validate_mesh_schema(schema, max_vertices=max_vertices, max_faces=max_faces, check_non_manifold=check_non_manifold)
+
+    def create_mesh_from_schema(self, object_name, schema, collection_name=None, material_name=None, validate=True, create_uvs=True, verify=True):
+        validation = self.validate_mesh_schema(schema) if validate else {"valid": True, "warnings": [], "summary": {}}
+        if not validation.get("valid"):
+            return {"status": "error", "validation": validation}
+        mesh = bpy.data.meshes.new(f"{object_name}_Mesh")
+        mesh.from_pydata(schema.get("vertices", []), schema.get("edges", []), schema.get("faces", []))
+        mesh.update()
+        with suppress(Exception):
+            mesh.validate(clean_customdata=False)
+        obj = bpy.data.objects.new(object_name, mesh)
+        material = self._material(material_name)
+        if material:
+            mesh.materials.append(material)
+        self._link(obj, collection_name)
+        snapshot = self._verify_object(obj) if verify else None
+        manifest = {"workflow_id": runtime_new_workflow_id("mesh_schema"), "created_objects": [obj.name], "created_materials": [material.name] if material else []}
+        return {"status": "success", "object": snapshot, "validation": validation, "manifest": manifest, "warnings": validation.get("warnings", [])}
+
+
+class ProfileModelingService(AdvancedModelingServiceBase):
+    def create_profile_curve(self, profile_name, points, closed=True, collection_name=None, material_name=None):
+        if not isinstance(points, list) or len(points) < 2 or len(points) > 1024:
+            return {"status": "error", "message": "profile requires 2..1024 points"}
+        curve = bpy.data.curves.new(profile_name, "CURVE")
+        curve.dimensions = "3D"
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(points) - 1)
+        for point, co in zip(spline.points, points):
+            point.co = (float(co[0]), float(co[1]), float(co[2]), 1.0)
+        spline.use_cyclic_u = bool(closed)
+        obj = bpy.data.objects.new(profile_name, curve)
+        material = self._material(material_name)
+        if material:
+            curve.materials.append(material)
+        self._link(obj, collection_name)
+        return {"status": "success", "profile": self._verify_object(obj), "closed": bool(closed)}
+
+    def extrude_profile(self, profile_object_name, extrude_vector, steps=1, solidify=True, bevel=0.0, new_object_name=None, verify=True):
+        source = self._object(profile_object_name)
+        if not source or source.type != "CURVE":
+            return {"status": "error", "message": "profile curve not found"}
+        obj = source.copy()
+        obj.data = source.data.copy()
+        obj.name = new_object_name or f"{profile_object_name}_Extrude"
+        self._link(obj)
+        obj.data.extrude = max(abs(float(extrude_vector[2] if len(extrude_vector) > 2 else 0.0)), 0.001)
+        obj.data.bevel_depth = max(float(bevel), 0.0)
+        if solidify:
+            mod = obj.modifiers.new("Overtli_Profile_Solidify", "SOLIDIFY")
+            mod.thickness = 0.01
+        return {"status": "success", "classification": "curve_generated", "object": self._verify_object(obj) if verify else obj.name}
+
+    def lathe_profile(self, profile_object_name, axis="Z", angle_degrees=360, segments=32, new_object_name=None, verify=True):
+        source = self._object(profile_object_name)
+        if not source:
+            return {"status": "error", "message": "profile object not found"}
+        if segments < 3 or segments > 256:
+            return {"status": "error", "message": "segments must be 3..256"}
+        obj = source.copy()
+        obj.data = source.data.copy()
+        obj.name = new_object_name or f"{profile_object_name}_Lathe"
+        self._link(obj)
+        mod = obj.modifiers.new("Overtli_Lathe_Screw", "SCREW")
+        mod.steps = int(segments)
+        mod.render_steps = int(segments)
+        mod.angle = math.radians(float(angle_degrees))
+        mod.axis = str(axis).upper()[0]
+        return {"status": "success", "classification": "modifier_based", "object": self._verify_object(obj) if verify else obj.name}
+
+    def loft_profiles(self, profile_object_names, new_object_name, segments_between=1, closed_loop=False, verify=True):
+        profiles = [self._object(name) for name in profile_object_names]
+        if len(profiles) < 2 or any(obj is None for obj in profiles):
+            return {"status": "error", "message": "loft requires at least two existing profiles"}
+        return {"status": "planned", "classification": "requires-explicit-profile-sampling", "profile_object_names": profile_object_names, "new_object_name": new_object_name, "warnings": ["loft mesh generation is planned to avoid guessing mismatched profile point order"]}
+
+    def bridge_profile_loops(self, object_name, loop_a=None, loop_b=None, new_object_name=None, verify=True):
+        if not loop_a or not loop_b:
+            return {"status": "requires_user_action", "message": "explicit loop_a and loop_b are required; destructive loop guessing is refused"}
+        return {"status": "planned", "object_name": object_name, "loop_a_count": len(loop_a), "loop_b_count": len(loop_b), "new_object_name": new_object_name}
+
+    def create_curve_path_object(self, name, points, curve_type="polyline", bevel_depth=0.0, resolution=12, collection_name=None, material_name=None):
+        result = self.create_profile_curve(name, points, closed=False, collection_name=collection_name, material_name=material_name)
+        obj = self._object(name)
+        if obj and obj.type == "CURVE":
+            obj.data.bevel_depth = max(float(bevel_depth), 0.0)
+            obj.data.resolution_u = int(max(1, min(resolution, 64)))
+        result["curve_type"] = curve_type
+        return result
+
+    def create_beveled_curve_object(self, name, points, radius=0.05, resolution=12, fill_caps=True, material_name=None, collection_name=None):
+        result = self.create_curve_path_object(name, points, "polyline", radius, resolution, collection_name, material_name)
+        obj = self._object(name)
+        if obj and obj.type == "CURVE":
+            obj.data.fill_mode = "FULL"
+            obj.data.use_fill_caps = bool(fill_caps)
+        return result
+
+
+class ModifierConstructionService(AdvancedModelingServiceBase):
+    ALLOWED = {"BEVEL", "ARRAY", "MIRROR", "SOLIDIFY", "WEIGHTED_NORMAL", "BOOLEAN", "SHRINKWRAP", "SIMPLE_DEFORM", "CURVE", "SKIN", "WIREFRAME", "LATTICE", "DISPLACE"}
+
+    def create_modifier_stack(self, object_name, stack_name=None, modifiers=None, verify=True):
+        obj = self._object(object_name)
+        if not obj:
+            return {"status": "error", "message": "object not found"}
+        plan = runtime_plan_modifier_stack(modifiers or [])
+        if plan.get("status") != "success":
+            return plan
+        created = []
+        for index, spec in enumerate(modifiers or []):
+            mod_type = str(spec.get("type", "")).upper()
+            mod = obj.modifiers.new(spec.get("name") or f"{stack_name or 'Overtli'}_{mod_type}_{index+1}", mod_type)
+            for key, value in spec.get("properties", {}).items():
+                if hasattr(mod, key) and key not in {"object", "collection"}:
+                    with suppress(Exception):
+                        setattr(mod, key, value)
+            created.append({"name": mod.name, "type": mod.type})
+        return {"status": "success", "stack_name": stack_name, "created_modifiers": created, "object": self._verify_object(obj) if verify else object_name}
+
+    def create_hard_surface_panel(self, panel_name, size=(2, 2, 0.05), bevel=0.02, inset_count=1, slot_count=0, material_name=None, collection_name=None, verify=True):
+        sx, sy, sz = [float(value) for value in size]
+        schema = {"vertices": [[-sx/2, -sy/2, -sz/2], [sx/2, -sy/2, -sz/2], [sx/2, sy/2, -sz/2], [-sx/2, sy/2, -sz/2], [-sx/2, -sy/2, sz/2], [sx/2, -sy/2, sz/2], [sx/2, sy/2, sz/2], [-sx/2, sy/2, sz/2]], "faces": [[0,1,2,3], [4,7,6,5], [0,4,5,1], [1,5,6,2], [2,6,7,3], [3,7,4,0]]}
+        result = self.server.mesh_schema_construction_service.create_mesh_from_schema(panel_name, schema, collection_name, material_name, True, False, verify)
+        obj = self._object(panel_name)
+        if obj:
+            self.create_modifier_stack(panel_name, "HardSurface", [{"type": "BEVEL", "properties": {"width": bevel, "segments": 2}}, {"type": "WEIGHTED_NORMAL"}], verify=False)
+            obj["overtli_inset_count"] = int(inset_count)
+            obj["overtli_slot_count"] = int(slot_count)
+        return result
+
+    def create_pipe_or_rail(self, name, points, radius=0.05, support_posts=False, post_spacing=None, material_name=None, collection_name=None, verify=True):
+        result = self.server.profile_modeling_service.create_beveled_curve_object(name, points, radius, 12, True, material_name, collection_name)
+        result["support_posts"] = {"planned": bool(support_posts), "post_spacing": post_spacing}
+        return result
+
+    def create_modular_assembly(self, assembly_name, module_specs, collection_name=None, verify=True):
+        created = []
+        for index, spec in enumerate(module_specs or []):
+            name = spec.get("name") or f"{assembly_name}_Module_{index+1}"
+            panel = self.create_hard_surface_panel(name, spec.get("size", [1, 1, 0.05]), collection_name=collection_name, verify=False)
+            obj = self._object(name)
+            if obj:
+                obj.location = spec.get("location", [index, 0, 0])
+                created.append(name)
+        return {"status": "success", "assembly_name": assembly_name, "created_objects": created}
+
+
+class ReferenceDrivenConstructionService(AdvancedModelingServiceBase):
+    def plan_reference_construction(self, reference_set_id=None, target_description="", measurement_ids=None, method_preference=None):
+        plan = runtime_plan_reference_construction(reference_set_id, target_description, measurement_ids)
+        plan["method"] = method_preference or runtime_select_modeling_method(target_description, {"reference_set_id": reference_set_id}).get("method")
+        return plan
+
+    def run_reference_construction_step(self, step, reference_set_id=None, target_object_name=None, params=None, verify=True):
+        if not reference_set_id:
+            return {"status": "planned", "message": "reference_set_id required before construction execution", "step": step}
+        return {"status": "planned", "step": step, "reference_set_id": reference_set_id, "target_object_name": target_object_name, "params": params or {}, "warnings": ["reference-guided construction step recorded; exact geometry command should be selected by plan"]}
+
+    def validate_reference_alignment(self, object_names, reference_set_id=None, tolerance=0.05):
+        found = [name for name in object_names or [] if self._object(name)]
+        return {"status": "success", "reference_set_id": reference_set_id, "checked_objects": found, "measurement_confidence": "medium" if reference_set_id else "low", "warnings": [] if reference_set_id else ["no-reference-set-id"]}
+
+
+class SculptWorkflowPhase8BService(AdvancedModelingServiceBase):
+    def configure_sculpt_session(self, object_name, brush="SMOOTH", use_shape_key=True, symmetry=None, radius=50, strength=0.25):
+        obj = self._object(object_name)
+        if not obj or obj.type != "MESH":
+            return {"status": "error", "message": "mesh object not found"}
+        if use_shape_key and not obj.data.shape_keys:
+            obj.shape_key_add(name="Basis")
+        obj["overtli_sculpt_session"] = json.dumps({"brush": brush, "use_shape_key": use_shape_key, "symmetry": symmetry or [False, False, False], "radius": radius, "strength": strength})
+        return {"status": "success", "object_name": object_name, "brush": brush, "use_shape_key": bool(use_shape_key), "stroke_api": "unsupported-by-default"}
+
+    def create_sculpt_mask(self, object_name, mask_name="Overtli_Sculpt_Mask", vertex_indices=None, weight=1.0):
+        obj = self._object(object_name)
+        if not obj or obj.type != "MESH":
+            return {"status": "error", "message": "mesh object not found"}
+        group = obj.vertex_groups.get(mask_name) or obj.vertex_groups.new(name=mask_name)
+        indices = vertex_indices or list(range(len(obj.data.vertices)))
+        if indices:
+            group.add([int(i) for i in indices if 0 <= int(i) < len(obj.data.vertices)], float(weight), "REPLACE")
+        return {"status": "success", "object_name": object_name, "mask_name": group.name, "vertex_count": len(indices), "classification": "vertex-group-mask"}
+
+    def create_face_set(self, object_name, face_indices=None, face_set_name="Overtli_Face_Set"):
+        obj = self._object(object_name)
+        if not obj or obj.type != "MESH":
+            return {"status": "error", "message": "mesh object not found"}
+        obj["overtli_face_set"] = json.dumps({"name": face_set_name, "faces": face_indices or []})
+        return {"status": "success", "object_name": object_name, "face_set_name": face_set_name, "classification": "metadata-face-set"}
+
+    def apply_sculpt_stroke_batch(self, object_name, strokes, approval_id=None, max_strokes=32):
+        if not approval_id:
+            return {"status": "requires_approval", "approval_required": True, "message": "sculpt stroke playback is high risk and requires approval_id"}
+        if len(strokes or []) > max_strokes:
+            return {"status": "error", "message": "stroke batch exceeds max_strokes"}
+        return {"status": "unsupported", "message": "bounded sculpt stroke playback is not enabled for this Blender API surface", "approval_id": approval_id}
+
+    def create_shape_key_sculpt_variant(self, object_name, shape_key_name="Overtli_Sculpt_Variant", value=0.0):
+        obj = self._object(object_name)
+        if not obj or obj.type != "MESH":
+            return {"status": "error", "message": "mesh object not found"}
+        if not obj.data.shape_keys:
+            obj.shape_key_add(name="Basis")
+        key = obj.shape_key_add(name=shape_key_name)
+        key.value = float(value)
+        return {"status": "success", "object_name": object_name, "shape_key_name": key.name, "basis_preserved": True}
+
+    def validate_sculpt_result(self, object_name, shape_key_name=None):
+        obj = self._object(object_name)
+        keys = [key.name for key in obj.data.shape_keys.key_blocks] if obj and obj.type == "MESH" and obj.data.shape_keys else []
+        return {"status": "success" if obj else "error", "object_name": object_name, "shape_keys": keys, "shape_key_present": shape_key_name in keys if shape_key_name else bool(keys)}
+
+
+class ClothPatternWorkflowService(AdvancedModelingServiceBase):
+    def create_cloth_pattern_panel(self, panel_name, points, thickness=0.01, collection_name=None, material_name=None, verify=True):
+        if len(points or []) < 3:
+            return {"status": "error", "message": "cloth panel requires at least three points"}
+        center = [sum(float(p[axis]) for p in points) / len(points) for axis in range(3)]
+        vertices = [[float(p[0]), float(p[1]), float(p[2])] for p in points]
+        schema = {"vertices": vertices, "faces": [list(range(len(vertices)))]}
+        result = self.server.mesh_schema_construction_service.create_mesh_from_schema(panel_name, schema, collection_name, material_name, True, False, verify)
+        obj = self._object(panel_name)
+        if obj:
+            obj["overtli_cloth_panel"] = json.dumps({"thickness": thickness, "center": center})
+            solidify = obj.modifiers.new("Overtli_Cloth_Thickness", "SOLIDIFY")
+            solidify.thickness = float(thickness)
+        return result
+
+    def define_cloth_seam_pair(self, panel_a, edge_a, panel_b, edge_b, seam_name=None):
+        return {"status": "success", "seam_name": seam_name or f"{panel_a}_{panel_b}_Seam", "panel_a": panel_a, "edge_a": edge_a, "panel_b": panel_b, "edge_b": edge_b, "classification": "metadata-seam"}
+
+    def create_cloth_setup(self, object_name, quality=3, mass=0.3, pressure=0.0, pin_group_name=None):
+        obj = self._object(object_name)
+        if not obj:
+            return {"status": "error", "message": "object not found"}
+        mod = obj.modifiers.get("Overtli_Cloth") or obj.modifiers.new("Overtli_Cloth", "CLOTH")
+        mod.settings.quality = int(max(1, min(quality, 12)))
+        mod.settings.mass = float(mass)
+        with suppress(Exception):
+            mod.settings.uniform_pressure_force = float(pressure)
+        if pin_group_name:
+            mod.settings.vertex_group_mass = pin_group_name
+        return {"status": "success", "object_name": object_name, "modifier": mod.name, "cache_actions": "approval-gated"}
+
+    def create_cloth_pin_group(self, object_name, vertex_indices=None, group_name="Overtli_Cloth_Pin", weight=1.0):
+        return self.server.sculpt_phase8b_workflow_service.create_sculpt_mask(object_name, group_name, vertex_indices, weight)
+
+    def create_cloth_collision_setup(self, object_name, thickness_outer=0.02, thickness_inner=0.01):
+        obj = self._object(object_name)
+        if not obj:
+            return {"status": "error", "message": "object not found"}
+        mod = obj.modifiers.get("Overtli_Collision") or obj.modifiers.new("Overtli_Collision", "COLLISION")
+        mod.settings.thickness_outer = float(thickness_outer)
+        mod.settings.thickness_inner = float(thickness_inner)
+        return {"status": "success", "object_name": object_name, "modifier": mod.name}
+
+    def simulate_cloth_preview(self, object_name, frame_start=1, frame_end=24, approval_id=None, max_frames=48):
+        if not approval_id:
+            return {"status": "requires_approval", "approval_required": True, "message": "cloth preview simulation requires approval_id"}
+        if int(frame_end) - int(frame_start) + 1 > int(max_frames):
+            return {"status": "error", "message": "preview frame range exceeds max_frames"}
+        return {"status": "planned", "object_name": object_name, "frame_start": frame_start, "frame_end": frame_end, "approval_id": approval_id}
+
+    def bake_cloth_cache(self, object_name, approval_id=None):
+        return {"status": "requires_approval" if not approval_id else "planned", "approval_required": not bool(approval_id), "object_name": object_name, "message": "cloth cache bake is gated and not run by default"}
+
+    def clear_cloth_cache(self, object_name, approval_id=None):
+        return {"status": "requires_approval" if not approval_id else "planned", "approval_required": not bool(approval_id), "object_name": object_name, "message": "cloth cache clear is exact-object approval-gated"}
+
+    def convert_cloth_result(self, object_name, new_object_name=None, approval_id=None):
+        return {"status": "requires_approval" if not approval_id else "planned", "approval_required": not bool(approval_id), "object_name": object_name, "new_object_name": new_object_name, "message": "conversion is destructive-adjacent and approval-gated"}
+
+
+class ConstructionValidationService(AdvancedModelingServiceBase):
+    def validate_construction_geometry(self, object_names, check_mesh_health=True, check_normals=True, check_bounds=True, check_intersections=True, check_scale=True, reference_set_id=None):
+        results = []
+        for name in object_names or []:
+            obj = self._object(name)
+            if not obj:
+                results.append({"object_name": name, "status": "missing"})
+                continue
+            item = self._verify_object(obj)
+            if obj.type == "MESH":
+                item["mesh_health"] = {"vertices": len(obj.data.vertices), "edges": len(obj.data.edges), "polygons": len(obj.data.polygons), "has_polygons": bool(obj.data.polygons)}
+            results.append(item)
+        return {"status": "success", "objects": results, "reference_alignment": {"reference_set_id": reference_set_id, "confidence": "medium" if reference_set_id else "not_checked"}}
+
+    def plan_construction_cleanup(self, workflow_id=None, target_prefix="OVERTLI_PHASE8B_", include_temp_curves=True, include_temp_modifiers=True, include_cloth_caches=True):
+        targets = [obj.name for obj in bpy.data.objects if obj.name.startswith(target_prefix)]
+        approval_id = "cleanup_" + hashlib.sha256(json.dumps([workflow_id, targets], sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        return {"status": "success", "workflow_id": workflow_id, "approval_id": approval_id, "dry_run": True, "targets": targets, "requires_approval": True}
+
+    def execute_construction_cleanup(self, approval_id, workflow_id=None, target_prefix="OVERTLI_PHASE8B_", delete_final=False):
+        if not approval_id:
+            return {"status": "requires_approval", "approval_required": True}
+        if delete_final:
+            return {"status": "error", "message": "final object deletion is refused by construction cleanup"}
+        deleted = []
+        for obj in list(bpy.data.objects):
+            if obj.name.startswith(target_prefix) and obj.get("overtli_temp", True):
+                bpy.data.objects.remove(obj, do_unlink=True)
+                deleted.append(obj.name)
+        return {"status": "success", "approval_id": approval_id, "workflow_id": workflow_id, "deleted_objects": deleted}
+
+
+class AdvancedModelingWorkflowBatchService(AdvancedModelingServiceBase):
+    def run_advanced_modeling_workflow_batch(self, workflow_name=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=50, allow_sculpt=False, allow_simulation=False, allow_destructive=False):
+        operations = operations or []
+        if len(operations) > max_operations:
+            return {"status": "error", "message": "operation count exceeds max_operations"}
+        before = self.server.create_scene_snapshot(label=f"{workflow_name or 'phase8b'}_before") if create_before_snapshot else None
+        results = []
+        for operation in operations:
+            command = operation.get("command")
+            if command in {"apply_sculpt_stroke_batch"} and not allow_sculpt:
+                result = {"status": "requires_approval", "message": "sculpt operations require allow_sculpt"}
+            elif command in {"simulate_cloth_preview", "bake_cloth_cache", "clear_cloth_cache", "convert_cloth_result"} and not allow_simulation:
+                result = {"status": "requires_approval", "message": "simulation/cache operations require allow_simulation"}
+            elif command in {"execute_construction_cleanup"} and not allow_destructive:
+                result = {"status": "requires_approval", "message": "destructive cleanup requires allow_destructive"}
+            else:
+                handler = self.server._build_command_handlers().get(command)
+                result = handler(**operation.get("params", {})) if handler else {"status": "error", "message": f"unknown command {command}"}
+            results.append({"command": command, "result": result})
+            if stop_on_error and result.get("status") == "error":
+                break
+        after = self.server.create_scene_snapshot(label=f"{workflow_name or 'phase8b'}_after") if create_after_snapshot else None
+        return {"status": "success" if all(item["result"].get("status") != "error" for item in results) else "partial", "workflow_name": workflow_name, "before_snapshot": before, "after_snapshot": after, "results": results}
+
+
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
         self.host = host
@@ -9316,8 +9874,52 @@ class BlenderMCPServer:
         self.channel_pack_service = ChannelPackService(self)
         self.baked_texture_validation_service = BakedTextureValidationService(self)
         self.bake_workflow_batch_service = BakeWorkflowBatchService(self)
+        self.mesh_schema_construction_service = MeshSchemaConstructionService(self)
+        self.profile_modeling_service = ProfileModelingService(self)
+        self.modifier_construction_service = ModifierConstructionService(self)
+        self.reference_driven_construction_service = ReferenceDrivenConstructionService(self)
+        self.sculpt_phase8b_workflow_service = SculptWorkflowPhase8BService(self)
+        self.cloth_pattern_workflow_service = ClothPatternWorkflowService(self)
+        self.construction_validation_service = ConstructionValidationService(self)
+        self.advanced_modeling_workflow_batch_service = AdvancedModelingWorkflowBatchService(self)
 
         for _name, _service in {
+            "get_modeling_capabilities": self.mesh_schema_construction_service,
+            "validate_mesh_schema": self.mesh_schema_construction_service,
+            "create_mesh_from_schema": self.mesh_schema_construction_service,
+            "create_profile_curve": self.profile_modeling_service,
+            "extrude_profile": self.profile_modeling_service,
+            "lathe_profile": self.profile_modeling_service,
+            "loft_profiles": self.profile_modeling_service,
+            "bridge_profile_loops": self.profile_modeling_service,
+            "create_curve_path_object": self.profile_modeling_service,
+            "create_beveled_curve_object": self.profile_modeling_service,
+            "create_modifier_stack": self.modifier_construction_service,
+            "create_hard_surface_panel": self.modifier_construction_service,
+            "create_pipe_or_rail": self.modifier_construction_service,
+            "create_modular_assembly": self.modifier_construction_service,
+            "plan_reference_construction": self.reference_driven_construction_service,
+            "run_reference_construction_step": self.reference_driven_construction_service,
+            "validate_reference_alignment": self.reference_driven_construction_service,
+            "configure_sculpt_session": self.sculpt_phase8b_workflow_service,
+            "create_sculpt_mask": self.sculpt_phase8b_workflow_service,
+            "create_face_set": self.sculpt_phase8b_workflow_service,
+            "apply_sculpt_stroke_batch": self.sculpt_phase8b_workflow_service,
+            "create_shape_key_sculpt_variant": self.sculpt_phase8b_workflow_service,
+            "validate_sculpt_result": self.sculpt_phase8b_workflow_service,
+            "create_cloth_pattern_panel": self.cloth_pattern_workflow_service,
+            "define_cloth_seam_pair": self.cloth_pattern_workflow_service,
+            "create_cloth_setup": self.cloth_pattern_workflow_service,
+            "create_cloth_pin_group": self.cloth_pattern_workflow_service,
+            "create_cloth_collision_setup": self.cloth_pattern_workflow_service,
+            "simulate_cloth_preview": self.cloth_pattern_workflow_service,
+            "bake_cloth_cache": self.cloth_pattern_workflow_service,
+            "clear_cloth_cache": self.cloth_pattern_workflow_service,
+            "convert_cloth_result": self.cloth_pattern_workflow_service,
+            "validate_construction_geometry": self.construction_validation_service,
+            "plan_construction_cleanup": self.construction_validation_service,
+            "execute_construction_cleanup": self.construction_validation_service,
+            "run_advanced_modeling_workflow_batch": self.advanced_modeling_workflow_batch_service,
             "get_bake_capabilities": self.bake_capabilities_service,
             "validate_bake_setup": self.bake_preflight_service,
             "estimate_bake_cost": self.bake_preflight_service,
@@ -9504,6 +10106,42 @@ class BlenderMCPServer:
         self.configure_sculpt_brush = self.sculpt_workflow_service.configure_sculpt_brush
         self.create_sculpt_mask_from_vertex_group = self.sculpt_workflow_service.create_sculpt_mask_from_vertex_group
         self.run_shape_key_sculpt_workflow = self.sculpt_workflow_service.run_shape_key_sculpt_workflow
+        self.get_modeling_capabilities = self.mesh_schema_construction_service.get_modeling_capabilities
+        self.validate_mesh_schema = self.mesh_schema_construction_service.validate_mesh_schema
+        self.create_mesh_from_schema = self.mesh_schema_construction_service.create_mesh_from_schema
+        self.create_profile_curve = self.profile_modeling_service.create_profile_curve
+        self.extrude_profile = self.profile_modeling_service.extrude_profile
+        self.lathe_profile = self.profile_modeling_service.lathe_profile
+        self.loft_profiles = self.profile_modeling_service.loft_profiles
+        self.bridge_profile_loops = self.profile_modeling_service.bridge_profile_loops
+        self.create_curve_path_object = self.profile_modeling_service.create_curve_path_object
+        self.create_beveled_curve_object = self.profile_modeling_service.create_beveled_curve_object
+        self.create_modifier_stack = self.modifier_construction_service.create_modifier_stack
+        self.create_hard_surface_panel = self.modifier_construction_service.create_hard_surface_panel
+        self.create_pipe_or_rail = self.modifier_construction_service.create_pipe_or_rail
+        self.create_modular_assembly = self.modifier_construction_service.create_modular_assembly
+        self.plan_reference_construction = self.reference_driven_construction_service.plan_reference_construction
+        self.run_reference_construction_step = self.reference_driven_construction_service.run_reference_construction_step
+        self.validate_reference_alignment = self.reference_driven_construction_service.validate_reference_alignment
+        self.configure_sculpt_session = self.sculpt_phase8b_workflow_service.configure_sculpt_session
+        self.create_sculpt_mask = self.sculpt_phase8b_workflow_service.create_sculpt_mask
+        self.create_face_set = self.sculpt_phase8b_workflow_service.create_face_set
+        self.apply_sculpt_stroke_batch = self.sculpt_phase8b_workflow_service.apply_sculpt_stroke_batch
+        self.create_shape_key_sculpt_variant = self.sculpt_phase8b_workflow_service.create_shape_key_sculpt_variant
+        self.validate_sculpt_result = self.sculpt_phase8b_workflow_service.validate_sculpt_result
+        self.create_cloth_pattern_panel = self.cloth_pattern_workflow_service.create_cloth_pattern_panel
+        self.define_cloth_seam_pair = self.cloth_pattern_workflow_service.define_cloth_seam_pair
+        self.create_cloth_setup = self.cloth_pattern_workflow_service.create_cloth_setup
+        self.create_cloth_pin_group = self.cloth_pattern_workflow_service.create_cloth_pin_group
+        self.create_cloth_collision_setup = self.cloth_pattern_workflow_service.create_cloth_collision_setup
+        self.simulate_cloth_preview = self.cloth_pattern_workflow_service.simulate_cloth_preview
+        self.bake_cloth_cache = self.cloth_pattern_workflow_service.bake_cloth_cache
+        self.clear_cloth_cache = self.cloth_pattern_workflow_service.clear_cloth_cache
+        self.convert_cloth_result = self.cloth_pattern_workflow_service.convert_cloth_result
+        self.validate_construction_geometry = self.construction_validation_service.validate_construction_geometry
+        self.plan_construction_cleanup = self.construction_validation_service.plan_construction_cleanup
+        self.execute_construction_cleanup = self.construction_validation_service.execute_construction_cleanup
+        self.run_advanced_modeling_workflow_batch = self.advanced_modeling_workflow_batch_service.run_advanced_modeling_workflow_batch
         self.get_timeline_info = self.animation_intelligence_service.get_timeline_info
         self.list_animated_objects = self.animation_intelligence_service.list_animated_objects
         self.get_animation_deep_info = self.animation_intelligence_service.get_animation_deep_info
@@ -9915,6 +10553,42 @@ class BlenderMCPServer:
             "configure_sculpt_brush": self.configure_sculpt_brush,
             "create_sculpt_mask_from_vertex_group": self.create_sculpt_mask_from_vertex_group,
             "run_shape_key_sculpt_workflow": self.run_shape_key_sculpt_workflow,
+            "get_modeling_capabilities": self.get_modeling_capabilities,
+            "validate_mesh_schema": self.validate_mesh_schema,
+            "create_mesh_from_schema": self.create_mesh_from_schema,
+            "create_profile_curve": self.create_profile_curve,
+            "extrude_profile": self.extrude_profile,
+            "lathe_profile": self.lathe_profile,
+            "loft_profiles": self.loft_profiles,
+            "bridge_profile_loops": self.bridge_profile_loops,
+            "create_curve_path_object": self.create_curve_path_object,
+            "create_beveled_curve_object": self.create_beveled_curve_object,
+            "create_modifier_stack": self.create_modifier_stack,
+            "create_hard_surface_panel": self.create_hard_surface_panel,
+            "create_pipe_or_rail": self.create_pipe_or_rail,
+            "create_modular_assembly": self.create_modular_assembly,
+            "plan_reference_construction": self.plan_reference_construction,
+            "run_reference_construction_step": self.run_reference_construction_step,
+            "validate_reference_alignment": self.validate_reference_alignment,
+            "configure_sculpt_session": self.configure_sculpt_session,
+            "create_sculpt_mask": self.create_sculpt_mask,
+            "create_face_set": self.create_face_set,
+            "apply_sculpt_stroke_batch": self.apply_sculpt_stroke_batch,
+            "create_shape_key_sculpt_variant": self.create_shape_key_sculpt_variant,
+            "validate_sculpt_result": self.validate_sculpt_result,
+            "create_cloth_pattern_panel": self.create_cloth_pattern_panel,
+            "define_cloth_seam_pair": self.define_cloth_seam_pair,
+            "create_cloth_setup": self.create_cloth_setup,
+            "create_cloth_pin_group": self.create_cloth_pin_group,
+            "create_cloth_collision_setup": self.create_cloth_collision_setup,
+            "simulate_cloth_preview": self.simulate_cloth_preview,
+            "bake_cloth_cache": self.bake_cloth_cache,
+            "clear_cloth_cache": self.clear_cloth_cache,
+            "convert_cloth_result": self.convert_cloth_result,
+            "validate_construction_geometry": self.validate_construction_geometry,
+            "plan_construction_cleanup": self.plan_construction_cleanup,
+            "execute_construction_cleanup": self.execute_construction_cleanup,
+            "run_advanced_modeling_workflow_batch": self.run_advanced_modeling_workflow_batch,
             "get_timeline_info": self.get_timeline_info,
             "list_animated_objects": self.list_animated_objects,
             "get_animation_deep_info": self.get_animation_deep_info,

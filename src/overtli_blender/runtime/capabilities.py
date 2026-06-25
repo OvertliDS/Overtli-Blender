@@ -27,12 +27,16 @@ CAPABILITIES = {
     "knowledge.read",
     "knowledge.write",
     "release.export",
+    "modeling.advanced",
+    "references.construct",
+    "sculpt.workflow",
+    "simulation.cloth",
 }
 
 PROFILE_CAPABILITIES = {
     "read_only": {"scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read"},
-    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack"},
-    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack"},
+    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth"},
+    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth"},
     "developer": set(CAPABILITIES),
     "custom": {"scene.read"},
 }

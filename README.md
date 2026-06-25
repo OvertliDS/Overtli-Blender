@@ -19,6 +19,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 7B runtime governance: command registry, tool packs, approval records, capability profiles, operation status/cancel skeletons, structured log status, and packaged addon migration scaffold
 - Phase 7C project runtime foundation: saved/unsaved `.blend` workspace resolution, approved-root file access, cache retention planning, task graph and scene revision tracking, reference image calibration, spatial measurement, and safe rename planning
 - Phase 8A texture baking and image resource pipeline: bake capability detection, preflight, bake target images, native/derived/approximated map classification, channel packing, baked texture validation, baked material variants, and approval-gated cleanup planning
+- Phase 8B advanced modeling workflows: validated mesh schemas, profile/extrude/lathe/loft surfaces, curve/path pipe construction, non-destructive modifier stacks, reference construction planning, shape-key-first sculpt setup, cloth pattern panels, construction validation, and gated cleanup/cache actions
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -92,6 +93,11 @@ Package and release helper docs:
 - [docs/task_graph.md](docs/task_graph.md)
 - [docs/reference_images.md](docs/reference_images.md)
 - [docs/spatial_measurement.md](docs/spatial_measurement.md)
+- [docs/advanced_modeling.md](docs/advanced_modeling.md)
+- [docs/reference_construction.md](docs/reference_construction.md)
+- [docs/sculpt_workflows.md](docs/sculpt_workflows.md)
+- [docs/cloth_patterns.md](docs/cloth_patterns.md)
+- [docs/construction_validation.md](docs/construction_validation.md)
 
 Phase 2 verification smoke:
 

@@ -41,6 +41,10 @@ TOOL_PACK_DEFINITIONS = {
     "references": ToolPack("references", "References", "Reference image import, placement, calibration, landmarks, and visibility controls.", ("references",)),
     "spatial_measurement": ToolPack("spatial_measurement", "Spatial Measurement", "Distances, angles, bounds, units, raycasts, intersections, and rename planning.", ("spatial_measurement", "rename")),
     "cache_management": ToolPack("cache_management", "Cache Management", "Cache status, cleanup planning, pinning, orphan scanning, and operation history compaction.", ("cache_management",)),
+    "advanced_modeling": ToolPack("advanced_modeling", "Advanced Modeling", "Mesh schemas, profiles, curves, modifier stacks, hard-surface assets, validation, and cleanup planning.", ("advanced_modeling", "construction_validation", "geometry_nodes", "verified_editing", "project_runtime")),
+    "reference_construction": ToolPack("reference_construction", "Reference Construction", "Reference-driven modeling plans, calibrated measurements, construction steps, and alignment checks.", ("reference_construction", "references", "spatial_measurement")),
+    "sculpt_workflows": ToolPack("sculpt_workflows", "Sculpt Workflows", "Sculpt session setup, masks, face sets, shape-key variants, and gated stroke batches.", ("sculpt_workflows", "verified_editing")),
+    "cloth_patterns": ToolPack("cloth_patterns", "Cloth Patterns", "Pattern panels, seams, pins, collision setup, and gated cloth preview/cache operations.", ("cloth_patterns", "cache_management")),
 }
 
 

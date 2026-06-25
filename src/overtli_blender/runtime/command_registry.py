@@ -37,6 +37,11 @@ CATEGORIES = {
     "references",
     "spatial_measurement",
     "rename",
+    "advanced_modeling",
+    "reference_construction",
+    "sculpt_workflows",
+    "cloth_patterns",
+    "construction_validation",
 }
 
 TOOL_PACKS = {
@@ -56,6 +61,10 @@ TOOL_PACKS = {
     "spatial_measurement",
     "cache_management",
     "texture_baking",
+    "advanced_modeling",
+    "reference_construction",
+    "sculpt_workflows",
+    "cloth_patterns",
 }
 
 GOVERNANCE_COMMANDS = {
@@ -137,7 +146,17 @@ def _title(name: str) -> str:
 def _category(name: str, operation_type: str) -> str:
     lowered = name.lower()
     if any(marker in lowered for marker in ("reference", "landmark")):
+        if any(marker in lowered for marker in ("construction", "alignment")):
+            return "reference_construction"
         return "references"
+    if any(marker in lowered for marker in ("cloth", "seam", "pin_group", "collision_setup", "cloth_cache")):
+        return "cloth_patterns"
+    if any(marker in lowered for marker in ("sculpt_session", "sculpt_mask", "face_set", "sculpt_stroke", "sculpt_result", "shape_key_sculpt")):
+        return "sculpt_workflows"
+    if any(marker in lowered for marker in ("mesh_schema", "mesh_from_schema", "profile", "lathe", "loft", "bridge_profile", "curve_path", "beveled_curve", "hard_surface", "pipe_or_rail", "modular_assembly", "modeling_capabilities", "modifier_stack", "advanced_modeling")):
+        return "advanced_modeling"
+    if any(marker in lowered for marker in ("construction_geometry", "construction_cleanup")):
+        return "construction_validation"
     if any(marker in lowered for marker in ("distance", "angle", "area", "volume", "unit", "bounds", "raycast", "nearest", "intersection", "clearance", "alignment", "scale_ratio", "measurement")):
         return "spatial_measurement"
     if any(marker in lowered for marker in ("cache", "artifact", "orphan")):
@@ -192,6 +211,14 @@ def _tool_pack(category: str) -> str:
         return "spatial_measurement"
     if category == "cache_management":
         return "cache_management"
+    if category in {"advanced_modeling", "construction_validation"}:
+        return "advanced_modeling"
+    if category == "reference_construction":
+        return "reference_construction"
+    if category == "sculpt_workflows":
+        return "sculpt_workflows"
+    if category == "cloth_patterns":
+        return "cloth_patterns"
     if category in {"core", "project", "workspace", "diagnostics"}:
         return "core"
     if category in {"scene", "verification", "selection", "deformation", "sculpting"}:
@@ -231,6 +258,14 @@ def _capabilities(metadata: Any, name: str, category: str) -> tuple[str, ...]:
         caps.add("raw_python")
     if category in {"textures", "baking"}:
         caps.add("texture.pack" if "pack" in name else "texture.bake")
+    if category == "advanced_modeling":
+        caps.add("modeling.advanced")
+    if category == "reference_construction":
+        caps.add("references.construct")
+    if category == "sculpt_workflows":
+        caps.add("sculpt.workflow")
+    if category == "cloth_patterns":
+        caps.add("simulation.cloth")
     if category == "knowledge":
         caps.add("knowledge.read")
         if metadata.can_write_files:

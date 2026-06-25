@@ -421,7 +421,45 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
     }
     command_map.update(_phase7c_safety_map())
     command_map.update(_phase8a_safety_map())
+    command_map.update(_phase8b_safety_map())
     return command_map
+
+
+def _phase8b_safety_map() -> dict[str, CommandSafetyMetadata]:
+    low = [
+        "get_modeling_capabilities", "validate_mesh_schema", "plan_reference_construction",
+        "validate_reference_alignment", "validate_sculpt_result", "validate_construction_geometry",
+        "plan_construction_cleanup",
+    ]
+    medium = [
+        "create_mesh_from_schema", "create_profile_curve", "extrude_profile", "lathe_profile",
+        "loft_profiles", "bridge_profile_loops", "create_curve_path_object",
+        "create_beveled_curve_object", "create_modifier_stack", "create_hard_surface_panel",
+        "create_pipe_or_rail", "create_modular_assembly", "run_reference_construction_step",
+        "configure_sculpt_session", "create_sculpt_mask", "create_face_set",
+        "create_shape_key_sculpt_variant", "create_cloth_pattern_panel", "define_cloth_seam_pair",
+        "create_cloth_setup", "create_cloth_pin_group", "create_cloth_collision_setup",
+        "run_advanced_modeling_workflow_batch",
+    ]
+    high = [
+        "apply_sculpt_stroke_batch", "simulate_cloth_preview", "bake_cloth_cache",
+        "clear_cloth_cache", "convert_cloth_result", "execute_construction_cleanup",
+    ]
+    specs: dict[str, CommandSafetyMetadata] = {}
+    for name in low:
+        specs[name] = _spec(name, OperationType.VERIFY if "plan" not in name else OperationType.PLAN, RiskLevel.LOW, Reversibility.REVERSIBLE, warnings=("phase8b-advanced-modeling",))
+    for name in medium:
+        operation = OperationType.SCULPT if "sculpt" in name or "face_set" in name else OperationType.EDIT
+        if "cloth" in name:
+            operation = OperationType.EDIT
+        if "modifier" in name:
+            operation = OperationType.MODIFIER
+        if any(marker in name for marker in ("mesh", "profile", "curve", "panel", "pipe", "assembly", "lathe", "loft", "bridge", "extrude")):
+            operation = OperationType.CREATE
+        specs[name] = _spec(name, operation, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True, can_write_files=name == "run_advanced_modeling_workflow_batch", warnings=("phase8b-structured-workflow", "non-destructive-default"))
+    for name in high:
+        specs[name] = _spec(name, OperationType.CLEANUP if "cleanup" in name or "cache" in name else OperationType.SCULPT if "sculpt" in name else OperationType.EDIT, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=True, strict_blocked=True, warnings=("explicit-approval-required", "phase8b-high-risk"))
+    return specs
 
 
 def _phase8a_safety_map() -> dict[str, CommandSafetyMetadata]:

@@ -15,9 +15,11 @@ from .bake_tools import register_bake_tools
 from .camera_tools import register_camera_tools
 from .cache_tools import register_cache_tools
 from .channel_packing_tools import register_channel_packing_tools
+from .cloth_pattern_tools import register_cloth_pattern_tools
 from .code_execution_tools import register_code_execution_tools
 from .collection_tools import register_collection_tools
 from .compositor_tools import register_compositor_tools
+from .construction_validation_tools import register_construction_validation_tools
 from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
@@ -38,7 +40,9 @@ from .material_intelligence_tools import register_material_intelligence_tools
 from .material_preview_tools import register_material_preview_tools
 from .material_tools import register_material_tools
 from .material_texture_tools import register_material_texture_tools
+from .modeling_schema_tools import register_modeling_schema_tools
 from .modifier_tools import register_modifier_tools
+from .modifier_construction_tools import register_modifier_construction_tools
 from .observation_tools import register_observation_tools
 from .safety_tools import register_safety_tools
 from .scene_intelligence_tools import register_scene_intelligence_tools
@@ -48,9 +52,11 @@ from .shape_key_tools import register_shape_key_tools
 from .shader_graph_tools import register_shader_graph_tools
 from .polyhaven_tools import register_polyhaven_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
+from .profile_modeling_tools import register_profile_modeling_tools
 from .procedural_asset_tools import register_procedural_asset_tools
 from .project_workspace_tools import register_project_workspace_tools
 from .provider_status_tools import register_provider_status_tools
+from .reference_construction_tools import register_reference_construction_tools
 from .reference_tools import register_reference_tools
 from .render_tools import register_render_tools
 from .rigging_simulation_tools import register_rigging_simulation_tools
@@ -61,6 +67,7 @@ from .review_package_tools import register_review_package_tools
 from .skill_pack_tools import register_skill_pack_tools
 from .snippet_library_tools import register_snippet_library_tools
 from .scene_kit_tools import register_scene_kit_tools
+from .sculpt_workflow_tools import register_sculpt_workflow_tools
 from .spatial_tools import register_spatial_tools
 from .task_graph_tools import register_task_graph_tools
 from .verification_tools import register_verification_tools
@@ -91,6 +98,13 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_bake_tools(mcp, get_blender_connection)
     register_image_resource_tools(mcp, get_blender_connection)
     register_channel_packing_tools(mcp, get_blender_connection)
+    register_modeling_schema_tools(mcp, get_blender_connection)
+    register_profile_modeling_tools(mcp, get_blender_connection)
+    register_modifier_construction_tools(mcp, get_blender_connection)
+    register_reference_construction_tools(mcp, get_blender_connection)
+    register_sculpt_workflow_tools(mcp, get_blender_connection)
+    register_cloth_pattern_tools(mcp, get_blender_connection)
+    register_construction_validation_tools(mcp, get_blender_connection)
     register_material_preview_tools(mcp, get_blender_connection)
     register_selection_tools(mcp, get_blender_connection)
     register_vertex_group_tools(mcp, get_blender_connection)
