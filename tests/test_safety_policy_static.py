@@ -202,6 +202,40 @@ def test_phase4b_high_risk_commands_are_strict_blocked() -> None:
         assert "strict_blocked=True" in command_block
 
 
+def test_common_safety_module_classifies_phase6b_commands() -> None:
+    for text in [
+        '"get_addon_management_status", OperationType.INSTALL_ADDON, RiskLevel.LOW',
+        '"list_blender_addons", OperationType.INSTALL_ADDON, RiskLevel.LOW',
+        '"get_blender_addon_info", OperationType.INSTALL_ADDON, RiskLevel.LOW',
+        '"inspect_blender_api_docs", OperationType.UPDATE_KNOWLEDGE, RiskLevel.LOW',
+        '"search_blender_api_docs", OperationType.UPDATE_KNOWLEDGE, RiskLevel.LOW',
+        '"get_blender_api_topic", OperationType.UPDATE_KNOWLEDGE, RiskLevel.LOW',
+        '"create_addon_skeleton", OperationType.INSTALL_ADDON, RiskLevel.MEDIUM',
+        '"validate_addon_skeleton", OperationType.VERIFY, RiskLevel.MEDIUM',
+        '"package_addon_zip", OperationType.EXPORT, RiskLevel.MEDIUM',
+        '"build_blender_api_index", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"create_verified_snippet", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"create_skill_pack", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"export_project_review_package", OperationType.EXPORT, RiskLevel.MEDIUM',
+        '"install_local_addon", OperationType.INSTALL_ADDON, RiskLevel.HIGH',
+        '"enable_blender_addon", OperationType.INSTALL_ADDON, RiskLevel.HIGH',
+        '"disable_blender_addon", OperationType.INSTALL_ADDON, RiskLevel.HIGH',
+        '"remove_blender_addon", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"run_verified_snippet_smoke", OperationType.UPDATE_KNOWLEDGE, RiskLevel.HIGH',
+        '"delete_verified_snippets", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"run_skill_pack", OperationType.UPDATE_KNOWLEDGE, RiskLevel.HIGH',
+        '"delete_skill_packs", OperationType.CLEANUP, RiskLevel.HIGH',
+    ]:
+        assert text in SAFETY_TEXT
+
+
+def test_phase6b_high_risk_commands_are_strict_blocked() -> None:
+    for command in ["install_local_addon", "enable_blender_addon", "disable_blender_addon", "remove_blender_addon", "run_verified_snippet_smoke", "delete_verified_snippets", "run_skill_pack", "delete_skill_packs"]:
+        command_index = SAFETY_TEXT.index(f'"{command}"')
+        command_block = SAFETY_TEXT[command_index:command_index + 600]
+        assert "strict_blocked=True" in command_block
+
+
 def test_smoke_script_exposes_safety_mode_flags() -> None:
     for text in [
         "--include-safety-status",

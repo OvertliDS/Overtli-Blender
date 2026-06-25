@@ -1,3 +1,7 @@
+from .addon_development_tools import register_addon_development_tools
+from .addon_management_tools import register_addon_management_tools
+from .advanced_knowledge_workflow_tools import register_advanced_knowledge_workflow_tools
+from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
 from .asset_workflow_tools import register_asset_workflow_tools
@@ -41,6 +45,9 @@ from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .registry import register_all_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .review_package_tools import register_review_package_tools
+from .skill_pack_tools import register_skill_pack_tools
+from .snippet_library_tools import register_snippet_library_tools
 from .verification_tools import register_verification_tools
 from .vertex_group_tools import register_vertex_group_tools
 from .workflow_intelligence_tools import register_workflow_intelligence_tools
@@ -48,6 +55,10 @@ from .workspace_tools import register_workspace_tools
 
 __all__ = [
     "register_all_tools",
+    "register_addon_development_tools",
+    "register_addon_management_tools",
+    "register_advanced_knowledge_workflow_tools",
+    "register_api_knowledge_tools",
     "register_animation_tools",
     "register_asset_library_tools",
     "register_asset_workflow_tools",
@@ -90,6 +101,9 @@ __all__ = [
     "register_screenshot_tools",
     "register_script_registry_tools",
     "register_sketchfab_tools",
+    "register_review_package_tools",
+    "register_skill_pack_tools",
+    "register_snippet_library_tools",
     "register_verification_tools",
     "register_vertex_group_tools",
     "register_workflow_intelligence_tools",

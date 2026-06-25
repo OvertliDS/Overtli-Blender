@@ -7278,6 +7278,404 @@ class GeometryNodesService:
             "message": f"Geometry Nodes support available (Blender {bpy.app.version_string})"
         }
 
+PHASE6B_DOCS_ROOT = os.path.join(ADDON_ROOT, "memory_bank", "research", "blender_python_reference_5_1_md")
+PHASE6B_SECRET_RE = re.compile(r"(key|token|secret|password|auth|credential)", re.IGNORECASE)
+PHASE6B_BAD_SNIPPET_RE = re.compile(r"\b(exec|eval|compile|__import__|subprocess|socket|requests|urllib|open\s*\(|os\.system|shutil\.rmtree|addon_install|addon_remove)\b", re.IGNORECASE)
+
+
+def _phase6b_slug(value, fallback="item"):
+    text = re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "").strip()).strip("_").lower()
+    if not text:
+        text = fallback
+    if not re.match(r"^[A-Za-z_]", text):
+        text = f"{fallback}_{text}"
+    return text[:80]
+
+
+def _phase6b_workspace_path(*parts, artifact_root=None):
+    root = os.path.abspath(os.path.join(artifact_root or ADDON_ROOT, ".overtli_blender"))
+    path = os.path.abspath(os.path.join(root, *parts))
+    if not (path == root or path.startswith(root + os.sep)):
+        raise ValueError("Resolved path escaped .overtli_blender workspace")
+    os.makedirs(os.path.dirname(path) if os.path.splitext(path)[1] else path, exist_ok=True)
+    return path
+
+
+def _phase6b_write_json(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+
+
+def _phase6b_read_json(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _phase6b_exact_module(module_name):
+    module = str(module_name or "").strip()
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_.]*$", module):
+        raise ValueError("module_name must be an exact Python module name")
+    return module
+
+
+class AddonManagementService:
+    def __init__(self, server):
+        self.server = server
+
+    def get_addon_management_status(self):
+        return {"status": "success", "supports_addon_inspection": True, "supports_local_install": hasattr(bpy.ops.preferences, "addon_install"), "supports_enable_disable": hasattr(bpy.ops.preferences, "addon_enable"), "supports_remove": hasattr(bpy.ops.preferences, "addon_remove"), "local_only": True, "network_downloads_supported": False, "safety": {"install_requires_confirm": True, "remove_requires_confirm": True}, "warnings": []}
+
+    def _addon_modules(self):
+        import addon_utils
+        return [(mod, getattr(mod, "__name__", ""), getattr(mod, "bl_info", {}) or {}, *addon_utils.check(getattr(mod, "__name__", ""))) for mod in addon_utils.modules(refresh=False)]
+
+    def _summary(self, mod, module, info, enabled, loaded, include_paths=True, include_version=True):
+        path = getattr(mod, "__file__", None)
+        user_addons = bpy.utils.user_resource("SCRIPTS", path="addons", create=False)
+        data = {"module": module, "name": info.get("name") or module, "enabled": bool(enabled), "loaded": bool(loaded), "category": info.get("category"), "is_user_addon": bool(path and user_addons and os.path.abspath(path).startswith(os.path.abspath(user_addons))), "warnings": []}
+        if include_paths:
+            data["path"] = path
+        if include_version:
+            data["version"] = list(info.get("version", ())) if isinstance(info.get("version"), tuple) else info.get("version")
+        return data
+
+    def list_blender_addons(self, include_enabled=True, include_disabled=True, include_paths=True, include_version=True, filter_text=None):
+        addons, counts = [], {"enabled": 0, "disabled": 0}
+        needle = str(filter_text or "").lower().strip()
+        for mod, module, info, enabled, loaded in self._addon_modules():
+            counts["enabled" if enabled else "disabled"] += 1
+            if (enabled and not include_enabled) or (not enabled and not include_disabled):
+                continue
+            item = self._summary(mod, module, info, enabled, loaded, include_paths, include_version)
+            if needle and needle not in f"{item.get('module')} {item.get('name')} {item.get('category')}".lower():
+                continue
+            addons.append(item)
+        return {"status": "success", "addons": addons, "counts": counts, "warnings": []}
+
+    def get_blender_addon_info(self, module_name, include_file_info=True, include_preferences_summary=True):
+        module_name = _phase6b_exact_module(module_name)
+        for mod, module, info, enabled, loaded in self._addon_modules():
+            if module != module_name:
+                continue
+            addon = self._summary(mod, module, info, enabled, loaded, include_file_info, True)
+            addon["bl_info"] = {k: (list(v) if isinstance(v, tuple) else v) for k, v in info.items() if k != "warning"}
+            if include_file_info and getattr(mod, "__file__", None):
+                path = getattr(mod, "__file__")
+                addon["file_info"] = {"exists": os.path.exists(path), "size": os.path.getsize(path) if os.path.exists(path) else None}
+            if include_preferences_summary and enabled:
+                prefs = bpy.context.preferences.addons.get(module_name)
+                addon["preferences_summary"] = {}
+                if prefs and getattr(prefs, "preferences", None):
+                    for attr in dir(prefs.preferences):
+                        if not attr.startswith("_") and not callable(getattr(prefs.preferences, attr, None)):
+                            addon["preferences_summary"][attr] = "<redacted>" if PHASE6B_SECRET_RE.search(attr) else str(getattr(prefs.preferences, attr))[:200]
+            return {"status": "success", "addon": addon, "warnings": []}
+        return {"status": "error", "message": f"Addon module not found: {module_name}"}
+
+    def install_local_addon(self, addon_path, enable_after_install=False, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "install_local_addon requires confirm=True"}
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", str(addon_path or "")):
+            return {"status": "error", "message": "Remote addon paths are not supported"}
+        path = os.path.abspath(bpy.path.abspath(str(addon_path)))
+        if not os.path.isfile(path) or os.path.splitext(path)[1].lower() not in {".py", ".zip"}:
+            return {"status": "error", "message": "addon_path must be an existing local .py or .zip file"}
+        before = {item["module"] for item in self.list_blender_addons().get("addons", [])}
+        result = bpy.ops.preferences.addon_install(filepath=path, overwrite=True)
+        after = {item["module"] for item in self.list_blender_addons().get("addons", [])}
+        installed = sorted(after - before)
+        if enable_after_install and installed:
+            self.enable_blender_addon(installed[0], confirm=True)
+        return {"status": "success", "operator_result": list(result), "installed_modules": installed, "warnings": []}
+
+    def enable_blender_addon(self, module_name, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "enable_blender_addon requires confirm=True"}
+        module_name = _phase6b_exact_module(module_name)
+        before = bool(bpy.context.preferences.addons.get(module_name))
+        result = bpy.ops.preferences.addon_enable(module=module_name)
+        return {"status": "success", "module": module_name, "before_enabled": before, "after_enabled": bool(bpy.context.preferences.addons.get(module_name)), "operator_result": list(result)}
+
+    def disable_blender_addon(self, module_name, confirm=False, allow_self_disable=False):
+        if not confirm:
+            return {"status": "error", "message": "disable_blender_addon requires confirm=True"}
+        module_name = _phase6b_exact_module(module_name)
+        if module_name in {__name__, "addon", "overtli_blender"} and not allow_self_disable:
+            return {"status": "error", "message": "Refusing to disable Overtli-Blender without allow_self_disable=True"}
+        before = bool(bpy.context.preferences.addons.get(module_name))
+        result = bpy.ops.preferences.addon_disable(module=module_name)
+        return {"status": "success", "module": module_name, "before_enabled": before, "after_enabled": bool(bpy.context.preferences.addons.get(module_name)), "operator_result": list(result)}
+
+    def remove_blender_addon(self, module_name, confirm=False, delete_files=False):
+        if not confirm:
+            return {"status": "error", "message": "remove_blender_addon requires confirm=True"}
+        if delete_files:
+            return {"status": "error", "message": "Physical deletion is not implemented; use Blender's exact addon_remove operator only"}
+        module_name = _phase6b_exact_module(module_name)
+        if module_name in {__name__, "addon", "overtli_blender"}:
+            return {"status": "error", "message": "Refusing to remove Overtli-Blender"}
+        before = bool(bpy.context.preferences.addons.get(module_name))
+        result = bpy.ops.preferences.addon_remove(module=module_name)
+        return {"status": "success", "module": module_name, "before_enabled": before, "after_enabled": bool(bpy.context.preferences.addons.get(module_name)), "operator_result": list(result)}
+
+
+class AddonDevelopmentService:
+    def __init__(self, server):
+        self.server = server
+
+    def create_addon_skeleton(self, addon_name, module_name=None, output_dir=None, include_operator=True, include_panel=True, include_preferences=True, include_property_group=True, include_readme=True, include_manifest=True):
+        module = _phase6b_slug(module_name or addon_name, "addon")
+        root = os.path.abspath(output_dir) if output_dir else _phase6b_workspace_path("addon_dev", "skeletons", module)
+        os.makedirs(root, exist_ok=True)
+        prefix = "".join(part.capitalize() for part in module.split("_"))
+        lines = [f'bl_info = {{"name": "{str(addon_name).replace(chr(34), chr(39))}", "author": "Overtli-Blender", "version": (0, 1, 0), "blender": (4, 0, 0), "category": "Development"}}', "import bpy", "from bpy.types import Operator, Panel, AddonPreferences, PropertyGroup", "from bpy.props import StringProperty, BoolProperty", ""]
+        classes = []
+        if include_property_group:
+            classes.append(f"{prefix}Properties"); lines += [f"class {prefix}Properties(PropertyGroup):", '    label: StringProperty(name="Label", default="Overtli")', ""]
+        if include_preferences:
+            classes.append(f"{prefix}Preferences"); lines += [f"class {prefix}Preferences(AddonPreferences):", f'    bl_idname = "{module}"', '    enabled: BoolProperty(name="Enabled", default=True)', "    def draw(self, context):", '        self.layout.prop(self, "enabled")', ""]
+        if include_operator:
+            classes.append(f"{prefix}Operator"); lines += [f"class {prefix}Operator(Operator):", f'    bl_idname = "{module}.sample_operator"', f'    bl_label = "{addon_name} Sample Operator"', "    def execute(self, context):", "        return {'FINISHED'}", ""]
+        if include_panel:
+            classes.append(f"{prefix}Panel"); lines += [f"class {prefix}Panel(Panel):", f'    bl_idname = "VIEW3D_PT_{module}"', f'    bl_label = "{addon_name}"', '    bl_space_type = "VIEW_3D"', '    bl_region_type = "UI"', '    bl_category = "Overtli"', "    def draw(self, context):", f'        self.layout.operator("{module}.sample_operator")' if include_operator else '        self.layout.label(text="Ready")', ""]
+        lines += [f"CLASSES = ({', '.join(classes)},)", "", "def register():", "    for cls in CLASSES:", "        bpy.utils.register_class(cls)", "", "def unregister():", "    for cls in reversed(CLASSES):", "        bpy.utils.unregister_class(cls)", ""]
+        init_path = os.path.join(root, "__init__.py")
+        with open(init_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines))
+        files = [init_path]
+        if include_readme:
+            readme = os.path.join(root, "README.md"); open(readme, "w", encoding="utf-8").write(f"# {addon_name}\n\nGenerated local Overtli-Blender addon scaffold.\n"); files.append(readme)
+        if include_manifest:
+            manifest = os.path.join(root, "blender_manifest.toml"); open(manifest, "w", encoding="utf-8").write(f'id = "{module}"\nname = "{addon_name}"\nversion = "0.1.0"\nschema_version = "1.0.0"\n'); files.append(manifest)
+        return {"status": "success", "module_name": module, "addon_dir": root, "files": files, "warnings": []}
+
+    def validate_addon_skeleton(self, addon_dir_or_file, check_register_functions=True, check_bl_info=True, check_operator_ids=True, check_no_secrets=True):
+        target = os.path.abspath(str(addon_dir_or_file))
+        if os.path.isdir(target):
+            target = os.path.join(target, "__init__.py")
+        if not os.path.isfile(target):
+            return {"status": "error", "message": "Addon skeleton file not found"}
+        text = open(target, "r", encoding="utf-8", errors="replace").read()
+        issues = []
+        if check_register_functions and ("def register(" not in text or "def unregister(" not in text): issues.append("missing register/unregister")
+        if check_bl_info and "bl_info" not in text: issues.append("missing bl_info")
+        if check_operator_ids:
+            for match in re.findall(r"bl_idname\s*=\s*['\"]([^'\"]+)['\"]", text):
+                if "." in match and not re.match(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$", match): issues.append(f"invalid operator bl_idname: {match}")
+        if check_no_secrets and PHASE6B_SECRET_RE.search(text): issues.append("possible secret-like field or text")
+        return {"status": "success", "valid": not issues, "issues": issues, "file": target}
+
+    def package_addon_zip(self, addon_dir_or_file, output_path=None, overwrite=False):
+        source = os.path.abspath(str(addon_dir_or_file))
+        if not os.path.exists(source):
+            return {"status": "error", "message": "Addon source not found"}
+        output = os.path.abspath(output_path) if output_path else _phase6b_workspace_path("addon_dev", "packages", f"{_phase6b_slug(os.path.splitext(os.path.basename(source))[0], 'addon')}.zip")
+        if os.path.exists(output) and not overwrite:
+            return {"status": "error", "message": "Output zip exists; pass overwrite=True"}
+        excluded, manifest = [], []
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            root = os.path.dirname(source)
+            candidates = [source] if os.path.isfile(source) else [os.path.join(d, n) for d, _, names in os.walk(source) for n in names]
+            for file_path in candidates:
+                rel = os.path.relpath(file_path, root).replace("\\", "/")
+                if any(part in rel.split("/") for part in [".git", "__pycache__", "memory_bank", ".overtli_blender"]) or rel.endswith((".pyc", ".env")):
+                    excluded.append(rel); continue
+                archive.write(file_path, rel); manifest.append({"path": rel, "size": os.path.getsize(file_path)})
+        return {"status": "success", "zip_path": output, "manifest": manifest, "excluded": excluded}
+
+
+class BlenderApiKnowledgeService:
+    def __init__(self, server):
+        self.server = server
+
+    def inspect_blender_api_docs(self, docs_root=None, max_files=50000):
+        root = os.path.abspath(docs_root or PHASE6B_DOCS_ROOT)
+        files = []
+        if os.path.isdir(root):
+            for d, _, names in os.walk(root):
+                for n in names:
+                    if n.lower().endswith(".md"):
+                        files.append(os.path.join(d, n))
+                        if len(files) >= int(max_files): break
+                if len(files) >= int(max_files): break
+        topics = sorted({t for t in ["bpy.ops", "bpy.types", "bpy.utils", "bpy.app.handlers", "bpy.path", "bpy.props", "AddonPreferences", "Operator", "Panel"] if any(t.lower() in os.path.basename(p).lower() for p in files)})
+        return {"status": "success", "docs_root": root, "exists": os.path.isdir(root), "file_count": len(files), "top_level_files": [os.path.basename(p) for p in files[:25]], "detected_topics": topics, "warnings": []}
+
+    def build_blender_api_index(self, docs_root=None, include_patterns=None, max_files=50000, max_chars_per_file=20000, write_index=True, artifact_root=None):
+        root = os.path.abspath(docs_root or PHASE6B_DOCS_ROOT)
+        if not os.path.isdir(root):
+            return {"status": "error", "message": f"Docs root missing: {root}"}
+        records = []
+        for d, _, names in os.walk(root):
+            for n in names:
+                if not n.lower().endswith(".md"): continue
+                text = open(os.path.join(d, n), "r", encoding="utf-8", errors="replace").read(int(max_chars_per_file))
+                headings = [line.strip("# ").strip() for line in text.splitlines() if line.startswith("#")][:12]
+                symbols = sorted(set(re.findall(r"\bbpy\.[A-Za-z0-9_\.]+|register_class|unregister_class|addon_install|addon_enable|addon_disable|addon_remove|AddonPreferences|Operator|Panel", text)))[:80]
+                records.append({"path": os.path.relpath(os.path.join(d, n), root).replace("\\", "/"), "title": headings[0] if headings else os.path.splitext(n)[0], "headings": headings, "symbols": symbols, "summary": " ".join(headings[:3])[:300], "keywords": sorted(set(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]{3,}\b", text.lower())))[:120]})
+                if len(records) >= int(max_files): break
+            if len(records) >= int(max_files): break
+        out_dir = _phase6b_workspace_path("knowledge", "api_index", artifact_root=artifact_root)
+        if write_index:
+            _phase6b_write_json(os.path.join(out_dir, "api_index.json"), {"records": records, "docs_root": root, "record_count": len(records)})
+            _phase6b_write_json(os.path.join(out_dir, "source_manifest.json"), {"docs_root": root, "file_count": len(records), "private_source": True})
+            _phase6b_write_json(os.path.join(out_dir, "build_report.json"), {"status": "success", "record_count": len(records)})
+        return {"status": "success", "docs_root": root, "record_count": len(records), "index_path": os.path.join(out_dir, "api_index.json") if write_index else None}
+
+    def _load_index(self, artifact_root=None):
+        path = _phase6b_workspace_path("knowledge", "api_index", "api_index.json", artifact_root=artifact_root)
+        if not os.path.exists(path):
+            self.build_blender_api_index(artifact_root=artifact_root)
+        return _phase6b_read_json(path, {"records": []}), path
+
+    def search_blender_api_docs(self, query, max_results=20, artifact_root=None):
+        index, path = self._load_index(artifact_root); terms = [t.lower() for t in re.findall(r"\w+", str(query))]; results = []
+        for rec in index.get("records", []):
+            hay = " ".join([rec.get("title", ""), rec.get("summary", ""), " ".join(rec.get("symbols", [])), " ".join(rec.get("keywords", []))]).lower()
+            score = sum(hay.count(t) for t in terms)
+            if score: results.append({"score": score, "title": rec.get("title"), "path": rec.get("path"), "summary": rec.get("summary"), "symbols": rec.get("symbols", [])[:20]})
+        results.sort(key=lambda item: item["score"], reverse=True)
+        return {"status": "success", "query": query, "index_path": path, "results": results[:int(max_results)], "warnings": []}
+
+    def get_blender_api_topic(self, topic, include_summary=True, include_symbols=True, artifact_root=None):
+        index, path = self._load_index(artifact_root); needle = str(topic).lower()
+        for rec in index.get("records", []):
+            if needle in rec.get("title", "").lower() or needle in rec.get("path", "").lower() or any(needle in s.lower() for s in rec.get("symbols", [])):
+                return {"status": "success", "topic": rec.get("title"), "path": rec.get("path"), "summary": rec.get("summary") if include_summary else None, "symbols": rec.get("symbols", []) if include_symbols else [], "index_path": path}
+        return {"status": "error", "message": f"API topic not found: {topic}"}
+
+
+class VerifiedSnippetLibraryService:
+    def __init__(self, server):
+        self.server = server
+    def _path(self, artifact_root=None): return _phase6b_workspace_path("knowledge", "snippets", "snippets.json", artifact_root=artifact_root)
+    def _load(self, artifact_root=None): return _phase6b_read_json(self._path(artifact_root), {"snippets": {}})
+    def _save(self, data, artifact_root=None): _phase6b_write_json(self._path(artifact_root), data)
+    def create_verified_snippet(self, name, code, description="", tags=None, source_evidence=None, safety_classification="medium", smoke_status="not_run", overwrite=False, artifact_root=None):
+        sid = _phase6b_slug(name, "snippet"); data = self._load(artifact_root)
+        if sid in data["snippets"] and not overwrite: return {"status": "error", "message": "Snippet exists; pass overwrite=True"}
+        dangerous = sorted(set(PHASE6B_BAD_SNIPPET_RE.findall(str(code))))
+        entry = {"id": sid, "name": name, "description": description, "tags": tags or [], "source_evidence": source_evidence or [], "safety_classification": safety_classification, "smoke_status": smoke_status, "dangerous_calls": dangerous, "code": str(code)}
+        data["snippets"][sid] = entry; self._save(data, artifact_root)
+        return {"status": "success", "snippet": {k: v for k, v in entry.items() if k != "code"}, "store_path": self._path(artifact_root), "warnings": ["dangerous-call-detected"] if dangerous else []}
+    def validate_verified_snippet(self, snippet_id=None, code=None, artifact_root=None):
+        entry = self._load(artifact_root).get("snippets", {}).get(str(snippet_id)) if snippet_id else None
+        if snippet_id and not entry: return {"status": "error", "message": "Snippet not found"}
+        dangerous = sorted(set(PHASE6B_BAD_SNIPPET_RE.findall(str(code if code is not None else entry.get("code", "")))))
+        return {"status": "success", "valid": not dangerous, "dangerous_calls": dangerous, "snippet_id": snippet_id}
+    def list_verified_snippets(self, include_code=False, artifact_root=None):
+        items = list(self._load(artifact_root).get("snippets", {}).values())
+        if not include_code: items = [{k: v for k, v in item.items() if k != "code"} for item in items]
+        return {"status": "success", "snippets": items, "count": len(items)}
+    def search_verified_snippets(self, query, max_results=20, artifact_root=None):
+        needle = str(query).lower(); return {"status": "success", "query": query, "snippets": [i for i in self.list_verified_snippets(False, artifact_root)["snippets"] if needle in json.dumps(i).lower()][:int(max_results)]}
+    def get_verified_snippet(self, snippet_id, include_code=False, artifact_root=None):
+        item = self._load(artifact_root).get("snippets", {}).get(str(snippet_id))
+        if not item: return {"status": "error", "message": "Snippet not found"}
+        return {"status": "success", "snippet": item if include_code else {k: v for k, v in item.items() if k != "code"}}
+    def run_verified_snippet_smoke(self, snippet_id, confirm=False, artifact_root=None):
+        if not confirm: return {"status": "error", "message": "run_verified_snippet_smoke requires confirm=True"}
+        validation = self.validate_verified_snippet(snippet_id=snippet_id, artifact_root=artifact_root)
+        if not validation.get("valid"): return {"status": "error", "message": "Snippet failed static validation", "validation": validation}
+        report = {"snippet_id": snippet_id, "smoke_status": "static_validated_only", "executed": False}; _phase6b_write_json(_phase6b_workspace_path("knowledge", "snippets", "smoke", f"{snippet_id}.json", artifact_root=artifact_root), report); return {"status": "success", "report": report}
+    def delete_verified_snippets(self, snippet_ids, confirm=False, artifact_root=None):
+        if not confirm: return {"status": "error", "message": "delete_verified_snippets requires confirm=True"}
+        data = self._load(artifact_root); removed = [sid for sid in (snippet_ids or []) if data["snippets"].pop(str(sid), None) is not None]; self._save(data, artifact_root); return {"status": "success", "removed": removed}
+
+
+class SkillPackService:
+    def __init__(self, server): self.server = server
+    def _root(self, artifact_root=None): return _phase6b_workspace_path("knowledge", "skill_packs", artifact_root=artifact_root)
+    def create_skill_pack(self, name, description="", operations=None, snippet_ids=None, docs_topics=None, overwrite=False, artifact_root=None):
+        pid = _phase6b_slug(name, "skill_pack"); pdir = os.path.join(self._root(artifact_root), pid)
+        if os.path.exists(pdir) and not overwrite: return {"status": "error", "message": "Skill pack exists; pass overwrite=True"}
+        os.makedirs(pdir, exist_ok=True); manifest = {"id": pid, "name": name, "description": description, "operations": operations or [], "snippet_ids": snippet_ids or [], "docs_topics": docs_topics or [], "run_requires_confirm": True}
+        _phase6b_write_json(os.path.join(pdir, "skill_pack.json"), manifest); open(os.path.join(pdir, "README.md"), "w", encoding="utf-8").write(f"# {name}\n\n{description}\n")
+        return {"status": "success", "skill_pack": manifest, "pack_dir": pdir}
+    def validate_skill_pack(self, pack_id, artifact_root=None):
+        path = os.path.join(self._root(artifact_root), _phase6b_slug(pack_id, "skill_pack"), "skill_pack.json")
+        if not os.path.isfile(path): return {"status": "error", "message": "Skill pack manifest not found"}
+        manifest = _phase6b_read_json(path, {}); issues = [] if manifest.get("id") and isinstance(manifest.get("operations", []), list) else ["invalid manifest shape"]
+        return {"status": "success", "valid": not issues, "issues": issues, "skill_pack": manifest}
+    def list_skill_packs(self, artifact_root=None):
+        root = self._root(artifact_root); packs = [_phase6b_read_json(os.path.join(root, n, "skill_pack.json"), {}) for n in os.listdir(root) if os.path.isfile(os.path.join(root, n, "skill_pack.json"))] if os.path.isdir(root) else []
+        return {"status": "success", "skill_packs": packs, "count": len(packs)}
+    def get_skill_pack(self, pack_id, artifact_root=None): return self.validate_skill_pack(pack_id, artifact_root)
+    def run_skill_pack(self, pack_id, confirm=False, max_operations=20, artifact_root=None):
+        if not confirm: return {"status": "error", "message": "run_skill_pack requires confirm=True"}
+        pack = self.validate_skill_pack(pack_id, artifact_root)
+        if pack.get("status") != "success": return pack
+        handlers = self.server._build_command_handlers(); results = []
+        for op in pack["skill_pack"].get("operations", [])[:int(max_operations)]:
+            cmd = op.get("command"); results.append({"command": cmd, "result": handlers[cmd](**op.get("params", {})) if cmd in handlers and cmd != "execute_code" else {"status": "blocked", "message": "blocked or unknown command"}})
+        return {"status": "success", "pack_id": pack_id, "results": results}
+    def delete_skill_packs(self, pack_ids, confirm=False, artifact_root=None):
+        if not confirm: return {"status": "error", "message": "delete_skill_packs requires confirm=True"}
+        root = os.path.abspath(self._root(artifact_root)); removed = []
+        for pid in pack_ids or []:
+            path = os.path.abspath(os.path.join(root, _phase6b_slug(pid, "skill_pack")))
+            if path.startswith(root + os.sep) and os.path.isdir(path): shutil.rmtree(path); removed.append(pid)
+        return {"status": "success", "removed": removed}
+
+
+class ReviewPackageExportService:
+    def __init__(self, server): self.server = server
+    def export_project_review_package(self, package_id=None, include_memory_bank=False, include_private_docs=False, include_generated_artifacts_summary=True, max_files=2000, artifact_root=None):
+        pid = _phase6b_slug(package_id or f"review_{int(time.time()*1000)}", "review"); pdir = _phase6b_workspace_path("review_packages", pid, artifact_root=artifact_root)
+        excluded_names = {".git", ".venv", "__pycache__", ".pytest_cache", ".overtli_blender", "tools"} | (set() if include_memory_bank else {"memory_bank"})
+        files, excluded = [], []
+        for d, dirs, names in os.walk(ADDON_ROOT):
+            rel_dir = os.path.relpath(d, ADDON_ROOT); parts = set([] if rel_dir == "." else rel_dir.split(os.sep))
+            if parts & excluded_names or (not include_private_docs and "blender_python_reference_5_1_md" in rel_dir):
+                excluded.append(rel_dir); dirs[:] = []; continue
+            for n in names:
+                rel = os.path.normpath(os.path.join(rel_dir, n)).replace("\\", "/")
+                if n.endswith((".pyc", ".env", ".zip")) or PHASE6B_SECRET_RE.search(n): excluded.append(rel); continue
+                files.append(rel)
+                if len(files) >= int(max_files): break
+            if len(files) >= int(max_files): break
+        try:
+            import subprocess
+            git_status = subprocess.run(["git", "status", "--short", "--untracked-files=all", "--ignored=matching"], cwd=ADDON_ROOT, text=True, capture_output=True, timeout=10).stdout
+        except Exception as exc:
+            git_status = f"git status unavailable: {exc}"
+        _phase6b_write_json(os.path.join(pdir, "manifest.json"), {"package_id": pid, "files_included_count": len(files), "include_memory_bank": include_memory_bank, "include_private_docs": include_private_docs})
+        _phase6b_write_json(os.path.join(pdir, "file_manifest.json"), {"files": files})
+        _phase6b_write_json(os.path.join(pdir, "exclusion_report.json"), {"excluded": sorted(set(excluded)), "memory_bank_excluded": not include_memory_bank, "docs_mirror_excluded": not include_private_docs, "env_excluded": True})
+        _phase6b_write_json(os.path.join(pdir, "docs_summary.json"), {"public_safe": True, "private_docs_copied": False})
+        _phase6b_write_json(os.path.join(pdir, "test_summary.json"), {"tests_executed_by_export": False})
+        _phase6b_write_json(os.path.join(pdir, "smoke_summary.json"), {"smoke_executed_by_export": False})
+        open(os.path.join(pdir, "repo_status.txt"), "w", encoding="utf-8").write(git_status)
+        return {"status": "success", "package_id": pid, "package_dir": pdir, "warnings": []}
+    def validate_review_package(self, package_path):
+        pdir = os.path.abspath(str(package_path)); issues = [f"missing {n}" for n in ["manifest.json", "file_manifest.json", "exclusion_report.json"] if not os.path.isfile(os.path.join(pdir, n))]
+        files = _phase6b_read_json(os.path.join(pdir, "file_manifest.json"), {"files": []}).get("files", []); joined = "\n".join(files).lower()
+        for forbidden in ["memory_bank", "blender_python_reference_5_1_md", ".env"]:
+            if forbidden in joined: issues.append(f"forbidden path included: {forbidden}")
+        if len(files) > 5000: issues.append("file count exceeds review package bound")
+        return {"status": "success", "valid": not issues, "issues": issues, "file_count": len(files)}
+
+
+class AdvancedKnowledgeWorkflowBatchService:
+    def __init__(self, server): self.server = server
+    def run_advanced_knowledge_workflow_batch(self, label=None, operations=None, stop_on_error=True, max_operations=40, batch_allow_destructive=False, artifact_root=None):
+        allowed = {"inspect_blender_api_docs", "build_blender_api_index", "search_blender_api_docs", "get_blender_api_topic", "create_verified_snippet", "validate_verified_snippet", "list_verified_snippets", "search_verified_snippets", "get_verified_snippet", "create_skill_pack", "validate_skill_pack", "list_skill_packs", "get_skill_pack", "export_project_review_package", "validate_review_package"}
+        destructive = {"install_local_addon", "enable_blender_addon", "disable_blender_addon", "remove_blender_addon", "run_verified_snippet_smoke", "delete_verified_snippets", "run_skill_pack", "delete_skill_packs"}
+        handlers = self.server._build_command_handlers(); results = []
+        for op in (operations or [])[:int(max_operations)]:
+            cmd, params = op.get("command") or op.get("type"), op.get("params", {})
+            if cmd in destructive and not (batch_allow_destructive and params.get("confirm") is True): result = {"status": "blocked", "message": "destructive operation requires batch_allow_destructive=True and operation confirm=True"}
+            elif cmd not in allowed and cmd not in destructive: result = {"status": "error", "message": f"operation not allowed in advanced knowledge batch: {cmd}"}
+            else: result = handlers[cmd](**params) if cmd in handlers else {"status": "error", "message": f"unknown command: {cmd}"}
+            results.append({"command": cmd, "result": result})
+            if stop_on_error and result.get("status") != "success": break
+        manifest_path = _phase6b_workspace_path("knowledge", "workflow_batches", f"{_phase6b_slug(label or 'phase6b_batch', 'batch')}.json", artifact_root=artifact_root)
+        _phase6b_write_json(manifest_path, {"label": label, "results": results})
+        return {"status": "success", "label": label, "results": results, "manifest_path": manifest_path}
+
 
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
@@ -7357,6 +7755,13 @@ class BlenderMCPServer:
         self.geometry_nodes_preview_service = GeometryNodesPreviewService(self)
         self.geometry_nodes_workflow_batch_service = GeometryNodesWorkflowBatchService(self)
         self.geometry_nodes_service = GeometryNodesService(self)
+        self.addon_management_service = AddonManagementService(self)
+        self.addon_development_service = AddonDevelopmentService(self)
+        self.blender_api_knowledge_service = BlenderApiKnowledgeService(self)
+        self.verified_snippet_library_service = VerifiedSnippetLibraryService(self)
+        self.skill_pack_service = SkillPackService(self)
+        self.review_package_export_service = ReviewPackageExportService(self)
+        self.advanced_knowledge_workflow_batch_service = AdvancedKnowledgeWorkflowBatchService(self)
 
         self.get_scene_info = self.scene_observation_service.get_scene_info
         self.get_object_info = self.scene_observation_service.get_object_info
@@ -7557,6 +7962,36 @@ class BlenderMCPServer:
         self.run_geometry_nodes_workflow_batch = self.geometry_nodes_workflow_batch_service.run_geometry_nodes_workflow_batch
         self.complete_geometry_node = self.geometry_nodes_service.complete_geometry_node
         self.get_geometry_nodes_status = self.geometry_nodes_service.get_geometry_nodes_status
+        self.get_addon_management_status = self.addon_management_service.get_addon_management_status
+        self.list_blender_addons = self.addon_management_service.list_blender_addons
+        self.get_blender_addon_info = self.addon_management_service.get_blender_addon_info
+        self.install_local_addon = self.addon_management_service.install_local_addon
+        self.enable_blender_addon = self.addon_management_service.enable_blender_addon
+        self.disable_blender_addon = self.addon_management_service.disable_blender_addon
+        self.remove_blender_addon = self.addon_management_service.remove_blender_addon
+        self.create_addon_skeleton = self.addon_development_service.create_addon_skeleton
+        self.validate_addon_skeleton = self.addon_development_service.validate_addon_skeleton
+        self.package_addon_zip = self.addon_development_service.package_addon_zip
+        self.inspect_blender_api_docs = self.blender_api_knowledge_service.inspect_blender_api_docs
+        self.build_blender_api_index = self.blender_api_knowledge_service.build_blender_api_index
+        self.search_blender_api_docs = self.blender_api_knowledge_service.search_blender_api_docs
+        self.get_blender_api_topic = self.blender_api_knowledge_service.get_blender_api_topic
+        self.create_verified_snippet = self.verified_snippet_library_service.create_verified_snippet
+        self.validate_verified_snippet = self.verified_snippet_library_service.validate_verified_snippet
+        self.list_verified_snippets = self.verified_snippet_library_service.list_verified_snippets
+        self.search_verified_snippets = self.verified_snippet_library_service.search_verified_snippets
+        self.get_verified_snippet = self.verified_snippet_library_service.get_verified_snippet
+        self.run_verified_snippet_smoke = self.verified_snippet_library_service.run_verified_snippet_smoke
+        self.delete_verified_snippets = self.verified_snippet_library_service.delete_verified_snippets
+        self.create_skill_pack = self.skill_pack_service.create_skill_pack
+        self.validate_skill_pack = self.skill_pack_service.validate_skill_pack
+        self.list_skill_packs = self.skill_pack_service.list_skill_packs
+        self.get_skill_pack = self.skill_pack_service.get_skill_pack
+        self.run_skill_pack = self.skill_pack_service.run_skill_pack
+        self.delete_skill_packs = self.skill_pack_service.delete_skill_packs
+        self.export_project_review_package = self.review_package_export_service.export_project_review_package
+        self.validate_review_package = self.review_package_export_service.validate_review_package
+        self.run_advanced_knowledge_workflow_batch = self.advanced_knowledge_workflow_batch_service.run_advanced_knowledge_workflow_batch
 
     def start(self):
         if self.running:
@@ -7913,6 +8348,37 @@ class BlenderMCPServer:
             "run_geometry_nodes_workflow_batch": self.run_geometry_nodes_workflow_batch,
             "complete_geometry_node": self.complete_geometry_node,
             "get_geometry_nodes_status": self.get_geometry_nodes_status,
+            # Phase 6B addon, docs, snippet, skill pack, and review tools
+            "get_addon_management_status": self.get_addon_management_status,
+            "list_blender_addons": self.list_blender_addons,
+            "get_blender_addon_info": self.get_blender_addon_info,
+            "install_local_addon": self.install_local_addon,
+            "enable_blender_addon": self.enable_blender_addon,
+            "disable_blender_addon": self.disable_blender_addon,
+            "remove_blender_addon": self.remove_blender_addon,
+            "create_addon_skeleton": self.create_addon_skeleton,
+            "validate_addon_skeleton": self.validate_addon_skeleton,
+            "package_addon_zip": self.package_addon_zip,
+            "inspect_blender_api_docs": self.inspect_blender_api_docs,
+            "build_blender_api_index": self.build_blender_api_index,
+            "search_blender_api_docs": self.search_blender_api_docs,
+            "get_blender_api_topic": self.get_blender_api_topic,
+            "create_verified_snippet": self.create_verified_snippet,
+            "validate_verified_snippet": self.validate_verified_snippet,
+            "list_verified_snippets": self.list_verified_snippets,
+            "search_verified_snippets": self.search_verified_snippets,
+            "get_verified_snippet": self.get_verified_snippet,
+            "run_verified_snippet_smoke": self.run_verified_snippet_smoke,
+            "delete_verified_snippets": self.delete_verified_snippets,
+            "create_skill_pack": self.create_skill_pack,
+            "validate_skill_pack": self.validate_skill_pack,
+            "list_skill_packs": self.list_skill_packs,
+            "get_skill_pack": self.get_skill_pack,
+            "run_skill_pack": self.run_skill_pack,
+            "delete_skill_packs": self.delete_skill_packs,
+            "export_project_review_package": self.export_project_review_package,
+            "validate_review_package": self.validate_review_package,
+            "run_advanced_knowledge_workflow_batch": self.run_advanced_knowledge_workflow_batch,
             # Script Registry tools
             "register_context_script": self.register_context_script,
             "execute_context_script": self.execute_context_script,

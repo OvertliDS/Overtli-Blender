@@ -957,6 +957,79 @@ def run_phase6a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         print("PASS phase6a cleanup removed smoke-created scene data")
 
 
+def _assert_phase6b_workspace_ignored() -> None:
+    gitignore_path = os.path.join(REPO_ROOT, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        raise RuntimeError("Phase 6B workspace ignore check failed: .gitignore missing")
+    text = open(gitignore_path, "r", encoding="utf-8", errors="replace").read()
+    if ".overtli_blender/" not in text and ".overtli_blender" not in text:
+        raise RuntimeError("Phase 6B workspace ignore check failed: .overtli_blender is not ignored")
+
+
+def run_phase6b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    run_id = str(time.time_ns())
+    snippet_name = f"OVERTLI_PHASE6B_SNIPPET_{run_id}"
+    skill_name = f"OVERTLI_PHASE6B_SKILL_{run_id}"
+    review_id = f"OVERTLI_PHASE6B_REVIEW_{run_id}"
+    docs_root = os.path.join(REPO_ROOT, "memory_bank", "research", "blender_python_reference_5_1_md")
+
+    status = assert_success("get_addon_management_status phase6b", send_command(sock, timeout_seconds, "get_addon_management_status"))
+    if not status.get("local_only") or status.get("network_downloads_supported"):
+        raise RuntimeError(f"get_addon_management_status: unsafe status {status}")
+    addons = assert_success("list_blender_addons phase6b", send_command(sock, timeout_seconds, "list_blender_addons", {"include_paths": False}))
+    if "addons" not in addons or "counts" not in addons:
+        raise RuntimeError("list_blender_addons: missing addons/counts")
+    if addons.get("addons"):
+        module = addons["addons"][0].get("module")
+        if module:
+            assert_success("get_blender_addon_info phase6b", send_command(sock, timeout_seconds, "get_blender_addon_info", {"module_name": module, "include_file_info": False}))
+
+    docs = assert_success("inspect_blender_api_docs phase6b", send_command(sock, timeout_seconds, "inspect_blender_api_docs", {"docs_root": docs_root, "max_files": 50000}))
+    if not docs.get("exists"):
+        raise RuntimeError("inspect_blender_api_docs: local docs mirror missing")
+    index = assert_success("build_blender_api_index phase6b", send_command(sock, timeout_seconds, "build_blender_api_index", {"docs_root": docs_root, "max_files": 50000, "artifact_root": REPO_ROOT}))
+    if not index.get("record_count"):
+        raise RuntimeError("build_blender_api_index: no records indexed")
+    topic_for_batch = "Operator"
+    for query in ["Operator", "Panel", "AddonPreferences", "register_class", "addon_install"]:
+        search = assert_success(f"search_blender_api_docs {query}", send_command(sock, timeout_seconds, "search_blender_api_docs", {"query": query, "max_results": 10, "artifact_root": REPO_ROOT}))
+        if not search.get("results"):
+            raise RuntimeError(f"search_blender_api_docs: no results for {query}")
+    assert_success("get_blender_api_topic phase6b", send_command(sock, timeout_seconds, "get_blender_api_topic", {"topic": topic_for_batch, "artifact_root": REPO_ROOT}))
+
+    snippet_code = "import " + "bpy\n# metadata-only smoke snippet\nresult = bpy.app.version_string"
+    snippet = assert_success("create_verified_snippet phase6b", send_command(sock, timeout_seconds, "create_verified_snippet", {"name": snippet_name, "code": snippet_code, "description": "Phase 6B metadata-only smoke snippet.", "tags": ["phase6b", "smoke"], "source_evidence": ["local Blender API docs mirror"], "safety_classification": "low", "overwrite": True, "artifact_root": REPO_ROOT}))
+    snippet_id = snippet.get("snippet", {}).get("id")
+    if not snippet_id:
+        raise RuntimeError("create_verified_snippet: missing snippet id")
+    assert_success("validate_verified_snippet phase6b", send_command(sock, timeout_seconds, "validate_verified_snippet", {"snippet_id": snippet_id, "artifact_root": REPO_ROOT}))
+    assert_success("list_verified_snippets phase6b", send_command(sock, timeout_seconds, "list_verified_snippets", {"artifact_root": REPO_ROOT}))
+    assert_success("search_verified_snippets phase6b", send_command(sock, timeout_seconds, "search_verified_snippets", {"query": "phase6b", "artifact_root": REPO_ROOT}))
+    assert_success("get_verified_snippet phase6b", send_command(sock, timeout_seconds, "get_verified_snippet", {"snippet_id": snippet_id, "artifact_root": REPO_ROOT}))
+
+    skill = assert_success("create_skill_pack phase6b", send_command(sock, timeout_seconds, "create_skill_pack", {"name": skill_name, "description": "Phase 6B local metadata skill pack.", "snippet_ids": [snippet_id], "docs_topics": [topic_for_batch], "operations": [{"command": "search_blender_api_docs", "params": {"query": "Operator", "max_results": 3, "artifact_root": REPO_ROOT}}], "overwrite": True, "artifact_root": REPO_ROOT}))
+    pack_id = skill.get("skill_pack", {}).get("id")
+    if not pack_id:
+        raise RuntimeError("create_skill_pack: missing pack id")
+    assert_success("validate_skill_pack phase6b", send_command(sock, timeout_seconds, "validate_skill_pack", {"pack_id": pack_id, "artifact_root": REPO_ROOT}))
+    assert_success("list_skill_packs phase6b", send_command(sock, timeout_seconds, "list_skill_packs", {"artifact_root": REPO_ROOT}))
+    assert_success("get_skill_pack phase6b", send_command(sock, timeout_seconds, "get_skill_pack", {"pack_id": pack_id, "artifact_root": REPO_ROOT}))
+
+    review = assert_success("export_project_review_package phase6b", send_command(sock, timeout_seconds, "export_project_review_package", {"package_id": review_id, "include_memory_bank": False, "include_private_docs": False, "max_files": 2000, "artifact_root": REPO_ROOT}))
+    package_dir = review.get("package_dir")
+    if not package_dir:
+        raise RuntimeError("export_project_review_package: missing package_dir")
+    validation = assert_success("validate_review_package phase6b", send_command(sock, timeout_seconds, "validate_review_package", {"package_path": package_dir}))
+    if not validation.get("valid"):
+        raise RuntimeError(f"validate_review_package: {validation}")
+
+    batch = assert_success("run_advanced_knowledge_workflow_batch phase6b", send_command(sock, timeout_seconds, "run_advanced_knowledge_workflow_batch", {"label": f"OVERTLI_PHASE6B_BATCH_{run_id}", "operations": [{"command": "inspect_blender_api_docs", "params": {"docs_root": docs_root, "max_files": 50000}}, {"command": "search_blender_api_docs", "params": {"query": "Panel", "max_results": 3, "artifact_root": REPO_ROOT}}, {"command": "get_verified_snippet", "params": {"snippet_id": snippet_id, "artifact_root": REPO_ROOT}}, {"command": "get_skill_pack", "params": {"pack_id": pack_id, "artifact_root": REPO_ROOT}}, {"command": "validate_review_package", "params": {"package_path": package_dir}}], "stop_on_error": True, "artifact_root": REPO_ROOT}))
+    if not batch.get("results"):
+        raise RuntimeError("run_advanced_knowledge_workflow_batch: missing results")
+    _assert_phase6b_workspace_ignored()
+    print("PASS phase6b full smoke completed without addon lifecycle or snippet execution")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1052,6 +1125,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-panel-generator", action="store_true", help="Run Phase 6A panel generator via the full contained scenario.")
     parser.add_argument("--include-geometry-nodes-preview", action="store_true", help="Run Phase 6A Geometry Nodes preview creation via the full contained scenario.")
     parser.add_argument("--include-geometry-nodes-workflow-batch", action="store_true", help="Run Phase 6A Geometry Nodes workflow batch via the full contained scenario.")
+    parser.add_argument("--include-addon-status", action="store_true", help="Run the Phase 6B addon management status smoke.")
+    parser.add_argument("--include-addon-list", action="store_true", help="Run the Phase 6B addon listing smoke.")
+    parser.add_argument("--include-api-docs-inspect", action="store_true", help="Run the Phase 6B local API docs inspection smoke.")
+    parser.add_argument("--include-api-docs-index", action="store_true", help="Run the Phase 6B local API docs index smoke.")
+    parser.add_argument("--include-api-docs-search", action="store_true", help="Run the Phase 6B API docs search smoke.")
+    parser.add_argument("--include-snippet-library", action="store_true", help="Run the Phase 6B verified snippet metadata smoke.")
+    parser.add_argument("--include-skill-pack", action="store_true", help="Run the Phase 6B skill pack metadata smoke.")
+    parser.add_argument("--include-review-package", action="store_true", help="Run the Phase 6B review package smoke.")
+    parser.add_argument("--include-advanced-knowledge-batch", action="store_true", help="Run the Phase 6B advanced knowledge batch smoke.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1086,6 +1168,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase6a-full",
         action="store_true",
         help="Run a contained Phase 6A Geometry Nodes, procedural asset, preview, scene-kit, batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase6b-full",
+        action="store_true",
+        help="Run a contained Phase 6B addon status, docs, snippets, skill pack, review package, and knowledge batch scenario.",
     )
     return parser
 
@@ -1254,6 +1341,30 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_geometry_nodes_workflow_batch
             ):
                 run_phase6a_full_smoke(sock, args.timeout)
+
+            if args.include_addon_status:
+                assert_success("get_addon_management_status", send_command(sock, args.timeout, "get_addon_management_status"))
+
+            if args.include_addon_list:
+                assert_success("list_blender_addons", send_command(sock, args.timeout, "list_blender_addons", {"include_paths": False}))
+
+            if args.include_api_docs_inspect:
+                assert_success("inspect_blender_api_docs", send_command(sock, args.timeout, "inspect_blender_api_docs", {"docs_root": os.path.join(REPO_ROOT, "memory_bank", "research", "blender_python_reference_5_1_md"), "max_files": 50000}))
+
+            if args.include_api_docs_index:
+                assert_success("build_blender_api_index", send_command(sock, args.timeout, "build_blender_api_index", {"docs_root": os.path.join(REPO_ROOT, "memory_bank", "research", "blender_python_reference_5_1_md"), "max_files": 50000, "artifact_root": REPO_ROOT}))
+
+            if args.include_api_docs_search:
+                assert_success("search_blender_api_docs", send_command(sock, args.timeout, "search_blender_api_docs", {"query": "Operator", "max_results": 10, "artifact_root": REPO_ROOT}))
+
+            if (
+                args.phase6b_full
+                or args.include_snippet_library
+                or args.include_skill_pack
+                or args.include_review_package
+                or args.include_advanced_knowledge_batch
+            ):
+                run_phase6b_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

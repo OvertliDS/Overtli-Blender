@@ -266,3 +266,46 @@ def test_runtime_smoke_phase5b_full_cleans_up_and_avoids_forbidden_commands() ->
         "create_rodin_job",
     ]:
         assert text not in phase5b_block
+
+
+def test_runtime_smoke_phase6b_flags_and_safe_full_boundary() -> None:
+    for flag in [
+        "--include-addon-status",
+        "--include-addon-list",
+        "--include-api-docs-inspect",
+        "--include-api-docs-index",
+        "--include-api-docs-search",
+        "--include-snippet-library",
+        "--include-skill-pack",
+        "--include-review-package",
+        "--include-advanced-knowledge-batch",
+        "--phase6b-full",
+    ]:
+        assert flag in SMOKE_TEXT
+    phase6b_start = SMOKE_TEXT.index("def run_phase6b_full_smoke")
+    phase6b_end = SMOKE_TEXT.index("def build_parser")
+    phase6b_block = SMOKE_TEXT[phase6b_start:phase6b_end]
+    for text in [
+        "get_addon_management_status",
+        "list_blender_addons",
+        "inspect_blender_api_docs",
+        "build_blender_api_index",
+        "create_verified_snippet",
+        "create_skill_pack",
+        "export_project_review_package",
+        "validate_review_package",
+        "run_advanced_knowledge_workflow_batch",
+    ]:
+        assert text in phase6b_block
+    for text in [
+        "install_local_addon",
+        "enable_blender_addon",
+        "disable_blender_addon",
+        "remove_blender_addon",
+        "run_verified_snippet_smoke",
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in phase6b_block

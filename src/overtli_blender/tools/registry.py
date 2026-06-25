@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from .addon_development_tools import register_addon_development_tools
+from .addon_management_tools import register_addon_management_tools
+from .advanced_knowledge_workflow_tools import register_advanced_knowledge_workflow_tools
+from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
 from .asset_workflow_tools import register_asset_workflow_tools
@@ -45,6 +49,9 @@ from .rigging_simulation_tools import register_rigging_simulation_tools
 from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .sketchfab_tools import register_sketchfab_tools
+from .review_package_tools import register_review_package_tools
+from .skill_pack_tools import register_skill_pack_tools
+from .snippet_library_tools import register_snippet_library_tools
 from .scene_kit_tools import register_scene_kit_tools
 from .verification_tools import register_verification_tools
 from .vertex_group_tools import register_vertex_group_tools
@@ -88,6 +95,13 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_geometry_nodes_modifier_tools(mcp, get_blender_connection)
     register_procedural_asset_tools(mcp, get_blender_connection)
     register_geometry_nodes_workflow_tools(mcp, get_blender_connection)
+    register_addon_management_tools(mcp, get_blender_connection)
+    register_addon_development_tools(mcp, get_blender_connection)
+    register_api_knowledge_tools(mcp, get_blender_connection)
+    register_snippet_library_tools(mcp, get_blender_connection)
+    register_skill_pack_tools(mcp, get_blender_connection)
+    register_review_package_tools(mcp, get_blender_connection)
+    register_advanced_knowledge_workflow_tools(mcp, get_blender_connection)
     register_modifier_tools(mcp, get_blender_connection)
     register_collection_tools(mcp, get_blender_connection)
     register_workspace_tools(mcp, get_blender_connection)

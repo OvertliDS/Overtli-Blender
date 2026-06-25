@@ -321,6 +321,37 @@ def test_server_still_contains_composition_root_bits() -> None:
         assert name in SERVER_TEXT
 
 
+def test_phase6b_tool_modules_exist_and_register_tools() -> None:
+    expected = {
+        "addon_management_tools.py": ["register_addon_management_tools", "get_addon_management_status", "list_blender_addons", "install_local_addon", "remove_blender_addon"],
+        "addon_development_tools.py": ["register_addon_development_tools", "create_addon_skeleton", "validate_addon_skeleton", "package_addon_zip"],
+        "api_knowledge_tools.py": ["register_api_knowledge_tools", "inspect_blender_api_docs", "build_blender_api_index", "search_blender_api_docs", "get_blender_api_topic"],
+        "snippet_library_tools.py": ["register_snippet_library_tools", "create_verified_snippet", "validate_verified_snippet", "run_verified_snippet_smoke", "delete_verified_snippets"],
+        "skill_pack_tools.py": ["register_skill_pack_tools", "create_skill_pack", "validate_skill_pack", "run_skill_pack", "delete_skill_packs"],
+        "review_package_tools.py": ["register_review_package_tools", "export_project_review_package", "validate_review_package"],
+        "advanced_knowledge_workflow_tools.py": ["register_advanced_knowledge_workflow_tools", "run_advanced_knowledge_workflow_batch"],
+    }
+    for filename, names in expected.items():
+        path = ROOT / f"src/overtli_blender/tools/{filename}"
+        assert path.exists()
+        text = path.read_text(encoding="utf-8")
+        for name in names:
+            assert f"def {name}(" in text
+
+
+def test_phase6b_registry_references_all_tool_helpers() -> None:
+    for name in [
+        "register_addon_management_tools",
+        "register_addon_development_tools",
+        "register_api_knowledge_tools",
+        "register_snippet_library_tools",
+        "register_skill_pack_tools",
+        "register_review_package_tools",
+        "register_advanced_knowledge_workflow_tools",
+    ]:
+        assert name in REGISTRY_TOOLS_TEXT
+
+
 def test_addon_command_strings_are_still_present() -> None:
     for name in [
         "get_scene_info",

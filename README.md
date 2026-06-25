@@ -114,6 +114,14 @@ Phase 6A Geometry Nodes procedural workflow smoke:
 
 The Phase 6A smoke creates temporary `OVERTLI_PHASE6A_*` objects, materials, collections, node groups, and Geometry Nodes modifiers; exercises capability detection, node group and modifier inspection, template discovery, safe template group creation, allowlisted recipe creation, modifier input setting, procedural rope/scatter/curve/radial/panel/cable/terrain generators, validation, previews, scene kits, and workflow batches; then removes exact smoke-created scene data. It writes ignored Geometry Nodes recipes, previews, workflow manifests, scene kit data, and verification snapshots under `.overtli_blender/`. It does not run raw code, download provider assets, apply modifiers destructively, create arbitrary node graphs, or touch arbitrary user objects.
 
+Phase 6B addon and knowledge workflow smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase6b-full
+```
+
+The Phase 6B smoke exercises addon status/list/info, local Blender Python API docs inspection/index/search, verified snippet metadata, local skill pack manifests, review package export/validation, and a non-destructive advanced knowledge workflow batch. It uses the local docs mirror at `memory_bank/research/blender_python_reference_5_1_md` when present and writes ignored knowledge, snippet, skill pack, addon-dev, and review artifacts under `.overtli_blender/`. It does not install addons by default, does not enable/disable/remove addons, does not execute snippets by default, does not publish private docs, does not run raw code, and does not run provider downloads.
+
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 
 ## Upstream Credit

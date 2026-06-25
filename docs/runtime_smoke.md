@@ -83,6 +83,16 @@ Optional checks:
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-geometry-nodes-preview
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-geometry-nodes-workflow-batch
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase6a-full
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-addon-status
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-addon-list
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-api-docs-inspect
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-api-docs-index
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-api-docs-search
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-snippet-library
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-skill-pack
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-review-package
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-advanced-knowledge-batch
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase6b-full
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-screenshot
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-script-registry
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-provider-status
@@ -122,6 +132,9 @@ Success criteria:
 - Phase 6A smoke writes generated files under `.overtli_blender/geometry_nodes/`, `.overtli_blender/scene_kits/`, and `.overtli_blender/verification/`.
 - Phase 6A smoke does not run raw code, does not download provider assets, does not apply modifiers destructively, does not create arbitrary node graphs, and does not touch arbitrary user objects.
 - Phase 6A cleanup succeeds only when remaining `OVERTLI_PHASE6A_*` objects, collections, materials, node groups, and modifiers are all empty lists. Generated files under `.overtli_blender/` may remain as ignored evidence.
+- `--phase6b-full` runs a contained Phase 6B addon and knowledge workflow: it checks addon management status, lists addons, inspects one addon, inspects the local Blender Python API docs mirror, builds a public-safe API index, searches API topics, creates and validates a metadata-only verified snippet, creates and validates a local skill pack, exports and validates a privacy-filtered review package, and runs a non-destructive advanced knowledge batch.
+- Phase 6B smoke writes generated files under `.overtli_blender/knowledge/`, `.overtli_blender/addon_dev/`, and `.overtli_blender/review_packages/`.
+- Phase 6B smoke uses the local docs mirror if present, does not install addons by default, does not enable/disable/remove addons, does not execute snippets by default, does not publish private docs, does not run raw code, and does not run provider downloads.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.
@@ -131,4 +144,4 @@ Success criteria:
 
 If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
 
-Generated Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 5A, Phase 5B, and Phase 6A artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
+Generated Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 5A, Phase 5B, Phase 6A, and Phase 6B artifacts are local evidence only. The smoke harness writes live smoke artifacts under `.overtli_blender/` in this checkout. They are ignored by git via `.overtli_blender/` and should not be committed.
