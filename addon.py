@@ -2,6 +2,7 @@
 
 import bpy
 import mathutils
+import math
 import json
 import os
 import sys
@@ -4341,6 +4342,788 @@ class SculptWorkflowService:
         return {"status": edit.get("status", "error"), "object_name": object_name, "shape_key_name": shape_key_name, "brush_action": brush_action, "shape_key": shape, "edit": edit, "warnings": edit.get("warnings", [])}
 
 
+class AnimationIntelligenceService:
+    def __init__(self, server):
+        self.server = server
+
+    def get_timeline_info(self, include_markers=True, include_playback=True):
+        scene = bpy.context.scene
+        fps = int(scene.render.fps)
+        fps_base = float(scene.render.fps_base or 1.0)
+        frame_start = int(scene.frame_start)
+        frame_end = int(scene.frame_end)
+        duration_frames = max(0, frame_end - frame_start + 1)
+        result = {
+            "status": "success",
+            "frame_current": int(scene.frame_current),
+            "frame_start": frame_start,
+            "frame_end": frame_end,
+            "fps": fps,
+            "fps_base": fps_base,
+            "duration_frames": duration_frames,
+            "duration_seconds": round(duration_frames / max(1.0, fps / fps_base), 4),
+            "warnings": [],
+        }
+        if include_markers:
+            result["markers"] = [{"name": marker.name, "frame": int(marker.frame)} for marker in scene.timeline_markers]
+        if include_playback:
+            result["playback"] = {"use_preview_range": bool(scene.use_preview_range), "frame_preview_start": int(scene.frame_preview_start), "frame_preview_end": int(scene.frame_preview_end)}
+        return result
+
+    @staticmethod
+    def _action_fcurves(action):
+        return list(getattr(action, "fcurves", []) or [])
+
+    @staticmethod
+    def _animation_summary(animation_data, include_keyframes=False, include_drivers=True, max_keyframes=200):
+        action = animation_data.action if animation_data else None
+        fcurves = []
+        truncated = False
+        if action:
+            for fcurve in AnimationIntelligenceService._action_fcurves(action):
+                points = list(fcurve.keyframe_points)
+                frames = [float(point.co.x) for point in points]
+                interpolation_summary = {}
+                keyframes = []
+                for point in points:
+                    interpolation_summary[point.interpolation] = interpolation_summary.get(point.interpolation, 0) + 1
+                    if include_keyframes and len(keyframes) < max_keyframes:
+                        keyframes.append({"frame": float(point.co.x), "value": float(point.co.y), "interpolation": point.interpolation})
+                if include_keyframes and len(points) > len(keyframes):
+                    truncated = True
+                item = {"data_path": fcurve.data_path, "array_index": int(fcurve.array_index), "keyframe_count": len(points), "frame_range": [min(frames), max(frames)] if frames else None, "interpolation_summary": interpolation_summary}
+                if include_keyframes:
+                    item["keyframes"] = keyframes
+                fcurves.append(item)
+        drivers = []
+        if include_drivers and animation_data:
+            for fcurve in getattr(animation_data, "drivers", []) or []:
+                driver = getattr(fcurve, "driver", None)
+                drivers.append({"data_path": fcurve.data_path, "array_index": int(fcurve.array_index), "type": getattr(driver, "type", None), "expression": getattr(driver, "expression", None), "variable_count": len(getattr(driver, "variables", []) or [])})
+        return {"action_name": action.name if action else None, "fcurves": fcurves, "drivers": drivers, "truncated": truncated}
+
+    def list_animated_objects(self, include_material_animation=True, include_shape_key_animation=True, include_drivers=True, max_objects=None):
+        objects = []
+        warnings = []
+        limit = int(max_objects) if max_objects is not None else None
+        for obj in bpy.context.scene.objects:
+            object_animation = self._animation_summary(obj.animation_data, include_drivers=include_drivers)
+            material_animation = []
+            shape_key_animation = None
+            if include_material_animation:
+                for slot in obj.material_slots:
+                    if slot.material and slot.material.animation_data:
+                        material_animation.append({"material_name": slot.material.name, **self._animation_summary(slot.material.animation_data, include_drivers=include_drivers)})
+            if include_shape_key_animation and getattr(obj.data, "shape_keys", None) and obj.data.shape_keys.animation_data:
+                shape_key_animation = self._animation_summary(obj.data.shape_keys.animation_data, include_drivers=include_drivers)
+            if object_animation["fcurves"] or object_animation["drivers"] or material_animation or shape_key_animation:
+                objects.append({"name": obj.name, "type": obj.type, "object_animation": object_animation, "material_animation": material_animation, "shape_key_animation": shape_key_animation, "driver_count": len(object_animation["drivers"])})
+            if limit is not None and len(objects) >= limit:
+                warnings.append("Animated object list truncated by max_objects")
+                break
+        return {"status": "success", "objects": objects, "count": len(objects), "warnings": warnings}
+
+    def get_animation_deep_info(self, object_name=None, material_name=None, include_keyframes=True, include_fcurves=True, include_drivers=True, max_keyframes=200):
+        target = None
+        target_type = None
+        if object_name:
+            target = bpy.data.objects.get(object_name)
+            target_type = "OBJECT"
+        elif material_name:
+            target = bpy.data.materials.get(material_name)
+            target_type = "MATERIAL"
+        if target is None and (object_name or material_name):
+            return {"status": "error", "message": "Animation target not found", "warnings": []}
+        if target is None:
+            return {"status": "success", "target": {"type": "SCENE"}, "timeline": self.get_timeline_info(), "animated_objects": self.list_animated_objects(max_objects=100), "warnings": []}
+        animation_data = self._animation_summary(target.animation_data, include_keyframes, include_drivers, max(1, min(int(max_keyframes), 1000)))
+        if not include_fcurves:
+            animation_data["fcurves"] = []
+        return {"status": "success", "target": {"type": target_type, "name": target.name}, "animation_data": animation_data, "truncated": animation_data["truncated"], "warnings": []}
+
+    def set_timeline_range(self, frame_start, frame_end, fps=None, current_frame=None):
+        before = self.get_timeline_info()
+        frame_start = int(frame_start)
+        frame_end = int(frame_end)
+        if frame_start >= frame_end or frame_end - frame_start > 10000:
+            return {"status": "error", "message": "frame_start must be less than frame_end and range must be <= 10000 frames", "warnings": []}
+        scene = bpy.context.scene
+        scene.frame_start = frame_start
+        scene.frame_end = frame_end
+        if fps is not None:
+            scene.render.fps = max(1, min(int(fps), 240))
+        if current_frame is not None:
+            scene.frame_set(max(frame_start, min(int(current_frame), frame_end)))
+        after = self.get_timeline_info()
+        self.server._add_to_history("set_timeline_range", {"frame_start": frame_start, "frame_end": frame_end, "fps": fps, "current_frame": current_frame}, after)
+        return {"status": "success", "before": before, "after": after, "warnings": []}
+
+    def set_current_frame(self, frame):
+        scene = bpy.context.scene
+        before = int(scene.frame_current)
+        frame = int(frame)
+        if frame < -100000 or frame > 100000:
+            return {"status": "error", "message": "frame is outside safety bounds", "warnings": []}
+        scene.frame_set(frame)
+        return {"status": "success", "before_frame": before, "frame_current": int(scene.frame_current), "warnings": []}
+
+
+class AnimationAuthoringService:
+    TRANSFORM_PROPERTIES = {"location", "rotation_euler", "scale"}
+    INTERPOLATIONS = {"CONSTANT", "LINEAR", "BEZIER"}
+    LIGHT_PROPERTIES = {"energy", "color", "spot_size", "shadow_soft_size"}
+    MATERIAL_CHANNELS = {"base_color", "metallic", "roughness", "alpha", "emission_color", "emission_strength"}
+
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _frames(values):
+        frames = [int(value) for value in values]
+        if not frames or len(frames) > 200 or min(frames) < -100000 or max(frames) > 100000:
+            raise ValueError("frames/keyframes must contain 1-200 bounded frame values")
+        return frames
+
+    @staticmethod
+    def _vec(value, length, label):
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            raise ValueError(f"{label} must be a {length}-item numeric list")
+        return [float(item) for item in value]
+
+    def _apply_interpolation(self, target, interpolation):
+        interpolation = str(interpolation or "BEZIER").upper()
+        if interpolation not in self.INTERPOLATIONS:
+            raise ValueError(f"Unsupported interpolation: {interpolation}")
+        if target.animation_data and target.animation_data.action:
+            for fcurve in AnimationIntelligenceService._action_fcurves(target.animation_data.action):
+                for point in fcurve.keyframe_points:
+                    point.interpolation = interpolation
+
+    def insert_transform_keyframes(self, object_name, frames, properties=None):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        properties = properties or ["location", "rotation_euler", "scale"]
+        if any(prop not in self.TRANSFORM_PROPERTIES for prop in properties):
+            return {"status": "error", "message": "Unsupported transform property requested", "warnings": []}
+        try:
+            frames = self._frames(frames)
+            inserted = []
+            for frame in frames:
+                bpy.context.scene.frame_set(frame)
+                for prop in properties:
+                    obj.keyframe_insert(data_path=prop, frame=frame)
+                    inserted.append({"property": prop, "frame": frame})
+            return {"status": "success", "object_name": obj.name, "inserted": inserted, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def _animate_transform(self, obj, keyframes, interpolation, clear_existing, confirm_clear_existing, verify):
+        if clear_existing:
+            if not confirm_clear_existing:
+                return {"status": "error", "message": "clear_existing requires confirm_clear_existing=True", "warnings": []}
+            obj.animation_data_clear()
+        try:
+            frames = self._frames([item.get("frame") for item in keyframes])
+            inserted = []
+            for frame, item in zip(frames, keyframes):
+                bpy.context.scene.frame_set(frame)
+                if "location" in item:
+                    obj.location = self._vec(item["location"], 3, "location")
+                    obj.keyframe_insert(data_path="location", frame=frame)
+                    inserted.append({"property": "location", "frame": frame})
+                if "rotation" in item or "rotation_euler" in item:
+                    obj.rotation_euler = self._vec(item.get("rotation", item.get("rotation_euler")), 3, "rotation")
+                    obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+                    inserted.append({"property": "rotation_euler", "frame": frame})
+                if "scale" in item:
+                    obj.scale = self._vec(item["scale"], 3, "scale")
+                    obj.keyframe_insert(data_path="scale", frame=frame)
+                    inserted.append({"property": "scale", "frame": frame})
+            self._apply_interpolation(obj, interpolation)
+            verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_animation_{obj.name}", include_screenshots=False) if verify else None
+            return {"status": "success", "object_name": obj.name, "keyframe_count": len(keyframes), "inserted": inserted, "interpolation": str(interpolation).upper(), "verification": verification, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def animate_object_transform(self, object_name, keyframes, interpolation="BEZIER", clear_existing=False, confirm_clear_existing=False, verify=False):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        return self._animate_transform(obj, keyframes, interpolation, clear_existing, confirm_clear_existing, verify)
+
+    def animate_camera_transform(self, camera_name, keyframes, interpolation="BEZIER", clear_existing=False, confirm_clear_existing=False, verify=False):
+        obj = bpy.data.objects.get(camera_name)
+        if not obj or obj.type != "CAMERA":
+            return {"status": "error", "message": f"Camera not found: {camera_name}", "warnings": []}
+        return self._animate_transform(obj, keyframes, interpolation, clear_existing, confirm_clear_existing, verify)
+
+    def animate_light_property(self, light_name, property_name, keyframes, interpolation="BEZIER"):
+        obj = bpy.data.objects.get(light_name)
+        if not obj or obj.type != "LIGHT":
+            return {"status": "error", "message": f"Light not found: {light_name}", "warnings": []}
+        property_name = str(property_name)
+        if property_name not in self.LIGHT_PROPERTIES:
+            return {"status": "error", "message": f"Unsupported light property: {property_name}", "warnings": []}
+        try:
+            frames = self._frames([item.get("frame") for item in keyframes])
+            for frame, item in zip(frames, keyframes):
+                bpy.context.scene.frame_set(frame)
+                value = item.get("value")
+                setattr(obj.data, property_name, self._vec(value, 3, property_name) if property_name == "color" else float(value))
+                obj.data.keyframe_insert(data_path=property_name, frame=frame)
+            self._apply_interpolation(obj.data, interpolation)
+            return {"status": "success", "light_name": obj.name, "property_name": property_name, "keyframe_count": len(keyframes), "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def animate_material_property(self, material_name, channel, keyframes, interpolation="BEZIER"):
+        mat = bpy.data.materials.get(material_name)
+        if not mat:
+            return {"status": "error", "message": f"Material not found: {material_name}", "warnings": []}
+        channel = str(channel)
+        if channel not in self.MATERIAL_CHANNELS:
+            return {"status": "error", "message": f"Unsupported material channel: {channel}", "warnings": []}
+        mat.use_nodes = True
+        node = next((node for node in mat.node_tree.nodes if node.type == "BSDF_PRINCIPLED"), None)
+        socket_names = {"base_color": "Base Color", "metallic": "Metallic", "roughness": "Roughness", "alpha": "Alpha", "emission_color": "Emission Color", "emission_strength": "Emission Strength"}
+        try:
+            socket = node.inputs.get(socket_names[channel]) if node else None
+            if socket is None and channel == "emission_color" and node:
+                socket = node.inputs.get("Emission")
+            if socket is None:
+                return {"status": "error", "message": f"Material channel unavailable: {channel}", "warnings": []}
+            frames = self._frames([item.get("frame") for item in keyframes])
+            for frame, item in zip(frames, keyframes):
+                bpy.context.scene.frame_set(frame)
+                socket.default_value = self._vec(item.get("value"), 4, channel) if channel in {"base_color", "emission_color"} else float(item.get("value"))
+                socket.keyframe_insert(data_path="default_value", frame=frame)
+            return {"status": "success", "material_name": mat.name, "channel": channel, "keyframe_count": len(keyframes), "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def animate_shape_key_value(self, object_name, shape_key_name, keyframes, interpolation="BEZIER"):
+        obj = bpy.data.objects.get(object_name)
+        key = obj.data.shape_keys.key_blocks.get(shape_key_name) if obj and getattr(obj.data, "shape_keys", None) else None
+        if not key:
+            return {"status": "error", "message": f"Shape key not found: {shape_key_name}", "warnings": []}
+        try:
+            frames = self._frames([item.get("frame") for item in keyframes])
+            for frame, item in zip(frames, keyframes):
+                bpy.context.scene.frame_set(frame)
+                key.value = float(item.get("value"))
+                key.keyframe_insert(data_path="value", frame=frame)
+            self._apply_interpolation(obj.data.shape_keys, interpolation)
+            return {"status": "success", "object_name": obj.name, "shape_key_name": key.name, "keyframe_count": len(keyframes), "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def delete_animation_data(self, target_type, target_name, data_paths=None, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "delete_animation_data requires confirm=True", "warnings": []}
+        target_type = str(target_type).lower()
+        target = bpy.data.materials.get(target_name) if target_type == "material" else bpy.data.objects.get(target_name)
+        if target_type == "camera" and (not target or target.type != "CAMERA"):
+            target = None
+        if target_type == "light" and (not target or target.type != "LIGHT"):
+            target = None
+        if not target:
+            return {"status": "error", "message": f"Animation target not found: {target_name}", "warnings": []}
+        deleted = []
+        if data_paths and target.animation_data and target.animation_data.action:
+            action = target.animation_data.action
+            for fcurve in AnimationIntelligenceService._action_fcurves(action):
+                if fcurve.data_path in data_paths:
+                    deleted.append({"data_path": fcurve.data_path, "array_index": int(fcurve.array_index)})
+                    if hasattr(action, "fcurves"):
+                        action.fcurves.remove(fcurve)
+        elif target.animation_data:
+            action_name = target.animation_data.action.name if target.animation_data.action else None
+            target.animation_data_clear()
+            deleted.append({"action_name": action_name, "cleared": True})
+        return {"status": "success", "target_type": target_type, "target_name": target_name, "deleted": deleted, "warnings": []}
+
+
+class CameraCompositionService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _unique(base):
+        base = re.sub(r"[^A-Za-z0-9_. -]+", "_", str(base or "OVERTLI_CAMERA")).strip() or "OVERTLI_CAMERA"
+        if base not in bpy.data.objects:
+            return base
+        index = 1
+        while f"{base}.{index:03d}" in bpy.data.objects:
+            index += 1
+        return f"{base}.{index:03d}"
+
+    @staticmethod
+    def _vec(value, default, length=3):
+        if value is None:
+            return list(default)
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            raise ValueError(f"Expected a {length}-item numeric list")
+        return [float(item) for item in value]
+
+    @staticmethod
+    def _summary(obj):
+        return {"name": obj.name, "type": obj.type, "location": list(obj.location), "rotation": list(obj.rotation_euler), "lens": float(obj.data.lens), "clip_start": float(obj.data.clip_start), "clip_end": float(obj.data.clip_end)}
+
+    def create_camera(self, camera_name=None, location=None, rotation=None, lens=None, sensor_width=None, clip_start=None, clip_end=None, collection_name=None, set_active=False, verify=False):
+        name = self._unique(camera_name or "OVERTLI_CAMERA")
+        data = bpy.data.cameras.new(name)
+        obj = bpy.data.objects.new(name, data)
+        obj.location = self._vec(location, [0.0, -6.0, 3.0])
+        obj.rotation_euler = self._vec(rotation, [math.radians(60.0), 0.0, 0.0])
+        if lens is not None:
+            data.lens = max(1.0, min(float(lens), 300.0))
+        if sensor_width is not None:
+            data.sensor_width = max(1.0, min(float(sensor_width), 200.0))
+        if clip_start is not None:
+            data.clip_start = max(0.001, float(clip_start))
+        if clip_end is not None:
+            data.clip_end = max(data.clip_start + 0.1, min(float(clip_end), 100000.0))
+        collection = bpy.data.collections.get(collection_name) if collection_name else bpy.context.scene.collection
+        if collection is None and collection_name:
+            collection = bpy.data.collections.new(collection_name)
+            bpy.context.scene.collection.children.link(collection)
+        collection.objects.link(obj)
+        if set_active:
+            bpy.context.scene.camera = obj
+        verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_camera_{name}", include_screenshots=False) if verify else None
+        return {"status": "success", "camera": self._summary(obj), "set_active": bool(set_active), "verification": verification, "warnings": []}
+
+    def _bounds(self, object_names):
+        if not object_names:
+            raise ValueError("object_names must contain at least one object")
+        corners = []
+        for name in object_names:
+            obj = bpy.data.objects.get(name)
+            if not obj:
+                raise ValueError(f"Object not found: {name}")
+            corners.extend([obj.matrix_world @ mathutils.Vector(corner) for corner in obj.bound_box])
+        min_corner = mathutils.Vector((min(v.x for v in corners), min(v.y for v in corners), min(v.z for v in corners)))
+        max_corner = mathutils.Vector((max(v.x for v in corners), max(v.y for v in corners), max(v.z for v in corners)))
+        return (min_corner + max_corner) * 0.5, max_corner - min_corner, min_corner, max_corner
+
+    def frame_camera_to_objects(self, camera_name, object_names, view="front_perspective", margin=1.25, distance_multiplier=1.0, look_at=True, set_active=True, verify=False):
+        camera = bpy.data.objects.get(camera_name)
+        if not camera or camera.type != "CAMERA":
+            return {"status": "error", "message": f"Camera not found: {camera_name}", "warnings": []}
+        directions = {
+            "front": mathutils.Vector((0, -1, 0)),
+            "back": mathutils.Vector((0, 1, 0)),
+            "left": mathutils.Vector((-1, 0, 0)),
+            "right": mathutils.Vector((1, 0, 0)),
+            "top": mathutils.Vector((0, 0, 1)),
+            "bottom": mathutils.Vector((0, 0, -1)),
+            "front_perspective": mathutils.Vector((0.65, -1, 0.45)),
+            "isometric": mathutils.Vector((1, -1, 0.75)),
+            "camera_current": None,
+        }
+        if view not in directions:
+            return {"status": "error", "message": f"Unsupported view: {view}", "warnings": []}
+        try:
+            center, size, min_corner, max_corner = self._bounds(object_names)
+            direction = (camera.location - center).normalized() if view == "camera_current" else directions[view].normalized()
+            if direction.length == 0:
+                direction = directions["front_perspective"].normalized()
+            distance = max(size.length * 0.5, 0.5) * max(1.0, float(margin)) * max(1.0, float(distance_multiplier)) * 2.5
+            camera.location = center + direction * distance
+            if look_at:
+                camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
+            if set_active:
+                bpy.context.scene.camera = camera
+            verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_frame_{camera.name}", include_screenshots=False) if verify else None
+            return {"status": "success", "camera": self._summary(camera), "framed_bounds": {"center": list(center), "size": list(size), "min": list(min_corner), "max": list(max_corner)}, "verification": verification, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
+
+    def set_active_camera(self, camera_name):
+        camera = bpy.data.objects.get(camera_name)
+        if not camera or camera.type != "CAMERA":
+            return {"status": "error", "message": f"Camera not found: {camera_name}", "warnings": []}
+        bpy.context.scene.camera = camera
+        return {"status": "success", "camera_name": camera.name, "warnings": []}
+
+
+class LightingSetupService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _vec(value, default, length=3):
+        if value is None:
+            return list(default)
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            raise ValueError(f"Expected a {length}-item numeric list")
+        return [float(item) for item in value]
+
+    @staticmethod
+    def _unique(base):
+        base = re.sub(r"[^A-Za-z0-9_. -]+", "_", str(base or "OVERTLI_LIGHT")).strip() or "OVERTLI_LIGHT"
+        if base not in bpy.data.objects:
+            return base
+        index = 1
+        while f"{base}.{index:03d}" in bpy.data.objects:
+            index += 1
+        return f"{base}.{index:03d}"
+
+    @staticmethod
+    def _summary(obj):
+        data = obj.data
+        return {"name": obj.name, "type": data.type, "location": list(obj.location), "rotation": list(obj.rotation_euler), "energy": float(data.energy), "color": list(data.color), "size": float(getattr(data, "size", getattr(data, "shadow_soft_size", 0.0)))}
+
+    def create_light(self, light_name=None, light_type="AREA", location=None, rotation=None, energy=None, color=None, size=None, collection_name=None, verify=False):
+        light_type = str(light_type or "AREA").upper()
+        if light_type not in {"POINT", "SUN", "SPOT", "AREA"}:
+            return {"status": "error", "message": f"Unsupported light_type: {light_type}", "warnings": []}
+        name = self._unique(light_name or f"OVERTLI_{light_type}_LIGHT")
+        data = bpy.data.lights.new(name, type=light_type)
+        obj = bpy.data.objects.new(name, data)
+        obj.location = self._vec(location, [3.0, -4.0, 4.0])
+        obj.rotation_euler = self._vec(rotation, [math.radians(60), 0.0, math.radians(35)])
+        data.energy = max(0.0, min(float(energy if energy is not None else 500.0), 100000.0))
+        if color is not None:
+            data.color = self._vec(color, [1, 1, 1])
+        if size is not None:
+            if hasattr(data, "size"):
+                data.size = max(0.01, min(float(size), 1000.0))
+            if hasattr(data, "shadow_soft_size"):
+                data.shadow_soft_size = max(0.01, min(float(size), 1000.0))
+        collection = bpy.data.collections.get(collection_name) if collection_name else bpy.context.scene.collection
+        if collection is None and collection_name:
+            collection = bpy.data.collections.new(collection_name)
+            bpy.context.scene.collection.children.link(collection)
+        collection.objects.link(obj)
+        verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_light_{name}", include_screenshots=False) if verify else None
+        return {"status": "success", "light": self._summary(obj), "verification": verification, "warnings": []}
+
+    def create_lighting_setup(self, setup_name, target_object_names=None, preset="three_point", collection_name=None, replace_existing_with_prefix=False, confirm_replace=False, verify=False):
+        preset = str(preset or "three_point").lower()
+        if preset not in {"three_point", "studio", "product", "softbox"}:
+            return {"status": "error", "message": f"Unsupported lighting preset: {preset}", "warnings": []}
+        prefix = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(setup_name or "OVERTLI_LIGHT_SETUP")).strip("._-")
+        if replace_existing_with_prefix:
+            if not confirm_replace:
+                return {"status": "error", "message": "replace_existing_with_prefix requires confirm_replace=True", "warnings": []}
+            for obj in list(bpy.data.objects):
+                if obj.type == "LIGHT" and obj.name.startswith(prefix):
+                    bpy.data.objects.remove(obj, do_unlink=True)
+        specs = [("KEY", "AREA", [-3, -4, 5], 650, [1, .95, .9], 5), ("FILL", "AREA", [4, -3, 3], 180, [.75, .85, 1], 7), ("RIM", "POINT", [0, 4, 4], 260, [1, 1, 1], 2)]
+        if preset == "softbox":
+            specs = [("SOFTBOX", "AREA", [0, -4, 4], 750, [1, 1, 1], 6)]
+        lights = []
+        for suffix, light_type, location, energy, color, size in specs:
+            result = self.create_light(f"{prefix}_{suffix}", light_type, location, energy=energy, color=color, size=size, collection_name=collection_name)
+            if result.get("status") == "success":
+                lights.append(result["light"])
+        verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_lighting_{prefix}", include_screenshots=False) if verify else None
+        return {"status": "success", "setup_name": prefix, "preset": preset, "lights": lights, "verification": verification, "warnings": []}
+
+    def update_light(self, light_name, energy=None, color=None, size=None, location=None, rotation=None, verify=False):
+        obj = bpy.data.objects.get(light_name)
+        if not obj or obj.type != "LIGHT":
+            return {"status": "error", "message": f"Light not found: {light_name}", "warnings": []}
+        if energy is not None:
+            obj.data.energy = max(0.0, min(float(energy), 100000.0))
+        if color is not None:
+            obj.data.color = self._vec(color, [1, 1, 1])
+        if size is not None and hasattr(obj.data, "size"):
+            obj.data.size = max(0.01, min(float(size), 1000.0))
+        if location is not None:
+            obj.location = self._vec(location, [0, 0, 0])
+        if rotation is not None:
+            obj.rotation_euler = self._vec(rotation, [0, 0, 0])
+        verification = self.server.verification_artifact_service.create_verification_snapshot(label=f"phase5a_update_light_{obj.name}", include_screenshots=False) if verify else None
+        return {"status": "success", "light": self._summary(obj), "verification": verification, "warnings": []}
+
+    def set_world_lighting(self, color=None, strength=None, verify=False):
+        world = bpy.context.scene.world or bpy.data.worlds.new("World")
+        bpy.context.scene.world = world
+        world.use_nodes = True
+        bg = next((node for node in world.node_tree.nodes if node.type == "BACKGROUND"), None)
+        if not bg:
+            bg = world.node_tree.nodes.new("ShaderNodeBackground")
+        if color is not None:
+            bg.inputs["Color"].default_value = self._vec(color, [1, 1, 1, 1], 4)
+        if strength is not None:
+            bg.inputs["Strength"].default_value = max(0.0, min(float(strength), 1000.0))
+        verification = self.server.verification_artifact_service.create_verification_snapshot(label="phase5a_world_lighting", include_screenshots=False) if verify else None
+        return {"status": "success", "world": world.name, "color": list(bg.inputs["Color"].default_value), "strength": float(bg.inputs["Strength"].default_value), "verification": verification, "warnings": []}
+
+
+class RenderSettingsService:
+    def __init__(self, server):
+        self.server = server
+
+    def get_render_settings(self):
+        scene = bpy.context.scene
+        return {"status": "success", "engine": scene.render.engine, "resolution": {"x": int(scene.render.resolution_x), "y": int(scene.render.resolution_y), "percentage": int(scene.render.resolution_percentage)}, "fps": int(scene.render.fps), "frame_range": {"start": int(scene.frame_start), "end": int(scene.frame_end), "current": int(scene.frame_current)}, "filepath": scene.render.filepath, "image_format": scene.render.image_settings.file_format, "cycles_samples": int(getattr(scene.cycles, "samples", 0)) if hasattr(scene, "cycles") else None, "warnings": []}
+
+    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False):
+        scene = bpy.context.scene
+        before = self.get_render_settings()
+        if engine:
+            engine = str(engine).upper()
+            if engine not in {"BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"}:
+                return {"status": "error", "message": f"Unsupported render engine: {engine}", "warnings": []}
+            scene.render.engine = engine
+        max_res = 640 if clamp_for_smoke else 8192
+        if resolution_x is not None:
+            scene.render.resolution_x = max(16, min(int(resolution_x), max_res))
+        if resolution_y is not None:
+            scene.render.resolution_y = max(16, min(int(resolution_y), max_res))
+        if resolution_percentage is not None:
+            scene.render.resolution_percentage = max(1, min(int(resolution_percentage), 100))
+        if samples is not None and hasattr(scene, "cycles"):
+            scene.cycles.samples = max(1, min(int(samples), 32 if clamp_for_smoke else 4096))
+        if image_format:
+            scene.render.image_settings.file_format = str(image_format).upper()
+        if transparent is not None:
+            scene.render.film_transparent = bool(transparent)
+        if color_management:
+            for key, value in color_management.items():
+                if hasattr(scene.view_settings, key):
+                    setattr(scene.view_settings, key, value)
+        return {"status": "success", "before": before, "after": self.get_render_settings(), "warnings": ["Render settings were clamped for smoke-safe cost"] if clamp_for_smoke else []}
+
+    def set_output_path(self, output_path=None, artifact_root=None, subdir="renders/stills", filename=None):
+        path = RenderArtifactService.safe_output_path(output_path, artifact_root, subdir, filename or "render.png")
+        bpy.context.scene.render.filepath = path
+        return {"status": "success", "output_path": path, "warnings": []}
+
+
+class RenderArtifactService:
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def artifact_root(artifact_root=None):
+        return os.path.abspath(os.path.expanduser(str(artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT") or ADDON_ROOT)))
+
+    @staticmethod
+    def stamp():
+        return time.strftime("%Y%m%d_%H%M%S", time.localtime()) + f"_{time.time_ns()}"
+
+    @staticmethod
+    def safe_output_path(output_path=None, artifact_root=None, subdir="renders/stills", filename="render.png"):
+        if output_path:
+            return os.path.abspath(os.path.expanduser(str(output_path)))
+        base = os.path.join(RenderArtifactService.artifact_root(artifact_root), ".overtli_blender", *str(subdir).split("/"))
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, filename)
+
+    @staticmethod
+    def write_json(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2, sort_keys=True)
+
+    def render_still(self, output_path=None, artifact_root=None, filename=None, camera_name=None, frame=None, clamp_for_smoke=True, write_manifest=True):
+        scene = bpy.context.scene
+        if camera_name:
+            camera = bpy.data.objects.get(camera_name)
+            if not camera or camera.type != "CAMERA":
+                return {"status": "error", "message": f"Camera not found: {camera_name}", "warnings": []}
+            scene.camera = camera
+        if frame is not None:
+            scene.frame_set(int(frame))
+        if clamp_for_smoke:
+            self.server.render_settings_service.set_render_settings(resolution_x=min(scene.render.resolution_x, 640), resolution_y=min(scene.render.resolution_y, 640), samples=32, clamp_for_smoke=True)
+        path = self.safe_output_path(output_path, artifact_root, "renders/stills", filename or f"OVERTLI_PHASE5A_STILL_{self.stamp()}.png")
+        previous = scene.render.filepath
+        try:
+            scene.render.filepath = path
+            bpy.ops.render.render(write_still=True)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "output_path": path, "warnings": []}
+        finally:
+            scene.render.filepath = previous
+        artifact = {"path": path, "exists": os.path.exists(path), "bytes": os.path.getsize(path) if os.path.exists(path) else 0, "frame": int(scene.frame_current), "camera": scene.camera.name if scene.camera else None}
+        manifest_path = None
+        if write_manifest:
+            manifest_path = path + ".manifest.json"
+            self.write_json(manifest_path, {"command": "render_still", "artifact": artifact, "settings": self.server.render_settings_service.get_render_settings()})
+        return {"status": "success", "artifact": artifact, "manifest_path": manifest_path, "warnings": []}
+
+    def render_contact_sheet(self, object_names=None, camera_name=None, views=None, artifact_root=None, filename=None, clamp_for_smoke=True):
+        views = (views or ["front", "right", "top"])[:8]
+        manifest_path = self.safe_output_path(None, artifact_root, "renders/contact_sheets", filename or f"OVERTLI_PHASE5A_CONTACT_{self.stamp()}.json")
+        artifacts = []
+        for index, view in enumerate(views):
+            still = self.render_still(artifact_root=artifact_root, filename=f"{os.path.splitext(os.path.basename(manifest_path))[0]}_{index}_{view}.png", camera_name=camera_name, clamp_for_smoke=clamp_for_smoke, write_manifest=False)
+            artifacts.append({"view": view, "result": still})
+        self.write_json(manifest_path, {"command": "render_contact_sheet", "object_names": object_names or [], "camera_name": camera_name, "views": views, "artifacts": artifacts})
+        return {"status": "success", "manifest_path": manifest_path, "artifacts": artifacts, "warnings": []}
+
+    def create_turntable_animation(self, object_name, frame_start=1, frame_end=48, axis="Z", rotations=1.0, empty_name=None, camera_name=None, confirm_clear_existing=False):
+        obj = bpy.data.objects.get(object_name)
+        if not obj:
+            return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
+        frame_start = int(frame_start)
+        frame_end = int(frame_end)
+        if frame_start >= frame_end or frame_end - frame_start > 240:
+            return {"status": "error", "message": "Turntable frame range must be 1-240 frames", "warnings": []}
+        axis = str(axis or "Z").upper()
+        if axis not in {"X", "Y", "Z"}:
+            return {"status": "error", "message": f"Unsupported axis: {axis}", "warnings": []}
+        idx = {"X": 0, "Y": 1, "Z": 2}[axis]
+        start = list(obj.rotation_euler)
+        obj.rotation_euler[idx] = start[idx]
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame_start)
+        obj.rotation_euler[idx] = start[idx] + math.tau * float(rotations)
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame_end)
+        if obj.animation_data and obj.animation_data.action:
+            for fcurve in AnimationIntelligenceService._action_fcurves(obj.animation_data.action):
+                for point in fcurve.keyframe_points:
+                    point.interpolation = "LINEAR"
+        bpy.context.scene.frame_start = frame_start
+        bpy.context.scene.frame_end = frame_end
+        return {"status": "success", "object_name": obj.name, "frame_start": frame_start, "frame_end": frame_end, "axis": axis, "warnings": []}
+
+    def render_preview_animation(self, output_dir=None, artifact_root=None, frame_start=None, frame_end=None, step=1, max_frames=24, camera_name=None, clamp_for_smoke=True):
+        scene = bpy.context.scene
+        start = int(frame_start if frame_start is not None else scene.frame_start)
+        end = int(frame_end if frame_end is not None else scene.frame_end)
+        frames = list(range(start, end + 1, max(1, int(step))))[:max(1, min(int(max_frames), 24))]
+        base = output_dir or os.path.join(self.artifact_root(artifact_root), ".overtli_blender", "renders", "previews", f"OVERTLI_PHASE5A_PREVIEW_{self.stamp()}")
+        os.makedirs(base, exist_ok=True)
+        artifacts = []
+        for frame in frames:
+            artifacts.append({"frame": frame, "result": self.render_still(output_path=os.path.join(base, f"frame_{frame:04d}.png"), camera_name=camera_name, frame=frame, clamp_for_smoke=clamp_for_smoke, write_manifest=False)})
+        manifest_path = os.path.join(base, "manifest.json")
+        self.write_json(manifest_path, {"command": "render_preview_animation", "frames": frames, "artifacts": artifacts})
+        return {"status": "success", "output_dir": base, "manifest_path": manifest_path, "frames": frames, "artifacts": artifacts, "warnings": []}
+
+
+class CompositorPassService:
+    def __init__(self, server):
+        self.server = server
+
+    def get_compositor_status(self):
+        scene = bpy.context.scene
+        layer = scene.view_layers[0] if scene.view_layers else None
+        node_tree = getattr(scene, "node_tree", None)
+        warnings = [] if node_tree is not None else ["Compositor node tree is not available in this Blender context"]
+        return {"status": "success", "use_nodes": bool(getattr(scene, "use_nodes", False)), "node_count": len(node_tree.nodes) if node_tree else 0, "render_passes": {"use_pass_z": bool(getattr(layer, "use_pass_z", False)), "use_pass_mist": bool(getattr(layer, "use_pass_mist", False)), "use_pass_normal": bool(getattr(layer, "use_pass_normal", False))}, "warnings": warnings}
+
+    def set_compositor_preset(self, preset="basic_viewer", confirm_replace=False):
+        preset = str(preset or "basic_viewer").lower()
+        if preset not in {"none", "basic_viewer", "transparent_preview", "mist_depth_preview"}:
+            return {"status": "error", "message": f"Unsupported compositor preset: {preset}", "warnings": []}
+        scene = bpy.context.scene
+        if not hasattr(scene, "use_nodes"):
+            return {"status": "error", "message": "Compositor nodes are not available in this Blender context", "warnings": []}
+        node_tree = getattr(scene, "node_tree", None)
+        if scene.use_nodes and node_tree and node_tree.nodes and preset != "none" and not confirm_replace:
+            return {"status": "error", "message": "Existing compositor nodes require confirm_replace=True", "warnings": []}
+        if preset == "none":
+            scene.use_nodes = False
+            return {"status": "success", "preset": preset, "warnings": []}
+        scene.use_nodes = True
+        tree = getattr(scene, "node_tree", None)
+        if tree is None:
+            return {"status": "error", "message": "Compositor node tree is not available in this Blender context", "warnings": []}
+        tree.nodes.clear()
+        layers = tree.nodes.new("CompositorNodeRLayers")
+        composite = tree.nodes.new("CompositorNodeComposite")
+        viewer = tree.nodes.new("CompositorNodeViewer")
+        tree.links.new(layers.outputs["Image"], composite.inputs["Image"])
+        tree.links.new(layers.outputs["Image"], viewer.inputs["Image"])
+        return {"status": "success", "preset": preset, "node_count": len(tree.nodes), "warnings": []}
+
+    def set_render_passes(self, use_pass_z=None, use_pass_mist=None, use_pass_normal=None, use_pass_diffuse_color=None):
+        layer = bpy.context.scene.view_layers[0]
+        changed = {}
+        for name, value in {"use_pass_z": use_pass_z, "use_pass_mist": use_pass_mist, "use_pass_normal": use_pass_normal, "use_pass_diffuse_color": use_pass_diffuse_color}.items():
+            if value is not None and hasattr(layer, name):
+                setattr(layer, name, bool(value))
+                changed[name] = bool(value)
+        return {"status": "success", "changed": changed, "status_after": self.get_compositor_status(), "warnings": []}
+
+
+class PresentationWorkflowBatchService:
+    ALLOWED_COMMANDS = {"get_timeline_info", "list_animated_objects", "get_animation_deep_info", "set_timeline_range", "set_current_frame", "insert_transform_keyframes", "animate_object_transform", "animate_camera_transform", "animate_light_property", "animate_material_property", "animate_shape_key_value", "set_render_settings", "render_still", "render_contact_sheet", "create_turntable_animation", "render_preview_animation", "get_compositor_status", "set_compositor_preset", "set_render_passes", "delete_animation_data", "cleanup_presentation_artifacts"}
+    DESTRUCTIVE_COMMANDS = {"delete_animation_data", "cleanup_presentation_artifacts"}
+
+    def __init__(self, server):
+        self.server = server
+
+    def run_presentation_workflow_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+        operations = operations or []
+        if len(operations) > max(1, min(int(max_operations), 50)):
+            return {"status": "error", "message": "Too many batch operations", "warnings": []}
+        batch_id = f"presentation_{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns()}"
+        batch_dir = os.path.join(RenderArtifactService.artifact_root(artifact_root), ".overtli_blender", "presentation", "batches", batch_id)
+        os.makedirs(batch_dir, exist_ok=True)
+        before = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_id}_before", include_screenshots=False, artifact_root=artifact_root) if create_before_snapshot else None
+        results = []
+        errors = []
+        for op in operations:
+            command = op.get("command")
+            params = dict(op.get("params") or {})
+            if command not in self.ALLOWED_COMMANDS:
+                errors.append({"command": command, "message": "Command is not allowed in presentation batches"})
+                if stop_on_error:
+                    break
+                continue
+            if command in self.DESTRUCTIVE_COMMANDS and not (batch_allow_destructive and params.get("confirm") is True):
+                errors.append({"command": command, "message": "Destructive batch operation requires batch_allow_destructive=True and operation confirm=True"})
+                if stop_on_error:
+                    break
+                continue
+            if command in {"render_still", "render_contact_sheet", "render_preview_animation"}:
+                params.setdefault("artifact_root", artifact_root)
+                params.setdefault("clamp_for_smoke", True)
+            try:
+                result = self.server._build_command_handlers()[command](**params)
+            except Exception as exc:
+                result = {"status": "error", "message": str(exc), "warnings": []}
+            results.append({"command": command, "params": params, "result": result})
+            if result.get("status") == "error":
+                errors.append({"command": command, "message": result.get("message")})
+                if stop_on_error:
+                    break
+        after = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_id}_after", include_screenshots=False, artifact_root=artifact_root) if create_after_snapshot else None
+        manifest_path = os.path.join(batch_dir, "manifest.json")
+        RenderArtifactService.write_json(manifest_path, {"batch_id": batch_id, "label": label, "before_snapshot": before, "after_snapshot": after, "operation_results": results, "errors": errors})
+        return {"status": "partial" if errors else "success", "batch_id": batch_id, "label": label, "before_snapshot": before, "after_snapshot": after, "render_artifacts": [], "operation_results": results, "errors": errors, "manifest_path": manifest_path, "warnings": []}
+
+    def cleanup_presentation_artifacts(self, prefix, confirm=False, cleanup_scene_data=True, cleanup_render_artifacts=False, artifact_root=None):
+        if not confirm:
+            return {"status": "error", "message": "cleanup_presentation_artifacts requires confirm=True", "warnings": []}
+        prefix = str(prefix or "")
+        if len(prefix) < 6:
+            return {"status": "error", "message": "A safe prefix is required", "warnings": []}
+        deleted = {"objects": [], "collections": [], "materials": [], "cameras": [], "lights": []}
+        if cleanup_scene_data:
+            for obj in list(bpy.data.objects):
+                if obj.name.startswith(prefix):
+                    bucket = "cameras" if obj.type == "CAMERA" else "lights" if obj.type == "LIGHT" else "objects"
+                    deleted[bucket].append(obj.name)
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            for mat in list(bpy.data.materials):
+                if mat.name.startswith(prefix):
+                    deleted["materials"].append(mat.name)
+                    bpy.data.materials.remove(mat)
+            for col in list(bpy.data.collections):
+                if col.name.startswith(prefix) and len(col.objects) == 0 and len(col.children) == 0:
+                    deleted["collections"].append(col.name)
+                    bpy.data.collections.remove(col)
+        artifact_deleted = []
+        if cleanup_render_artifacts:
+            root = os.path.join(RenderArtifactService.artifact_root(artifact_root), ".overtli_blender")
+            for current_root, _dirs, files in os.walk(root):
+                for filename in files:
+                    if filename.startswith(prefix):
+                        path = os.path.join(current_root, filename)
+                        os.remove(path)
+                        artifact_deleted.append(path)
+        return {"status": "success", "prefix": prefix, "deleted": deleted, "artifact_deleted": artifact_deleted, "warnings": []}
+
+
 class ModifierService:
     SUPPORTED_MODIFIERS = {"BEVEL", "SUBSURF", "SOLIDIFY", "MIRROR", "ARRAY", "WEIGHTED_NORMAL", "TRIANGULATE", "DECIMATE"}
     ALLOWED_PROPERTIES = {
@@ -5246,6 +6029,14 @@ class BlenderMCPServer:
         self.asset_material_workflow_service = AssetMaterialWorkflowService(self)
         self.uv_selection_measurement_service = UVSelectionMeasurementService(self)
         self.sculpt_workflow_service = SculptWorkflowService(self)
+        self.animation_intelligence_service = AnimationIntelligenceService(self)
+        self.animation_authoring_service = AnimationAuthoringService(self)
+        self.camera_composition_service = CameraCompositionService(self)
+        self.lighting_setup_service = LightingSetupService(self)
+        self.render_settings_service = RenderSettingsService(self)
+        self.render_artifact_service = RenderArtifactService(self)
+        self.compositor_pass_service = CompositorPassService(self)
+        self.presentation_workflow_batch_service = PresentationWorkflowBatchService(self)
         self.modifier_service = ModifierService(self)
         self.collection_organization_service = CollectionOrganizationService(self)
         self.verified_edit_batch_service = VerifiedEditBatchService(self)
@@ -5335,6 +6126,37 @@ class BlenderMCPServer:
         self.configure_sculpt_brush = self.sculpt_workflow_service.configure_sculpt_brush
         self.create_sculpt_mask_from_vertex_group = self.sculpt_workflow_service.create_sculpt_mask_from_vertex_group
         self.run_shape_key_sculpt_workflow = self.sculpt_workflow_service.run_shape_key_sculpt_workflow
+        self.get_timeline_info = self.animation_intelligence_service.get_timeline_info
+        self.list_animated_objects = self.animation_intelligence_service.list_animated_objects
+        self.get_animation_deep_info = self.animation_intelligence_service.get_animation_deep_info
+        self.set_timeline_range = self.animation_intelligence_service.set_timeline_range
+        self.set_current_frame = self.animation_intelligence_service.set_current_frame
+        self.insert_transform_keyframes = self.animation_authoring_service.insert_transform_keyframes
+        self.animate_object_transform = self.animation_authoring_service.animate_object_transform
+        self.animate_camera_transform = self.animation_authoring_service.animate_camera_transform
+        self.animate_light_property = self.animation_authoring_service.animate_light_property
+        self.animate_material_property = self.animation_authoring_service.animate_material_property
+        self.animate_shape_key_value = self.animation_authoring_service.animate_shape_key_value
+        self.delete_animation_data = self.animation_authoring_service.delete_animation_data
+        self.create_camera = self.camera_composition_service.create_camera
+        self.frame_camera_to_objects = self.camera_composition_service.frame_camera_to_objects
+        self.set_active_camera = self.camera_composition_service.set_active_camera
+        self.create_light = self.lighting_setup_service.create_light
+        self.create_lighting_setup = self.lighting_setup_service.create_lighting_setup
+        self.update_light = self.lighting_setup_service.update_light
+        self.set_world_lighting = self.lighting_setup_service.set_world_lighting
+        self.get_render_settings = self.render_settings_service.get_render_settings
+        self.set_render_settings = self.render_settings_service.set_render_settings
+        self.set_output_path = self.render_settings_service.set_output_path
+        self.render_still = self.render_artifact_service.render_still
+        self.render_contact_sheet = self.render_artifact_service.render_contact_sheet
+        self.create_turntable_animation = self.render_artifact_service.create_turntable_animation
+        self.render_preview_animation = self.render_artifact_service.render_preview_animation
+        self.get_compositor_status = self.compositor_pass_service.get_compositor_status
+        self.set_compositor_preset = self.compositor_pass_service.set_compositor_preset
+        self.set_render_passes = self.compositor_pass_service.set_render_passes
+        self.run_presentation_workflow_batch = self.presentation_workflow_batch_service.run_presentation_workflow_batch
+        self.cleanup_presentation_artifacts = self.presentation_workflow_batch_service.cleanup_presentation_artifacts
         self.add_object_modifier = self.modifier_service.add_object_modifier
         self.update_object_modifier = self.modifier_service.update_object_modifier
         self.remove_object_modifier = self.modifier_service.remove_object_modifier
@@ -5607,6 +6429,37 @@ class BlenderMCPServer:
             "configure_sculpt_brush": self.configure_sculpt_brush,
             "create_sculpt_mask_from_vertex_group": self.create_sculpt_mask_from_vertex_group,
             "run_shape_key_sculpt_workflow": self.run_shape_key_sculpt_workflow,
+            "get_timeline_info": self.get_timeline_info,
+            "list_animated_objects": self.list_animated_objects,
+            "get_animation_deep_info": self.get_animation_deep_info,
+            "set_timeline_range": self.set_timeline_range,
+            "set_current_frame": self.set_current_frame,
+            "insert_transform_keyframes": self.insert_transform_keyframes,
+            "animate_object_transform": self.animate_object_transform,
+            "animate_camera_transform": self.animate_camera_transform,
+            "animate_light_property": self.animate_light_property,
+            "animate_material_property": self.animate_material_property,
+            "animate_shape_key_value": self.animate_shape_key_value,
+            "delete_animation_data": self.delete_animation_data,
+            "create_camera": self.create_camera,
+            "frame_camera_to_objects": self.frame_camera_to_objects,
+            "set_active_camera": self.set_active_camera,
+            "create_light": self.create_light,
+            "create_lighting_setup": self.create_lighting_setup,
+            "update_light": self.update_light,
+            "set_world_lighting": self.set_world_lighting,
+            "get_render_settings": self.get_render_settings,
+            "set_render_settings": self.set_render_settings,
+            "set_output_path": self.set_output_path,
+            "render_still": self.render_still,
+            "render_contact_sheet": self.render_contact_sheet,
+            "create_turntable_animation": self.create_turntable_animation,
+            "render_preview_animation": self.render_preview_animation,
+            "get_compositor_status": self.get_compositor_status,
+            "set_compositor_preset": self.set_compositor_preset,
+            "set_render_passes": self.set_render_passes,
+            "run_presentation_workflow_batch": self.run_presentation_workflow_batch,
+            "cleanup_presentation_artifacts": self.cleanup_presentation_artifacts,
             "add_object_modifier": self.add_object_modifier,
             "update_object_modifier": self.update_object_modifier,
             "remove_object_modifier": self.remove_object_modifier,
@@ -5831,6 +6684,99 @@ class BlenderMCPServer:
     def update_material_properties(self, material_name, base_color=None, metallic=None, roughness=None, alpha=None, verify=False):
         """Update supported properties on an existing material."""
         return self.material_authoring_service.update_material_properties(material_name, base_color, metallic, roughness, alpha, verify)
+
+    def get_timeline_info(self, include_markers=True, include_playback=True):
+        return self.animation_intelligence_service.get_timeline_info(include_markers, include_playback)
+
+    def list_animated_objects(self, include_material_animation=True, include_shape_key_animation=True, include_drivers=True, max_objects=None):
+        return self.animation_intelligence_service.list_animated_objects(include_material_animation, include_shape_key_animation, include_drivers, max_objects)
+
+    def get_animation_deep_info(self, object_name=None, material_name=None, include_keyframes=True, include_fcurves=True, include_drivers=True, max_keyframes=200):
+        return self.animation_intelligence_service.get_animation_deep_info(object_name, material_name, include_keyframes, include_fcurves, include_drivers, max_keyframes)
+
+    def set_timeline_range(self, frame_start, frame_end, fps=None, current_frame=None):
+        return self.animation_intelligence_service.set_timeline_range(frame_start, frame_end, fps, current_frame)
+
+    def set_current_frame(self, frame):
+        return self.animation_intelligence_service.set_current_frame(frame)
+
+    def insert_transform_keyframes(self, object_name, frames, properties=None):
+        return self.animation_authoring_service.insert_transform_keyframes(object_name, frames, properties)
+
+    def animate_object_transform(self, object_name, keyframes, interpolation="BEZIER", clear_existing=False, confirm_clear_existing=False, verify=False):
+        return self.animation_authoring_service.animate_object_transform(object_name, keyframes, interpolation, clear_existing, confirm_clear_existing, verify)
+
+    def animate_camera_transform(self, camera_name, keyframes, interpolation="BEZIER", clear_existing=False, confirm_clear_existing=False, verify=False):
+        return self.animation_authoring_service.animate_camera_transform(camera_name, keyframes, interpolation, clear_existing, confirm_clear_existing, verify)
+
+    def animate_light_property(self, light_name, property_name, keyframes, interpolation="BEZIER"):
+        return self.animation_authoring_service.animate_light_property(light_name, property_name, keyframes, interpolation)
+
+    def animate_material_property(self, material_name, channel, keyframes, interpolation="BEZIER"):
+        return self.animation_authoring_service.animate_material_property(material_name, channel, keyframes, interpolation)
+
+    def animate_shape_key_value(self, object_name, shape_key_name, keyframes, interpolation="BEZIER"):
+        return self.animation_authoring_service.animate_shape_key_value(object_name, shape_key_name, keyframes, interpolation)
+
+    def delete_animation_data(self, target_type, target_name, data_paths=None, confirm=False):
+        return self.animation_authoring_service.delete_animation_data(target_type, target_name, data_paths, confirm)
+
+    def create_camera(self, camera_name=None, location=None, rotation=None, lens=None, sensor_width=None, clip_start=None, clip_end=None, collection_name=None, set_active=False, verify=False):
+        return self.camera_composition_service.create_camera(camera_name, location, rotation, lens, sensor_width, clip_start, clip_end, collection_name, set_active, verify)
+
+    def frame_camera_to_objects(self, camera_name, object_names, view="front_perspective", margin=1.25, distance_multiplier=1.0, look_at=True, set_active=True, verify=False):
+        return self.camera_composition_service.frame_camera_to_objects(camera_name, object_names, view, margin, distance_multiplier, look_at, set_active, verify)
+
+    def set_active_camera(self, camera_name):
+        return self.camera_composition_service.set_active_camera(camera_name)
+
+    def create_light(self, light_name=None, light_type="AREA", location=None, rotation=None, energy=None, color=None, size=None, collection_name=None, verify=False):
+        return self.lighting_setup_service.create_light(light_name, light_type, location, rotation, energy, color, size, collection_name, verify)
+
+    def create_lighting_setup(self, setup_name, target_object_names=None, preset="three_point", collection_name=None, replace_existing_with_prefix=False, confirm_replace=False, verify=False):
+        return self.lighting_setup_service.create_lighting_setup(setup_name, target_object_names, preset, collection_name, replace_existing_with_prefix, confirm_replace, verify)
+
+    def update_light(self, light_name, energy=None, color=None, size=None, location=None, rotation=None, verify=False):
+        return self.lighting_setup_service.update_light(light_name, energy, color, size, location, rotation, verify)
+
+    def set_world_lighting(self, color=None, strength=None, verify=False):
+        return self.lighting_setup_service.set_world_lighting(color, strength, verify)
+
+    def get_render_settings(self):
+        return self.render_settings_service.get_render_settings()
+
+    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False):
+        return self.render_settings_service.set_render_settings(engine, resolution_x, resolution_y, resolution_percentage, samples, image_format, transparent, color_management, clamp_for_smoke)
+
+    def set_output_path(self, output_path=None, artifact_root=None, subdir="renders/stills", filename=None):
+        return self.render_settings_service.set_output_path(output_path, artifact_root, subdir, filename)
+
+    def render_still(self, output_path=None, artifact_root=None, filename=None, camera_name=None, frame=None, clamp_for_smoke=True, write_manifest=True):
+        return self.render_artifact_service.render_still(output_path, artifact_root, filename, camera_name, frame, clamp_for_smoke, write_manifest)
+
+    def render_contact_sheet(self, object_names=None, camera_name=None, views=None, artifact_root=None, filename=None, clamp_for_smoke=True):
+        return self.render_artifact_service.render_contact_sheet(object_names, camera_name, views, artifact_root, filename, clamp_for_smoke)
+
+    def create_turntable_animation(self, object_name, frame_start=1, frame_end=48, axis="Z", rotations=1.0, empty_name=None, camera_name=None, confirm_clear_existing=False):
+        return self.render_artifact_service.create_turntable_animation(object_name, frame_start, frame_end, axis, rotations, empty_name, camera_name, confirm_clear_existing)
+
+    def render_preview_animation(self, output_dir=None, artifact_root=None, frame_start=None, frame_end=None, step=1, max_frames=24, camera_name=None, clamp_for_smoke=True):
+        return self.render_artifact_service.render_preview_animation(output_dir, artifact_root, frame_start, frame_end, step, max_frames, camera_name, clamp_for_smoke)
+
+    def get_compositor_status(self):
+        return self.compositor_pass_service.get_compositor_status()
+
+    def set_compositor_preset(self, preset="basic_viewer", confirm_replace=False):
+        return self.compositor_pass_service.set_compositor_preset(preset, confirm_replace)
+
+    def set_render_passes(self, use_pass_z=None, use_pass_mist=None, use_pass_normal=None, use_pass_diffuse_color=None):
+        return self.compositor_pass_service.set_render_passes(use_pass_z, use_pass_mist, use_pass_normal, use_pass_diffuse_color)
+
+    def run_presentation_workflow_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+        return self.presentation_workflow_batch_service.run_presentation_workflow_batch(label, operations, create_before_snapshot, create_after_snapshot, stop_on_error, max_operations, batch_allow_destructive, artifact_root)
+
+    def cleanup_presentation_artifacts(self, prefix, confirm=False, cleanup_scene_data=True, cleanup_render_artifacts=False, artifact_root=None):
+        return self.presentation_workflow_batch_service.cleanup_presentation_artifacts(prefix, confirm, cleanup_scene_data, cleanup_render_artifacts, artifact_root)
 
     def add_object_modifier(self, object_name, modifier_type, name=None, properties=None, verify=False):
         """Add an allowlisted modifier to one explicitly named object."""

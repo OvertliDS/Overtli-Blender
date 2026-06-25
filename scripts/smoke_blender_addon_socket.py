@@ -606,6 +606,70 @@ def run_phase4b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         print("PASS phase4b cleanup removed smoke objects, collection, materials, images, lattice, groups, and shape keys")
 
 
+def run_phase5a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(time.time_ns())
+    prefix = f"OVERTLI_PHASE5A_{stamp}"
+    collection_name = f"{prefix}_SMOKE"
+    object_name = f"{prefix}_OBJECT"
+    material_name = f"{prefix}_MAT"
+    camera_name = f"{prefix}_CAMERA"
+    light_setup = f"{prefix}_LIGHT"
+
+    try:
+        assert_success("create_collection phase5a", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        assert_success("create_basic_material phase5a", send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.2, 0.55, 0.9, 1.0], "replace_existing": True}))
+        created = assert_success("create_primitive_object phase5a", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": object_name, "collection_name": collection_name, "material_name": material_name}))
+        object_name = created.get("object_name", object_name)
+        assert_success("get_timeline_info phase5a", send_command(sock, timeout_seconds, "get_timeline_info"))
+        assert_success("set_timeline_range phase5a", send_command(sock, timeout_seconds, "set_timeline_range", {"frame_start": 1, "frame_end": 48, "fps": 24, "current_frame": 1}))
+        assert_success("create_camera phase5a", send_command(sock, timeout_seconds, "create_camera", {"camera_name": camera_name, "collection_name": collection_name, "set_active": True}))
+        assert_success("frame_camera_to_objects phase5a", send_command(sock, timeout_seconds, "frame_camera_to_objects", {"camera_name": camera_name, "object_names": [object_name], "view": "front_perspective", "verify": True}))
+        lighting = assert_success("create_lighting_setup phase5a", send_command(sock, timeout_seconds, "create_lighting_setup", {"setup_name": light_setup, "collection_name": collection_name, "preset": "three_point", "verify": True}))
+        light_names = [item.get("name") for item in lighting.get("lights", []) if item.get("name")]
+        assert_success("set_active_camera phase5a", send_command(sock, timeout_seconds, "set_active_camera", {"camera_name": camera_name}))
+        assert_success("insert_transform_keyframes phase5a", send_command(sock, timeout_seconds, "insert_transform_keyframes", {"object_name": object_name, "frames": [1, 24, 48], "properties": ["location", "rotation_euler"]}))
+        assert_success("animate_object_transform phase5a", send_command(sock, timeout_seconds, "animate_object_transform", {"object_name": object_name, "keyframes": [{"frame": 1, "location": [0, 0, 0]}, {"frame": 48, "location": [0.5, 0, 0.2]}], "interpolation": "LINEAR"}))
+        assert_success("animate_camera_transform phase5a", send_command(sock, timeout_seconds, "animate_camera_transform", {"camera_name": camera_name, "keyframes": [{"frame": 1, "location": [3, -5, 3]}, {"frame": 48, "location": [4, -5, 3.2]}], "interpolation": "LINEAR"}))
+        if light_names:
+            assert_success("animate_light_property phase5a", send_command(sock, timeout_seconds, "animate_light_property", {"light_name": light_names[0], "property_name": "energy", "keyframes": [{"frame": 1, "value": 250}, {"frame": 48, "value": 500}], "interpolation": "LINEAR"}))
+        assert_success("animate_material_property phase5a", send_command(sock, timeout_seconds, "animate_material_property", {"material_name": material_name, "channel": "roughness", "keyframes": [{"frame": 1, "value": 0.25}, {"frame": 48, "value": 0.6}], "interpolation": "LINEAR"}))
+        assert_success("get_animation_deep_info phase5a", send_command(sock, timeout_seconds, "get_animation_deep_info", {"object_name": object_name, "max_keyframes": 50}))
+        assert_success("list_animated_objects phase5a", send_command(sock, timeout_seconds, "list_animated_objects", {"max_objects": 25}))
+        assert_success("get_render_settings phase5a", send_command(sock, timeout_seconds, "get_render_settings"))
+        assert_success("set_render_settings phase5a", send_command(sock, timeout_seconds, "set_render_settings", {"engine": "BLENDER_WORKBENCH", "resolution_x": 320, "resolution_y": 320, "samples": 8, "clamp_for_smoke": True}))
+        still = assert_success("render_still phase5a", send_command(sock, timeout_seconds, "render_still", {"artifact_root": REPO_ROOT, "camera_name": camera_name, "filename": f"{prefix}_still.png", "clamp_for_smoke": True}))
+        if not still.get("artifact", {}).get("exists"):
+            raise RuntimeError(f"Phase 5A still render artifact missing: {still}")
+        contact = assert_success("render_contact_sheet phase5a", send_command(sock, timeout_seconds, "render_contact_sheet", {"artifact_root": REPO_ROOT, "camera_name": camera_name, "object_names": [object_name], "filename": f"{prefix}_contact.json", "clamp_for_smoke": True}))
+        if not contact.get("manifest_path"):
+            raise RuntimeError(f"Phase 5A contact sheet manifest missing: {contact}")
+        assert_success("create_turntable_animation phase5a", send_command(sock, timeout_seconds, "create_turntable_animation", {"object_name": object_name, "frame_start": 1, "frame_end": 24, "axis": "Z"}))
+        preview = assert_success("render_preview_animation phase5a", send_command(sock, timeout_seconds, "render_preview_animation", {"artifact_root": REPO_ROOT, "frame_start": 1, "frame_end": 24, "step": 8, "max_frames": 4, "camera_name": camera_name, "clamp_for_smoke": True}))
+        if not preview.get("manifest_path"):
+            raise RuntimeError(f"Phase 5A preview manifest missing: {preview}")
+        assert_success("get_compositor_status phase5a", send_command(sock, timeout_seconds, "get_compositor_status"))
+        compositor_preset = send_command(sock, timeout_seconds, "set_compositor_preset", {"preset": "basic_viewer", "confirm_replace": True})
+        if compositor_preset.get("status") == "error" and "not available" in str(compositor_preset.get("message", "")).lower():
+            print(f"WARN set_compositor_preset skipped: {compositor_preset.get('message')}")
+        else:
+            assert_success("set_compositor_preset phase5a", compositor_preset)
+        assert_success("set_render_passes phase5a", send_command(sock, timeout_seconds, "set_render_passes", {"use_pass_z": True, "use_pass_mist": False}))
+        batch = assert_success("run_presentation_workflow_batch phase5a", send_command(sock, timeout_seconds, "run_presentation_workflow_batch", {"label": "Phase 5A smoke batch", "artifact_root": REPO_ROOT, "operations": [{"command": "get_timeline_info", "params": {}}, {"command": "get_render_settings", "params": {}}, {"command": "render_still", "params": {"camera_name": camera_name, "filename": f"{prefix}_batch_still.png"}}]}))
+        if not batch.get("manifest_path"):
+            raise RuntimeError(f"Phase 5A batch manifest missing: {batch}")
+        assert_success("get_scene_health phase5a", send_command(sock, timeout_seconds, "get_scene_health"))
+    finally:
+        cleanup = assert_success("cleanup_presentation_artifacts phase5a", send_command(sock, timeout_seconds, "cleanup_presentation_artifacts", {"prefix": prefix, "confirm": True, "cleanup_scene_data": True, "cleanup_render_artifacts": False, "artifact_root": REPO_ROOT}))
+        scene_index = assert_success("get_scene_index phase5a_cleanup_probe", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 500}))
+        materials = assert_success("list_materials_deep phase5a_cleanup_probe", send_command(sock, timeout_seconds, "list_materials_deep", {"max_materials": 500}))
+        object_leftovers = [obj.get("name") for obj in scene_index.get("objects", []) if str(obj.get("name", "")).startswith(prefix)]
+        collection_leftovers = [col.get("name") for col in scene_index.get("collections", []) if str(col.get("name", "")).startswith(prefix)]
+        material_leftovers = [mat.get("name") for mat in materials.get("materials", []) if str(mat.get("name", "")).startswith(prefix)]
+        if object_leftovers or collection_leftovers or material_leftovers:
+            raise RuntimeError(f"Phase 5A cleanup leaked data: objects={object_leftovers}, collections={collection_leftovers}, materials={material_leftovers}, cleanup={cleanup}")
+        print("PASS phase5a cleanup removed smoke-created scene data")
+
+
 def run_optional_modifier_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     stamp = str(int(time.time()))
     collection = f"OVERTLI_PHASE3_MOD_SMOKE_{stamp}"
@@ -814,6 +878,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-deformation-modifier-ops", action="store_true", help="Run Phase 4B deformation modifier operations via the full contained scenario.")
     parser.add_argument("--include-region-deformation", action="store_true", help="Run Phase 4B region deformation via the full contained scenario.")
     parser.add_argument("--include-deformation-workflow-batch", action="store_true", help="Run Phase 4B deformation workflow batch via the full contained scenario.")
+    parser.add_argument("--include-timeline-info", action="store_true", help="Run the Phase 5A timeline info smoke.")
+    parser.add_argument("--include-animation-ops", action="store_true", help="Run Phase 5A animation operations via the full contained scenario.")
+    parser.add_argument("--include-camera-ops", action="store_true", help="Run Phase 5A camera operations via the full contained scenario.")
+    parser.add_argument("--include-lighting-ops", action="store_true", help="Run Phase 5A lighting operations via the full contained scenario.")
+    parser.add_argument("--include-render-settings", action="store_true", help="Run the Phase 5A render settings smoke.")
+    parser.add_argument("--include-render-still", action="store_true", help="Run Phase 5A still rendering via the full contained scenario.")
+    parser.add_argument("--include-contact-sheet", action="store_true", help="Run Phase 5A contact sheet rendering via the full contained scenario.")
+    parser.add_argument("--include-turntable", action="store_true", help="Run Phase 5A turntable setup via the full contained scenario.")
+    parser.add_argument("--include-preview-animation", action="store_true", help="Run Phase 5A bounded preview animation via the full contained scenario.")
+    parser.add_argument("--include-compositor-ops", action="store_true", help="Run Phase 5A compositor/pass operations via the full contained scenario.")
+    parser.add_argument("--include-presentation-batch", action="store_true", help="Run Phase 5A presentation batch via the full contained scenario.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -833,6 +908,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase4b-full",
         action="store_true",
         help="Run a contained Phase 4B selection, vertex group, shape key, lattice, deformation modifier, batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase5a-full",
+        action="store_true",
+        help="Run a contained Phase 5A animation, camera, lighting, render, compositor, presentation batch, and cleanup scenario.",
     )
     return parser
 
@@ -949,6 +1029,26 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_deformation_workflow_batch
             ):
                 run_phase4b_full_smoke(sock, args.timeout)
+
+            if args.include_timeline_info:
+                assert_success("get_timeline_info", send_command(sock, args.timeout, "get_timeline_info"))
+
+            if args.include_render_settings:
+                assert_success("get_render_settings", send_command(sock, args.timeout, "get_render_settings"))
+
+            if (
+                args.phase5a_full
+                or args.include_animation_ops
+                or args.include_camera_ops
+                or args.include_lighting_ops
+                or args.include_render_still
+                or args.include_contact_sheet
+                or args.include_turntable
+                or args.include_preview_animation
+                or args.include_compositor_ops
+                or args.include_presentation_batch
+            ):
+                run_phase5a_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

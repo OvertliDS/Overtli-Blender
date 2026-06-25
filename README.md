@@ -13,6 +13,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Phase 3 workspace, todo, operation journal, scene snapshot, scene diff, user-change detection, and rollback tools under `.overtli_blender/workspace/`
 - Phase 4A production material workflows: channel schema, material templates, deep material inspection, shader graph inspection, texture/map slot binding, procedural material generation, material previews, material workflow batches, and confirmed material cleanup
 - Phase 4B method, asset, region, deformation, and sculpt workflows: method plans, playbooks, tricks knowledge, anti-pattern rules, modifier recipes, confidence scoring, asset scans/previews, style/PBR material helpers, texture-folder import, paintable texture setup, UV map inspection, measurements, vertex groups, Basis-preserving shape keys, lattice deformers, proportional-style deformation, sculpt mask intent, shape-key sculpt workflows, and deformation workflow batches
+- Phase 5A presentation workflows: timeline and animation inspection, transform/material/light/shape-key animation, camera creation/framing, active camera control, light and studio setup tools, render settings, still/contact-sheet/preview artifacts, turntable setup, compositor/pass presets, presentation workflow batches, and exact-prefix cleanup
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -86,6 +87,14 @@ Phase 4B selection and deformation smoke:
 ```
 
 The Phase 4B smoke creates temporary `OVERTLI_PHASE4B_*` objects, materials, an image, a collection, a vertex group, shape keys, a lattice, and a deformation modifier. It exercises method planning, playbooks, tricks, anti-patterns, modifier recipes, asset scan/preview, style material creation, paintable texture setup, selection intelligence, UV inspection, measurement, confidence scoring, vertex group masks, shape key offsets, lattice updates, proportional deformation, sculpt mask intent, shape-key sculpt workflow, region deformation, and workflow batches; then verifies no smoke-created objects, collections, materials, images, lattices, vertex groups, or shape keys remain. It writes ignored verification artifacts under `.overtli_blender/`, does not run raw code, does not download assets, does not apply modifiers destructively, and does not touch arbitrary user data.
+
+Phase 5A presentation smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase5a-full
+```
+
+The Phase 5A smoke creates temporary `OVERTLI_PHASE5A_*` scene data, exercises timeline, animation, camera, lighting, render settings, still render, contact sheet, turntable, bounded preview animation, compositor/pass, and presentation batch workflows, then removes exact smoke-created scene data. It writes ignored render, preview, presentation, and verification artifacts under `.overtli_blender/`. It does not download assets, run raw code, render high-cost full animations, or touch arbitrary user objects.
 
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 

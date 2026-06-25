@@ -49,6 +49,18 @@ Optional checks:
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-region-deformation
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-deformation-workflow-batch
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase4b-full
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-timeline-info
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-animation-ops
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-camera-ops
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-lighting-ops
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-render-settings
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-render-still
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-contact-sheet
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-turntable
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-preview-animation
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-compositor-ops
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-presentation-batch
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase5a-full
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-screenshot
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-script-registry
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-provider-status
@@ -76,6 +88,10 @@ Success criteria:
 - `--phase4b-full` runs a contained Phase 4B method, asset, region, deformation, and sculpt workflow: it creates temporary `OVERTLI_PHASE4B_*` objects, materials, an image, a collection, a vertex group, shape keys, a lattice, and a deformation modifier; exercises method plans, playbooks, tricks knowledge, anti-pattern rules, modifier recipes, asset scan/preview, style material creation, paintable texture setup, deep selection info, UV inspection, measurements, confidence scoring, vertex group operations, shape key offsets, lattice updates, proportional deformation, sculpt mask intent, shape-key sculpt workflow, region deformation, and deformation workflow batches; then cleans up exact smoke-created data.
 - Phase 4B smoke writes verification artifacts under `.overtli_blender/verification/`, does not run raw code, does not download assets, does not run provider generation, does not apply modifiers destructively, and does not touch arbitrary user objects.
 - Phase 4B cleanup succeeds only when remaining `OVERTLI_PHASE4B_*` objects, collections, materials, images, lattices, vertex groups, and shape keys are all empty lists.
+- `--phase5a-full` runs a contained Phase 5A presentation workflow: it creates temporary `OVERTLI_PHASE5A_*` scene data; exercises timeline inspection, bounded timeline updates, camera creation/framing, lighting setup, active camera control, object/camera/light/material animation, animation deep info, render settings, smoke-clamped still render, contact sheet manifest, turntable setup, bounded preview frame artifacts, compositor/pass presets, presentation workflow batch snapshots, and scene health; then cleans up exact smoke-created scene data.
+- Phase 5A smoke writes render artifacts under `.overtli_blender/renders/`, presentation batch manifests under `.overtli_blender/presentation/`, and verification snapshots under `.overtli_blender/verification/`.
+- Phase 5A smoke does not run raw code, does not download assets, does not run provider generation, does not run high-cost full animations, does not create arbitrary compositor graphs, and does not touch arbitrary user objects.
+- Phase 5A cleanup succeeds only when remaining `OVERTLI_PHASE5A_*` objects, collections, and materials are all empty lists.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.
@@ -85,4 +101,4 @@ Success criteria:
 
 If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
 
-Generated Phase 2, Phase 3, Phase 4A, and Phase 4B artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
+Generated Phase 2, Phase 3, Phase 4A, Phase 4B, and Phase 5A artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
