@@ -1037,9 +1037,10 @@ def _unwrap_governance_envelope(name: str, response: dict) -> dict:
     return result
 
 
-def assert_command_success(name: str, response: dict) -> dict:
+def assert_command_success(name: str, response: dict, allowed_statuses: set[str] | None = None) -> dict:
     result = assert_success(name, response)
-    if result.get("status") != "success":
+    allowed = allowed_statuses or {"success"}
+    if result.get("status") not in allowed:
         raise RuntimeError(f"{name}: nested command did not succeed: {result}")
     return result
 
@@ -1170,6 +1171,56 @@ def run_phase7c_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     print("PASS phase7c full smoke completed with project-local workspace and no destructive filesystem execution")
 
 
+def run_phase8a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(int(time.time()))
+    target_name = f"OVERTLI_PHASE8A_TARGET_{stamp}"
+    material_name = f"OVERTLI_PHASE8A_MAT_{stamp}"
+    baked_material_name = f"OVERTLI_PHASE8A_BAKED_MAT_{stamp}"
+    output_dir = os.path.join(REPO_ROOT, ".overtli_blender", "phase8a_smoke", stamp, "textures", "baked")
+    packed_dir = os.path.join(REPO_ROOT, ".overtli_blender", "phase8a_smoke", stamp, "textures", "packed")
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(packed_dir, exist_ok=True)
+    created_objects: list[str] = []
+    try:
+        assert_command_success("add_approved_root phase8a smoke", send_command(sock, timeout_seconds, "add_approved_root", {"root": os.path.dirname(os.path.dirname(output_dir)), "confirm": True}))
+        caps = assert_command_success("get_bake_capabilities", send_command(sock, timeout_seconds, "get_bake_capabilities"))
+        if not caps.get("bake_operator_available"):
+            print("WARN phase8a bake operator unavailable; native bake execution will report unsupported")
+        created = assert_command_success("create_primitive_object phase8a target", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": target_name, "collection_name": f"OVERTLI_PHASE8A_SMOKE_{stamp}"}))
+        target_name = created.get("object_name", target_name)
+        created_objects.append(target_name)
+        assert_command_success("create_basic_material phase8a", send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.8, 0.3, 0.2, 1.0]}))
+        assert_command_success("assign_material phase8a", send_command(sock, timeout_seconds, "assign_material", {"object_name": target_name, "material_name": material_name}))
+        preflight = send_command(sock, timeout_seconds, "validate_bake_setup", {"target_object_names": [target_name], "passes": ["NORMAL"], "resolution": 64, "output_dir": output_dir})
+        if preflight.get("status") not in {"success", "error"}:
+            raise RuntimeError(f"validate_bake_setup unexpected response: {preflight}")
+        assert_command_success("estimate_bake_cost", send_command(sock, timeout_seconds, "estimate_bake_cost", {"target_object_names": [target_name], "passes": ["NORMAL"], "resolution": 64}))
+        targets = assert_command_success("create_bake_target_images", send_command(sock, timeout_seconds, "create_bake_target_images", {"target_object_names": [target_name], "passes": ["NORMAL", "ROUGHNESS"], "resolution": 64, "output_dir": output_dir, "prefix": f"phase8a_{stamp}"}))
+        first_image = (targets.get("created") or [{}])[0].get("image_name")
+        if first_image:
+            assert_command_success("assign_bake_targets", send_command(sock, timeout_seconds, "assign_bake_targets", {"object_names": [target_name], "image_name": first_image}))
+        assert_command_success("list_bake_targets", send_command(sock, timeout_seconds, "list_bake_targets"))
+        native = send_command(sock, timeout_seconds, "bake_material_maps", {"target_object_names": [target_name], "passes": ["NORMAL"], "resolution": 64, "output_dir": output_dir, "verify": True})
+        if native.get("status") not in {"success", "partial", "unsupported", "error"}:
+            raise RuntimeError(f"bake_material_maps unexpected response: {native}")
+        assert_command_success("bake_derived_map", send_command(sock, timeout_seconds, "bake_derived_map", {"object_names": [target_name], "derived_type": "roughness", "resolution": 64, "output_dir": output_dir}))
+        assert_command_success("bake_curvature_map", send_command(sock, timeout_seconds, "bake_curvature_map", {"object_names": [target_name], "resolution": 64, "output_dir": output_dir}))
+        assert_command_success("validate_baked_textures", send_command(sock, timeout_seconds, "validate_baked_textures", {"image_names_or_paths": [first_image] if first_image else []}))
+        if first_image:
+            assert_command_success("create_baked_material", send_command(sock, timeout_seconds, "create_baked_material", {"source_material_name": material_name, "new_material_name": baked_material_name, "texture_bindings": {"normal": first_image}, "assign_to_objects": [target_name]}))
+        assert_command_success("validate_packed_texture", send_command(sock, timeout_seconds, "validate_packed_texture", {"packed_image_name_or_path": first_image or "missing", "layout": "ORM"}), allowed_statuses={"success", "error"})
+        workflow = send_command(sock, timeout_seconds, "run_verified_bake_workflow", {"workflow_name": f"phase8a_{stamp}", "target_object_names": [target_name], "passes": ["NORMAL"], "resolution": 64, "output_dir": output_dir, "include_derived": True, "include_channel_pack": False})
+        if workflow.get("status") not in {"success", "partial", "error"}:
+            raise RuntimeError(f"run_verified_bake_workflow unexpected response: {workflow}")
+        cleanup = send_command(sock, timeout_seconds, "plan_bake_cleanup", {"workflow_id": f"phase8a_{stamp}"})
+        if cleanup.get("status") not in {"requires_approval", "success"}:
+            raise RuntimeError(f"plan_bake_cleanup unexpected response: {cleanup}")
+        print("PASS phase8a full smoke completed with project-local texture outputs and cleanup planning")
+    finally:
+        if created_objects:
+            assert_command_success("delete_objects phase8a cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True}))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1288,6 +1339,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-reference-images", action="store_true", help="Run Phase 7C reference image smoke through --phase7c-full.")
     parser.add_argument("--include-spatial-measurement", action="store_true", help="Run Phase 7C spatial measurement smoke through --phase7c-full.")
     parser.add_argument("--include-rename-planning", action="store_true", help="Run Phase 7C rename planning smoke through --phase7c-full.")
+    parser.add_argument("--include-bake-capabilities", action="store_true", help="Run Phase 8A bake capabilities smoke through --phase8a-full.")
+    parser.add_argument("--include-bake-preflight", action="store_true", help="Run Phase 8A bake preflight smoke through --phase8a-full.")
+    parser.add_argument("--include-bake-target-images", action="store_true", help="Run Phase 8A bake target image smoke through --phase8a-full.")
+    parser.add_argument("--include-native-bake", action="store_true", help="Run Phase 8A native bake smoke through --phase8a-full when supported.")
+    parser.add_argument("--include-derived-bake", action="store_true", help="Run Phase 8A derived bake smoke through --phase8a-full.")
+    parser.add_argument("--include-selected-to-active-bake", action="store_true", help="Run Phase 8A selected-to-active bake smoke through --phase8a-full when supported.")
+    parser.add_argument("--include-channel-packing", action="store_true", help="Run Phase 8A channel packing validation smoke through --phase8a-full.")
+    parser.add_argument("--include-baked-material", action="store_true", help="Run Phase 8A baked material smoke through --phase8a-full.")
+    parser.add_argument("--include-bake-cleanup-plan", action="store_true", help="Run Phase 8A bake cleanup planning smoke through --phase8a-full.")
+    parser.add_argument("--include-verified-bake-workflow", action="store_true", help="Run Phase 8A verified bake workflow smoke through --phase8a-full.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1337,6 +1398,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase7c-full",
         action="store_true",
         help="Run Phase 7C project workspace, file access, cache, task graph, time/revision, references, spatial, and rename planning checks.",
+    )
+    parser.add_argument(
+        "--phase8a-full",
+        action="store_true",
+        help="Run Phase 8A texture baking and image resource smoke with project-local generated data.",
     )
     return parser
 
@@ -1553,6 +1619,21 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_rename_planning
             ):
                 run_phase7c_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase8a_full
+                or args.include_bake_capabilities
+                or args.include_bake_preflight
+                or args.include_bake_target_images
+                or args.include_native_bake
+                or args.include_derived_bake
+                or args.include_selected_to_active_bake
+                or args.include_channel_packing
+                or args.include_baked_material
+                or args.include_bake_cleanup_plan
+                or args.include_verified_bake_workflow
+            ):
+                run_phase8a_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

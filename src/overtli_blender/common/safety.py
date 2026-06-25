@@ -420,7 +420,37 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
         ),
     }
     command_map.update(_phase7c_safety_map())
+    command_map.update(_phase8a_safety_map())
     return command_map
+
+
+def _phase8a_safety_map() -> dict[str, CommandSafetyMetadata]:
+    low = [
+        "get_bake_capabilities", "validate_bake_setup", "estimate_bake_cost", "list_bake_targets",
+        "validate_packed_texture", "validate_baked_textures", "plan_bake_cleanup",
+        "list_project_images", "get_image_resource_info",
+    ]
+    medium_scene = [
+        "create_bake_target_images", "assign_bake_targets", "bake_material_maps",
+        "bake_selected_to_active", "bake_procedural_material", "bake_derived_map",
+        "bake_curvature_map", "bake_thickness_map", "relink_baked_textures",
+        "create_baked_material", "run_verified_bake_workflow",
+    ]
+    medium_files = [
+        "pack_texture_channels", "unpack_texture_channels", "save_baked_textures",
+        "rename_image_resource",
+    ]
+    high = ["execute_bake_cleanup"]
+    specs: dict[str, CommandSafetyMetadata] = {}
+    for name in low:
+        specs[name] = _spec(name, OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE, warnings=("phase8a-texture-baking",))
+    for name in medium_scene:
+        specs[name] = _spec(name, OperationType.TEXTURE, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True, can_write_files=name not in {"assign_bake_targets", "relink_baked_textures", "create_baked_material"}, warnings=("phase8a-texture-baking", "project-workspace-required"))
+    for name in medium_files:
+        specs[name] = _spec(name, OperationType.TEXTURE, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_write_files=True, warnings=("phase8a-texture-baking", "no-overwrite-without-approval"))
+    for name in high:
+        specs[name] = _spec(name, OperationType.CLEANUP, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=True, can_write_files=True, strict_blocked=True, warnings=("explicit-approval-required", "tracked-bake-artifacts-only"))
+    return specs
 
 
 def _phase7c_safety_map() -> dict[str, CommandSafetyMetadata]:

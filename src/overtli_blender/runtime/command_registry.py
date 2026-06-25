@@ -55,6 +55,7 @@ TOOL_PACKS = {
     "references",
     "spatial_measurement",
     "cache_management",
+    "texture_baking",
 }
 
 GOVERNANCE_COMMANDS = {
@@ -147,16 +148,18 @@ def _category(name: str, operation_type: str) -> str:
         return "files"
     if any(marker in lowered for marker in ("project_workspace", "project_layout", "project_backup", "project_dependencies", "blend_file", "save_project_as", "register_blend_file")) or name == "get_project_status":
         return "project"
-    if "rename" in lowered:
-        return "rename"
     if name in GOVERNANCE_COMMANDS:
         return "core"
     if "geometry_node" in lowered or operation_type == "GEOMETRY_NODES":
         return "geometry_nodes"
+    if any(marker in lowered for marker in ("bake", "packed_texture", "pack_texture", "channel_pack")):
+        return "baking"
     if any(marker in lowered for marker in ("material", "shader")):
         return "materials"
-    if any(marker in lowered for marker in ("texture", "image", "uv", "bake")):
+    if any(marker in lowered for marker in ("texture", "image", "uv")):
         return "textures"
+    if "rename" in lowered:
+        return "rename"
     if any(marker in lowered for marker in ("asset", "import", "export", "blend", "dependency", "scene_kit")):
         return "assets"
     if any(marker in lowered for marker in ("addon", "snippet", "skill", "api_docs", "review_package", "knowledge")):
@@ -193,7 +196,9 @@ def _tool_pack(category: str) -> str:
         return "core"
     if category in {"scene", "verification", "selection", "deformation", "sculpting"}:
         return "scene_intelligence" if category in {"scene", "verification"} else "verified_editing"
-    if category in {"materials", "textures", "baking"}:
+    if category == "baking":
+        return "texture_baking"
+    if category in {"materials", "textures"}:
         return "materials"
     if category == "geometry_nodes":
         return "geometry_nodes"
@@ -224,6 +229,8 @@ def _capabilities(metadata: Any, name: str, category: str) -> tuple[str, ...]:
         caps.add("network.providers")
     if metadata.can_execute_code or name == "execute_code":
         caps.add("raw_python")
+    if category in {"textures", "baking"}:
+        caps.add("texture.pack" if "pack" in name else "texture.bake")
     if category == "knowledge":
         caps.add("knowledge.read")
         if metadata.can_write_files:
@@ -257,9 +264,9 @@ def _from_safety(name: str, metadata: Any) -> CommandSpec:
         idempotent=read_only,
         requires_approval=high_risk or destructive,
         requires_confirmation=high_risk or metadata.strict_blocked,
-        supports_progress=metadata.can_write_files or metadata.operation_type.value in {"RENDER", "EXPORT", "IMPORT"},
-        supports_cancel=metadata.can_write_files or metadata.operation_type.value in {"RENDER", "EXPORT", "IMPORT"},
-        timeout_seconds=120 if metadata.operation_type.value in {"RENDER", "IMPORT", "EXPORT"} else 30,
+        supports_progress=metadata.can_write_files or metadata.operation_type.value in {"RENDER", "EXPORT", "IMPORT"} or "bake" in name,
+        supports_cancel=metadata.can_write_files or metadata.operation_type.value in {"RENDER", "EXPORT", "IMPORT"} or "bake" in name,
+        timeout_seconds=300 if "bake" in name else (120 if metadata.operation_type.value in {"RENDER", "IMPORT", "EXPORT"} else 30),
         rollback_strategy="scene_snapshot" if metadata.can_mutate_scene else ("artifact_cleanup" if metadata.can_write_files else None),
         allowed_capabilities=_capabilities(metadata, name, category),
         filesystem_access="project_write" if metadata.can_write_files else "none",

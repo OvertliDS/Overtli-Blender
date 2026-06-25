@@ -17,6 +17,8 @@ CAPABILITIES = {
     "filesystem.external.read",
     "filesystem.external.write",
     "filesystem.delete",
+    "texture.bake",
+    "texture.pack",
     "network.providers",
     "addon.inspect",
     "addon.manage",
@@ -29,8 +31,8 @@ CAPABILITIES = {
 
 PROFILE_CAPABILITIES = {
     "read_only": {"scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read"},
-    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write"},
-    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export"},
+    "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack"},
+    "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack"},
     "developer": set(CAPABILITIES),
     "custom": {"scene.read"},
 }

@@ -1,5 +1,29 @@
 # Runtime Smoke
 
+## Phase 8A
+
+Run the contained Phase 8A texture baking smoke after refreshing or reloading the Blender addon:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase8a-full
+```
+
+Phase 8A smoke flags:
+
+- `--include-bake-capabilities`
+- `--include-bake-preflight`
+- `--include-bake-target-images`
+- `--include-native-bake`
+- `--include-derived-bake`
+- `--include-selected-to-active-bake`
+- `--include-channel-packing`
+- `--include-baked-material`
+- `--include-bake-cleanup-plan`
+- `--include-verified-bake-workflow`
+- `--phase8a-full`
+
+`--phase8a-full` creates smoke-scoped objects, materials, image targets, project-local texture folders, and cleanup plans under ignored `.overtli_blender/phase8a_smoke/`. Native bake execution is runtime-dependent and reports unsupported/error states honestly instead of claiming fake success.
+
 ## Phase 7C
 
 Run the contained Phase 7C project-runtime smoke after refreshing or reloading the Blender addon:

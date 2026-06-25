@@ -11,8 +11,10 @@ from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
 from .asset_workflow_tools import register_asset_workflow_tools
+from .bake_tools import register_bake_tools
 from .camera_tools import register_camera_tools
 from .cache_tools import register_cache_tools
+from .channel_packing_tools import register_channel_packing_tools
 from .code_execution_tools import register_code_execution_tools
 from .collection_tools import register_collection_tools
 from .compositor_tools import register_compositor_tools
@@ -29,6 +31,7 @@ from .geometry_nodes_workflow_tools import register_geometry_nodes_workflow_tool
 from .governance_tools import register_governance_tools
 from .hyper3d_tools import register_hyper3d_tools
 from .import_export_tools import register_import_export_tools
+from .image_resource_tools import register_image_resource_tools
 from .lattice_tools import register_lattice_tools
 from .lighting_tools import register_lighting_tools
 from .material_intelligence_tools import register_material_intelligence_tools
@@ -85,6 +88,9 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_advanced_material_tools(mcp, get_blender_connection)
     register_shader_graph_tools(mcp, get_blender_connection)
     register_material_texture_tools(mcp, get_blender_connection)
+    register_bake_tools(mcp, get_blender_connection)
+    register_image_resource_tools(mcp, get_blender_connection)
+    register_channel_packing_tools(mcp, get_blender_connection)
     register_material_preview_tools(mcp, get_blender_connection)
     register_selection_tools(mcp, get_blender_connection)
     register_vertex_group_tools(mcp, get_blender_connection)

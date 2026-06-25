@@ -123,3 +123,6 @@ __all__ = [
     "register_workflow_intelligence_tools",
     "register_workspace_tools",
 ]
+from .bake_tools import register_bake_tools
+from .channel_packing_tools import register_channel_packing_tools
+from .image_resource_tools import register_image_resource_tools

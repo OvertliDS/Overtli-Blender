@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added Phase 8A texture baking and image resource pipeline command surface.
+- Added bake preflight, target image creation, native/derived/approximated classification, channel packing metadata, baked texture validation, baked material variants, and approval-gated bake cleanup planning.
+- Added Phase 8A smoke flags and public docs for texture baking, image resources, and channel packing.
 - Added Phase 7C project runtime foundations: project workspace resolution, approved-root file access policy, cache retention planning, task graph and scene revision tracking, reference image workflow scaffolding, spatial measurement commands, and safe rename planning.
 - Added Phase 7C MCP wrapper modules, command registry metadata, tool packs, smoke flags, and static tests.
 

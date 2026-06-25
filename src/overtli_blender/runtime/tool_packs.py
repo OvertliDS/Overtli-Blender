@@ -29,6 +29,7 @@ TOOL_PACK_DEFINITIONS = {
     "scene_intelligence": ToolPack("scene_intelligence", "Scene Intelligence", "Scene inspection, verification, screenshots, and health checks.", ("scene", "verification")),
     "verified_editing": ToolPack("verified_editing", "Verified Editing", "Structured scene edits, deformation, selection, cleanup, and rollback.", ("editing", "selection", "deformation", "sculpting")),
     "materials": ToolPack("materials", "Materials", "Material, shader, texture, preview, and future baking workflows.", ("materials", "textures", "baking")),
+    "texture_baking": ToolPack("texture_baking", "Texture Baking", "Bake preflight, target images, native and derived maps, channel packing, validation, relink, and cleanup.", ("baking", "textures")),
     "geometry_nodes": ToolPack("geometry_nodes", "Geometry Nodes", "Geometry Nodes inspection, templates, modifiers, and procedural workflows.", ("geometry_nodes",)),
     "animation_presentation": ToolPack("animation_presentation", "Animation and Presentation", "Animation, rigging, cameras, lighting, rendering, and compositor workflows.", ("animation", "rigging", "rendering")),
     "asset_workflows": ToolPack("asset_workflows", "Asset Workflows", "Local asset library, import/export, dependency, scene kit, and file workflows.", ("assets", "files")),
