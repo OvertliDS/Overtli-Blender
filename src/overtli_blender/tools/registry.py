@@ -21,6 +21,7 @@ from .screenshot_tools import register_screenshot_tools
 from .script_registry_tools import register_script_registry_tools
 from .sketchfab_tools import register_sketchfab_tools
 from .verification_tools import register_verification_tools
+from .workspace_tools import register_workspace_tools
 
 
 def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | None = None) -> None:
@@ -33,6 +34,7 @@ def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | No
     register_material_tools(mcp, get_blender_connection)
     register_modifier_tools(mcp, get_blender_connection)
     register_collection_tools(mcp, get_blender_connection)
+    register_workspace_tools(mcp, get_blender_connection)
     register_screenshot_tools(mcp, get_blender_connection, image_type=image_type)
     register_verification_tools(mcp, get_blender_connection)
     register_script_registry_tools(mcp, get_blender_connection)

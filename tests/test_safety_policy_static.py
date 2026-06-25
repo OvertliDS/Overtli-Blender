@@ -98,16 +98,31 @@ def test_common_safety_module_classifies_phase3_commands() -> None:
         '"delete_objects", OperationType.CLEANUP, RiskLevel.HIGH',
         '"remove_object_modifier", OperationType.MODIFIER, RiskLevel.HIGH',
         '"delete_collection", OperationType.CLEANUP, RiskLevel.HIGH',
+        '"rollback_to_scene_snapshot", OperationType.ROLLBACK, RiskLevel.HIGH',
+        '"undo_last_blender_operation", OperationType.ROLLBACK, RiskLevel.HIGH',
         "explicit-confirmation-required",
     ]:
         assert text in SAFETY_TEXT
 
 
 def test_phase3_destructive_commands_are_strict_blocked() -> None:
-    for command in ["delete_objects", "remove_object_modifier", "delete_collection"]:
+    for command in ["delete_objects", "remove_object_modifier", "delete_collection", "rollback_to_scene_snapshot", "undo_last_blender_operation"]:
         command_index = SAFETY_TEXT.index(f'"{command}"')
         command_block = SAFETY_TEXT[command_index:command_index + 500]
         assert "strict_blocked=True" in command_block
+
+
+def test_common_safety_module_classifies_phase3_master_workspace_commands() -> None:
+    for text in [
+        '"get_task_workspace", OperationType.VERIFY, RiskLevel.LOW',
+        '"create_workspace_task", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"add_workspace_todo", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"record_operation_journal_entry", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM',
+        '"create_scene_snapshot", OperationType.VERIFY, RiskLevel.MEDIUM',
+        '"diff_scene_snapshots", OperationType.VERIFY, RiskLevel.LOW',
+        '"detect_user_changes", OperationType.VERIFY, RiskLevel.LOW',
+    ]:
+        assert text in SAFETY_TEXT
 
 
 def test_smoke_script_exposes_safety_mode_flags() -> None:

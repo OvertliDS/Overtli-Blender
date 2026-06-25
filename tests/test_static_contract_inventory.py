@@ -16,6 +16,7 @@ SCREENSHOT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/screenshot_tools.py")
 SCENE_EDIT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_edit_tools.py").read_text(encoding="utf-8")
 SCENE_INTELLIGENCE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
 VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
+WORKSPACE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/workspace_tools.py").read_text(encoding="utf-8")
 SCRIPT_REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/script_registry_tools.py").read_text(encoding="utf-8")
 CODE_EXECUTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/code_execution_tools.py").read_text(encoding="utf-8")
 REGISTRY_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/registry.py").read_text(encoding="utf-8")
@@ -111,6 +112,7 @@ def test_registry_tool_module_includes_all_registrations() -> None:
         "register_material_tools",
         "register_modifier_tools",
         "register_collection_tools",
+        "register_workspace_tools",
         "register_screenshot_tools",
         "register_verification_tools",
         "register_script_registry_tools",
@@ -186,6 +188,7 @@ def test_phase3_tool_modules_include_extracted_wrappers() -> None:
         MATERIAL_TOOLS_TEXT: ["create_basic_material", "assign_material", "update_material_properties"],
         MODIFIER_TOOLS_TEXT: ["add_object_modifier", "update_object_modifier", "remove_object_modifier"],
         COLLECTION_TOOLS_TEXT: ["create_collection", "move_objects_to_collection", "delete_collection"],
+        WORKSPACE_TOOLS_TEXT: ["get_task_workspace", "create_workspace_task", "add_workspace_todo", "record_operation_journal_entry", "create_scene_snapshot", "diff_scene_snapshots", "rollback_to_scene_snapshot"],
     }
     for source, names in expected.items():
         missing = [name for name in names if f"def {name}(" not in source]
@@ -228,6 +231,7 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "class ModifierService",
         "class CollectionOrganizationService",
         "class VerifiedEditBatchService",
+        "class WorkspaceSafetyDiffService",
         "class ProviderStatusService",
         "class PolyHavenService",
         "class SketchfabService",
@@ -246,6 +250,7 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "self.modifier_service = ModifierService(self)",
         "self.collection_organization_service = CollectionOrganizationService(self)",
         "self.verified_edit_batch_service = VerifiedEditBatchService(self)",
+        "self.workspace_safety_diff_service = WorkspaceSafetyDiffService(self)",
         "self.provider_status_service = ProviderStatusService(self)",
         "self.polyhaven_service = PolyHavenService(self)",
         "self.sketchfab_service = SketchfabService(self)",
@@ -289,6 +294,21 @@ def test_addon_static_surface_includes_expected_commands() -> None:
         "move_objects_to_collection",
         "delete_collection",
         "run_verified_edit_batch",
+        "get_task_workspace",
+        "create_workspace_task",
+        "update_workspace_task",
+        "list_workspace_tasks",
+        "add_workspace_todo",
+        "update_workspace_todo",
+        "list_workspace_todos",
+        "record_operation_journal_entry",
+        "get_operation_journal",
+        "create_scene_snapshot",
+        "list_scene_snapshots",
+        "diff_scene_snapshots",
+        "detect_user_changes",
+        "rollback_to_scene_snapshot",
+        "undo_last_blender_operation",
         "get_safety_status",
         "execute_code",
         "get_shared_context",

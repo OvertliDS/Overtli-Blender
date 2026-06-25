@@ -10,6 +10,7 @@ It connects Blender to MCP clients through a socket bridge, with shared context,
 - Viewport screenshots
 - Multi-view screenshot packs and verification snapshot manifests under `.overtli_blender/verification/`
 - Verified Phase 3 scene editing: primitive creation, transforms, duplication, bounded deletion, visibility, materials, modifiers, collections, and verified edit batches
+- Phase 3 workspace, todo, operation journal, scene snapshot, scene diff, user-change detection, and rollback tools under `.overtli_blender/workspace/`
 - Shared context, object handles, and material handles
 - Script registry management
 - Provider status checks for Poly Haven, Sketchfab, and Hyper3D
@@ -66,9 +67,9 @@ Phase 3 verified edit smoke:
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase3-full
 ```
 
-The Phase 3 smoke creates temporary `OVERTLI_PHASE3_*` objects, materials, and a collection, uses only structured edit commands, captures verification artifacts under `.overtli_blender/verification/`, and cleans up only the object and collection names created by that run. It does not run raw code, download assets, or target arbitrary user objects.
+The Phase 3 smoke creates temporary `OVERTLI_PHASE3_*` objects, materials, and collections, uses only structured edit/workspace commands, captures verification artifacts under `.overtli_blender/verification/`, writes workspace evidence under `.overtli_blender/workspace/`, checks scene diff/change detection/rollback, and cleans up only the object and collection names created by that run. It does not run raw code, download assets, or target arbitrary user objects.
 
-Generated verification artifacts are written under `.overtli_blender/verification/` and are ignored by git.
+Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 
 ## Upstream Credit
 

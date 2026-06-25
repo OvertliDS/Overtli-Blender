@@ -235,6 +235,83 @@ def run_optional_edit_ops_smoke(sock: socket.socket, timeout_seconds: float) -> 
     return result
 
 
+def run_phase3_workspace_safety_diff_smoke(sock: socket.socket, timeout_seconds: float, stamp: str) -> None:
+    task_id = f"phase3_master_{stamp}"
+    before_label = f"phase3_master_before_{stamp}"
+    after_label = f"phase3_master_after_{stamp}"
+    workspace = assert_success("get_task_workspace", send_command(sock, timeout_seconds, "get_task_workspace", {"artifact_root": REPO_ROOT}))
+    if workspace.get("status") != "success" or "workspace_root" not in workspace:
+        raise RuntimeError(f"get_task_workspace: {workspace}")
+
+    task = assert_success(
+        "create_workspace_task",
+        send_command(sock, timeout_seconds, "create_workspace_task", {"task_id": task_id, "title": "Phase 3 master smoke", "goal": "Verify workspace, todos, journal, scene diff, rollback, and change detection", "artifact_root": REPO_ROOT}),
+    )
+    if task.get("status") != "success":
+        raise RuntimeError(f"create_workspace_task: {task}")
+
+    todo = assert_success(
+        "add_workspace_todo",
+        send_command(sock, timeout_seconds, "add_workspace_todo", {"task_id": task_id, "todo_id": f"todo_{task_id}", "text": "Verify Phase 3 master systems", "artifact_root": REPO_ROOT}),
+    )
+    if todo.get("status") != "success":
+        raise RuntimeError(f"add_workspace_todo: {todo}")
+
+    assert_success("update_workspace_todo", send_command(sock, timeout_seconds, "update_workspace_todo", {"todo_id": f"todo_{task_id}", "state": "in_progress", "evidence": {"smoke": True}, "artifact_root": REPO_ROOT}))
+
+    before = assert_success("create_scene_snapshot", send_command(sock, timeout_seconds, "create_scene_snapshot", {"label": before_label, "task_id": task_id, "artifact_root": REPO_ROOT}))
+    if before.get("status") != "success":
+        raise RuntimeError(f"create_scene_snapshot before: {before}")
+
+    probe_name = f"OVERTLI_PHASE3_MASTER_CUBE_{stamp}"
+    created_objects: list[str] = []
+    try:
+        created = assert_success("create_primitive_object phase3_master", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": probe_name, "collection_name": f"OVERTLI_PHASE3_MASTER_{stamp}"}))
+        if created.get("status") != "success":
+            raise RuntimeError(f"create_primitive_object phase3_master: {created}")
+        probe_name = created["object_name"]
+        created_objects.append(probe_name)
+        moved = assert_success("transform_object phase3_master", send_command(sock, timeout_seconds, "transform_object", {"object_name": probe_name, "location": [2.0, 0.0, 0.0]}))
+        if moved.get("status") != "success":
+            raise RuntimeError(f"transform_object phase3_master: {moved}")
+
+        after = assert_success("create_scene_snapshot", send_command(sock, timeout_seconds, "create_scene_snapshot", {"label": after_label, "task_id": task_id, "artifact_root": REPO_ROOT}))
+        if after.get("status") != "success":
+            raise RuntimeError(f"create_scene_snapshot after: {after}")
+
+        diff = assert_success("diff_scene_snapshots", send_command(sock, timeout_seconds, "diff_scene_snapshots", {"before_snapshot_id": before["snapshot_id"], "after_snapshot_id": after["snapshot_id"], "artifact_root": REPO_ROOT}))
+        if probe_name not in diff.get("diff", {}).get("objects", {}).get("added", []):
+            raise RuntimeError(f"diff_scene_snapshots: expected added object {probe_name}, got {diff}")
+
+        changes = assert_success("detect_user_changes", send_command(sock, timeout_seconds, "detect_user_changes", {"baseline_snapshot_id": before["snapshot_id"], "artifact_root": REPO_ROOT}))
+        if not changes.get("changed"):
+            raise RuntimeError(f"detect_user_changes: expected changed scene, got {changes}")
+
+        rollback = assert_success(
+            "rollback_to_scene_snapshot",
+            send_command(sock, timeout_seconds, "rollback_to_scene_snapshot", {"snapshot_id": before["snapshot_id"], "confirm": True, "remove_new_objects": True, "artifact_root": REPO_ROOT}),
+        )
+        if rollback.get("status") != "success" or probe_name not in rollback.get("removed_new_objects", []):
+            raise RuntimeError(f"rollback_to_scene_snapshot: {rollback}")
+        created_objects.clear()
+
+        journal = assert_success("get_operation_journal", send_command(sock, timeout_seconds, "get_operation_journal", {"task_id": task_id, "artifact_root": REPO_ROOT}))
+        if journal.get("status") != "success" or not journal.get("journal"):
+            raise RuntimeError(f"get_operation_journal: {journal}")
+
+        assert_success("update_workspace_task", send_command(sock, timeout_seconds, "update_workspace_task", {"task_id": task_id, "status": "done", "rollback_status": "verified", "artifact_root": REPO_ROOT}))
+        assert_success("update_workspace_todo", send_command(sock, timeout_seconds, "update_workspace_todo", {"todo_id": f"todo_{task_id}", "state": "done", "artifact_root": REPO_ROOT}))
+    finally:
+        if created_objects:
+            assert_success("delete_objects phase3_master_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True}))
+        try:
+            cleanup = send_command(sock, timeout_seconds, "delete_collection", {"collection_name": f"OVERTLI_PHASE3_MASTER_{stamp}", "confirm": True, "require_empty": True})
+            if cleanup.get("status") == "success":
+                assert_success("delete_collection phase3_master_cleanup", cleanup)
+        except Exception as exc:
+            print(f"WARN delete_collection phase3_master_cleanup: {exc}")
+
+
 def run_phase3_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     stamp = str(int(time.time()))
     collection_name = f"OVERTLI_PHASE3_SMOKE_{stamp}"
@@ -330,6 +407,7 @@ def run_phase3_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         )
         print(f"ARTIFACT phase3_after {after.get('artifact_dir')}")
         print(f"PHASE3 created_objects {created_objects}")
+        run_phase3_workspace_safety_diff_smoke(sock, timeout_seconds, stamp)
     finally:
         if created_objects:
             cleanup = assert_success(
@@ -372,6 +450,7 @@ def run_optional_modifier_ops_smoke(sock: socket.socket, timeout_seconds: float)
             raise RuntimeError(f"add_object_modifier: {added}")
     finally:
         assert_success("delete_objects modifier_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [obj_name], "confirm": True, "allow_missing": True}))
+        assert_success("delete_collection modifier_cleanup", send_command(sock, timeout_seconds, "delete_collection", {"collection_name": collection, "confirm": True, "require_empty": True}))
 
 
 def run_optional_collection_ops_smoke(sock: socket.socket, timeout_seconds: float) -> None:
@@ -550,6 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-modifier-ops", action="store_true", help="Run the Phase 3 modifier operations smoke.")
     parser.add_argument("--include-collection-ops", action="store_true", help="Run the Phase 3 collection operations smoke.")
     parser.add_argument("--include-verified-edit-batch", action="store_true", help="Run the Phase 3 verified edit batch smoke.")
+    parser.add_argument("--include-workspace-safety-diff", action="store_true", help="Run the Phase 3 workspace, todo, journal, scene diff, rollback, and change-detection smoke.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -633,6 +713,9 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.include_verified_edit_batch:
                 run_optional_verified_edit_batch_smoke(sock, args.timeout)
+
+            if args.include_workspace_safety_diff:
+                run_phase3_workspace_safety_diff_smoke(sock, args.timeout, str(int(time.time())))
 
             if args.phase3_full:
                 run_phase3_full_smoke(sock, args.timeout)

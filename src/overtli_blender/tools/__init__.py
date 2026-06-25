@@ -16,6 +16,7 @@ from .script_registry_tools import register_script_registry_tools
 from .registry import register_all_tools
 from .sketchfab_tools import register_sketchfab_tools
 from .verification_tools import register_verification_tools
+from .workspace_tools import register_workspace_tools
 
 __all__ = [
     "register_all_tools",
@@ -36,4 +37,5 @@ __all__ = [
     "register_script_registry_tools",
     "register_sketchfab_tools",
     "register_verification_tools",
+    "register_workspace_tools",
 ]

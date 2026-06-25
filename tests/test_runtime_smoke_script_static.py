@@ -67,6 +67,7 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-modifier-ops",
         "--include-collection-ops",
         "--include-verified-edit-batch",
+        "--include-workspace-safety-diff",
         "--phase2-full",
         "--phase3-full",
         "--include-geometry-nodes-status",
@@ -108,6 +109,7 @@ def test_runtime_smoke_phase3_full_avoids_forbidden_commands() -> None:
         "OVERTLI_PHASE3_MAT_",
         "delete_objects",
         "delete_collection",
+        "run_phase3_workspace_safety_diff_smoke",
         '"confirm": True',
     ]:
         assert text in phase3_block

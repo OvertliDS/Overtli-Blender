@@ -117,6 +117,21 @@ except ModuleNotFoundError:
             "move_objects_to_collection": _fallback_spec("move_objects_to_collection", "EDIT", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True),
             "delete_collection": _fallback_spec("delete_collection", "CLEANUP", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required", "empty-collection-only-by-default")),
             "run_verified_edit_batch": _fallback_spec("run_verified_edit_batch", "EDIT", RiskLevel.MEDIUM, "PARTIAL", can_mutate_scene=True, can_write_files=True, warnings=("writes-local-verification-artifacts",)),
+            "get_task_workspace": _fallback_spec("get_task_workspace", "VERIFY", RiskLevel.LOW, "REVERSIBLE", can_write_files=True),
+            "create_workspace_task": _fallback_spec("create_workspace_task", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "update_workspace_task": _fallback_spec("update_workspace_task", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "list_workspace_tasks": _fallback_spec("list_workspace_tasks", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "add_workspace_todo": _fallback_spec("add_workspace_todo", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "update_workspace_todo": _fallback_spec("update_workspace_todo", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "list_workspace_todos": _fallback_spec("list_workspace_todos", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "record_operation_journal_entry": _fallback_spec("record_operation_journal_entry", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
+            "get_operation_journal": _fallback_spec("get_operation_journal", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "create_scene_snapshot": _fallback_spec("create_scene_snapshot", "VERIFY", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True, warnings=("writes-local-workspace-artifacts",)),
+            "list_scene_snapshots": _fallback_spec("list_scene_snapshots", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "diff_scene_snapshots": _fallback_spec("diff_scene_snapshots", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "detect_user_changes": _fallback_spec("detect_user_changes", "VERIFY", RiskLevel.LOW, "REVERSIBLE"),
+            "rollback_to_scene_snapshot": _fallback_spec("rollback_to_scene_snapshot", "ROLLBACK", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required", "existing-objects-only")),
+            "undo_last_blender_operation": _fallback_spec("undo_last_blender_operation", "ROLLBACK", RiskLevel.HIGH, "PARTIAL", can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required",)),
             "create_object_handle": _fallback_spec("create_object_handle", "CREATE", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "create_material_handle": _fallback_spec("create_material_handle", "MATERIAL", RiskLevel.MEDIUM, "REVERSIBLE", can_mutate_scene=True),
             "register_context_script": _fallback_spec("register_context_script", "UPDATE_KNOWLEDGE", RiskLevel.MEDIUM, "REVERSIBLE", can_write_files=True),
@@ -2902,6 +2917,326 @@ class VerifiedEditBatchService:
         return result
 
 
+class WorkspaceSafetyDiffService:
+    TODO_STATES = {"pending", "in_progress", "done", "blocked", "rejected", "needs_user_selection", "needs_screenshot", "needs_rollback", "needs_manual_check"}
+    TASK_STATES = {"pending", "in_progress", "done", "blocked", "deferred", "superseded"}
+
+    def __init__(self, server):
+        self.server = server
+
+    @staticmethod
+    def _utc_timestamp():
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    @staticmethod
+    def _stamp():
+        return time.strftime("%Y%m%d_%H%M%S", time.localtime())
+
+    @staticmethod
+    def _safe_slug(value, fallback="item"):
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or fallback)).strip("._-")
+        return safe[:80] or fallback
+
+    def _workspace_root(self, artifact_root=None):
+        root = artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT") or ADDON_ROOT
+        path = os.path.join(os.path.abspath(os.path.expanduser(str(root))), ".overtli_blender", "workspace")
+        os.makedirs(path, exist_ok=True)
+        for child in ["tasks", "snapshots", "rollback"]:
+            os.makedirs(os.path.join(path, child), exist_ok=True)
+        return path
+
+    def _path(self, *parts, artifact_root=None):
+        return os.path.join(self._workspace_root(artifact_root), *parts)
+
+    @staticmethod
+    def _read_json(path, default):
+        if not os.path.exists(path):
+            return default
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    @staticmethod
+    def _write_json(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2, sort_keys=True)
+
+    def _index_path(self, name, artifact_root=None):
+        return self._path(f"{name}.json", artifact_root=artifact_root)
+
+    def _load_index(self, name, artifact_root=None):
+        return self._read_json(self._index_path(name, artifact_root), [])
+
+    def _save_index(self, name, data, artifact_root=None):
+        self._write_json(self._index_path(name, artifact_root), data)
+
+    def get_task_workspace(self, artifact_root=None):
+        root = self._workspace_root(artifact_root)
+        tasks = self._load_index("tasks", artifact_root)
+        todos = self._load_index("todos", artifact_root)
+        journal = self._load_index("operation_journal", artifact_root)
+        snapshots = self.list_scene_snapshots(artifact_root=artifact_root)
+        return {
+            "status": "success",
+            "workspace_root": root,
+            "tasks_count": len(tasks),
+            "todos_count": len(todos),
+            "journal_count": len(journal),
+            "snapshot_count": len(snapshots.get("snapshots", [])),
+            "todo_states": sorted(self.TODO_STATES),
+            "task_states": sorted(self.TASK_STATES),
+            "warnings": [],
+        }
+
+    def create_workspace_task(self, title, goal=None, assumptions=None, status="pending", task_id=None, artifact_root=None):
+        if not title:
+            return {"status": "error", "message": "title is required", "warnings": []}
+        state = str(status or "pending")
+        if state not in self.TASK_STATES:
+            return {"status": "error", "message": f"Unsupported task status: {state}", "warnings": []}
+        tasks = self._load_index("tasks", artifact_root)
+        task_id = task_id or f"task_{self._stamp()}_{len(tasks) + 1}"
+        if any(task.get("task_id") == task_id for task in tasks):
+            return {"status": "error", "message": f"Task already exists: {task_id}", "warnings": []}
+        task = {
+            "task_id": task_id,
+            "title": str(title),
+            "goal": goal,
+            "assumptions": assumptions or [],
+            "status": state,
+            "created_at": self._utc_timestamp(),
+            "updated_at": self._utc_timestamp(),
+            "rollback_status": "not_required",
+            "verification": {},
+            "warnings": [],
+        }
+        tasks.append(task)
+        self._save_index("tasks", tasks, artifact_root)
+        self.record_operation_journal_entry("create_workspace_task", task_id=task_id, target=task_id, summary=f"Created workspace task {title}", risk_level="LOW", rollback_status="not_required", artifact_root=artifact_root)
+        return {"status": "success", "task": task, "warnings": []}
+
+    def update_workspace_task(self, task_id, status=None, goal=None, assumptions=None, rollback_status=None, verification=None, artifact_root=None):
+        tasks = self._load_index("tasks", artifact_root)
+        for task in tasks:
+            if task.get("task_id") != task_id:
+                continue
+            if status is not None:
+                state = str(status)
+                if state not in self.TASK_STATES:
+                    return {"status": "error", "message": f"Unsupported task status: {state}", "warnings": []}
+                task["status"] = state
+            if goal is not None:
+                task["goal"] = goal
+            if assumptions is not None:
+                task["assumptions"] = assumptions
+            if rollback_status is not None:
+                task["rollback_status"] = rollback_status
+            if verification is not None:
+                task["verification"] = verification
+            task["updated_at"] = self._utc_timestamp()
+            self._save_index("tasks", tasks, artifact_root)
+            self.record_operation_journal_entry("update_workspace_task", task_id=task_id, target=task_id, summary=f"Updated workspace task {task_id}", risk_level="LOW", rollback_status=task.get("rollback_status"), artifact_root=artifact_root)
+            return {"status": "success", "task": task, "warnings": []}
+        return {"status": "error", "message": f"Task not found: {task_id}", "warnings": []}
+
+    def list_workspace_tasks(self, status=None, artifact_root=None):
+        tasks = self._load_index("tasks", artifact_root)
+        if status:
+            tasks = [task for task in tasks if task.get("status") == status]
+        return {"status": "success", "tasks": tasks, "warnings": []}
+
+    def add_workspace_todo(self, text, task_id=None, state="pending", todo_id=None, artifact_root=None):
+        if not text:
+            return {"status": "error", "message": "text is required", "warnings": []}
+        if state not in self.TODO_STATES:
+            return {"status": "error", "message": f"Unsupported todo state: {state}", "warnings": []}
+        todos = self._load_index("todos", artifact_root)
+        todo_id = todo_id or f"todo_{self._stamp()}_{len(todos) + 1}"
+        todo = {"todo_id": todo_id, "task_id": task_id, "text": str(text), "state": state, "created_at": self._utc_timestamp(), "updated_at": self._utc_timestamp(), "evidence": None}
+        todos.append(todo)
+        self._save_index("todos", todos, artifact_root)
+        self.record_operation_journal_entry("add_workspace_todo", task_id=task_id, target=todo_id, summary=f"Added todo {text}", risk_level="LOW", rollback_status="not_required", artifact_root=artifact_root)
+        return {"status": "success", "todo": todo, "warnings": []}
+
+    def update_workspace_todo(self, todo_id, state=None, text=None, evidence=None, artifact_root=None):
+        todos = self._load_index("todos", artifact_root)
+        for todo in todos:
+            if todo.get("todo_id") != todo_id:
+                continue
+            if state is not None:
+                if state not in self.TODO_STATES:
+                    return {"status": "error", "message": f"Unsupported todo state: {state}", "warnings": []}
+                todo["state"] = state
+            if text is not None:
+                todo["text"] = text
+            if evidence is not None:
+                todo["evidence"] = evidence
+            todo["updated_at"] = self._utc_timestamp()
+            self._save_index("todos", todos, artifact_root)
+            self.record_operation_journal_entry("update_workspace_todo", task_id=todo.get("task_id"), target=todo_id, summary=f"Updated todo {todo_id}", risk_level="LOW", rollback_status="not_required", artifact_root=artifact_root)
+            return {"status": "success", "todo": todo, "warnings": []}
+        return {"status": "error", "message": f"Todo not found: {todo_id}", "warnings": []}
+
+    def list_workspace_todos(self, task_id=None, state=None, artifact_root=None):
+        todos = self._load_index("todos", artifact_root)
+        if task_id:
+            todos = [todo for todo in todos if todo.get("task_id") == task_id]
+        if state:
+            todos = [todo for todo in todos if todo.get("state") == state]
+        return {"status": "success", "todos": todos, "warnings": []}
+
+    def record_operation_journal_entry(self, operation_type, task_id=None, target=None, summary=None, risk_level="LOW", rollback_status="unknown", before_snapshot_id=None, after_snapshot_id=None, metadata=None, artifact_root=None):
+        journal = self._load_index("operation_journal", artifact_root)
+        entry = {
+            "entry_id": f"journal_{self._stamp()}_{len(journal) + 1}",
+            "created_at": self._utc_timestamp(),
+            "operation_type": str(operation_type),
+            "task_id": task_id,
+            "target": target,
+            "summary": summary,
+            "risk_level": str(risk_level),
+            "rollback_status": rollback_status,
+            "before_snapshot_id": before_snapshot_id,
+            "after_snapshot_id": after_snapshot_id,
+            "metadata": metadata or {},
+        }
+        journal.append(entry)
+        self._save_index("operation_journal", journal[-500:], artifact_root)
+        return {"status": "success", "entry": entry, "warnings": []}
+
+    def get_operation_journal(self, task_id=None, limit=50, artifact_root=None):
+        journal = self._load_index("operation_journal", artifact_root)
+        if task_id:
+            journal = [entry for entry in journal if entry.get("task_id") == task_id]
+        return {"status": "success", "journal": journal[-max(1, int(limit)):], "warnings": []}
+
+    def _scene_state(self):
+        objects = {}
+        for obj in bpy.context.scene.objects:
+            objects[obj.name] = {
+                "name": obj.name,
+                "type": obj.type,
+                "location": [round(float(v), 6) for v in obj.location],
+                "rotation_euler": [round(float(v), 6) for v in obj.rotation_euler],
+                "scale": [round(float(v), 6) for v in obj.scale],
+                "hide_viewport": bool(obj.hide_viewport),
+                "hide_render": bool(obj.hide_render),
+                "collection_names": [collection.name for collection in obj.users_collection],
+                "material_names": [slot.material.name if slot.material else None for slot in getattr(obj, "material_slots", [])],
+                "modifier_names": [modifier.name for modifier in getattr(obj, "modifiers", [])],
+            }
+        collections = {collection.name: {"name": collection.name, "object_names": [obj.name for obj in collection.objects], "children": [child.name for child in collection.children]} for collection in bpy.data.collections}
+        materials = {material.name: {"name": material.name, "users": int(material.users), "diffuse_color": [round(float(v), 6) for v in material.diffuse_color]} for material in bpy.data.materials}
+        return {"objects": objects, "collections": collections, "materials": materials}
+
+    def create_scene_snapshot(self, label=None, task_id=None, include_verification_snapshot=False, artifact_root=None):
+        snapshot_id = f"{self._stamp()}_{self._safe_slug(label or 'scene')}"
+        path = self._path("snapshots", f"{snapshot_id}.json", artifact_root=artifact_root)
+        data = {
+            "snapshot_id": snapshot_id,
+            "label": label,
+            "task_id": task_id,
+            "created_at": self._utc_timestamp(),
+            "scene_name": bpy.context.scene.name,
+            "state": self._scene_state(),
+            "verification_snapshot": None,
+        }
+        if include_verification_snapshot:
+            data["verification_snapshot"] = self.server.verification_artifact_service.create_verification_snapshot(label=f"{snapshot_id}_verification", include_screenshots=False, artifact_root=artifact_root)
+        self._write_json(path, data)
+        self.record_operation_journal_entry("create_scene_snapshot", task_id=task_id, target=snapshot_id, summary=f"Created scene snapshot {snapshot_id}", risk_level="LOW", rollback_status="available", after_snapshot_id=snapshot_id, artifact_root=artifact_root)
+        return {"status": "success", "snapshot_id": snapshot_id, "snapshot_path": path, "object_count": len(data["state"]["objects"]), "collection_count": len(data["state"]["collections"]), "material_count": len(data["state"]["materials"]), "warnings": []}
+
+    def list_scene_snapshots(self, artifact_root=None):
+        snapshot_dir = self._path("snapshots", artifact_root=artifact_root)
+        snapshots = []
+        for filename in sorted(os.listdir(snapshot_dir), reverse=True):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(snapshot_dir, filename)
+            data = self._read_json(path, {})
+            snapshots.append({"snapshot_id": data.get("snapshot_id") or filename[:-5], "label": data.get("label"), "task_id": data.get("task_id"), "created_at": data.get("created_at"), "snapshot_path": path})
+        return {"status": "success", "snapshots": snapshots, "warnings": []}
+
+    def _load_snapshot(self, snapshot_id, artifact_root=None):
+        path = self._path("snapshots", f"{snapshot_id}.json", artifact_root=artifact_root)
+        if not os.path.exists(path):
+            raise ValueError(f"Scene snapshot not found: {snapshot_id}")
+        return self._read_json(path, {})
+
+    @staticmethod
+    def _dict_diff(before, after):
+        before_keys = set(before)
+        after_keys = set(after)
+        added = sorted(after_keys - before_keys)
+        removed = sorted(before_keys - after_keys)
+        changed = []
+        for key in sorted(before_keys & after_keys):
+            if before[key] != after[key]:
+                changed.append(key)
+        return added, removed, changed
+
+    def diff_scene_snapshots(self, before_snapshot_id, after_snapshot_id, artifact_root=None):
+        before = self._load_snapshot(before_snapshot_id, artifact_root)
+        after = self._load_snapshot(after_snapshot_id, artifact_root)
+        diff = {}
+        for section in ["objects", "collections", "materials"]:
+            added, removed, changed = self._dict_diff(before.get("state", {}).get(section, {}), after.get("state", {}).get(section, {}))
+            diff[section] = {"added": added, "removed": removed, "changed": changed}
+        return {"status": "success", "before_snapshot_id": before_snapshot_id, "after_snapshot_id": after_snapshot_id, "diff": diff, "warnings": []}
+
+    def detect_user_changes(self, baseline_snapshot_id=None, artifact_root=None):
+        snapshots = self.list_scene_snapshots(artifact_root=artifact_root).get("snapshots", [])
+        if not snapshots and not baseline_snapshot_id:
+            current = self.create_scene_snapshot(label="user_change_baseline", artifact_root=artifact_root)
+            return {"status": "success", "baseline_created": True, "baseline_snapshot_id": current["snapshot_id"], "changed": False, "diff": {}, "warnings": ["No baseline existed; created one"]}
+        baseline_id = baseline_snapshot_id or snapshots[0]["snapshot_id"]
+        current = self.create_scene_snapshot(label="user_change_current", artifact_root=artifact_root)
+        diff = self.diff_scene_snapshots(baseline_id, current["snapshot_id"], artifact_root=artifact_root)
+        changed = any(diff["diff"][section][kind] for section in diff["diff"] for kind in ["added", "removed", "changed"])
+        return {"status": "success", "baseline_snapshot_id": baseline_id, "current_snapshot_id": current["snapshot_id"], "changed": changed, "diff": diff["diff"], "warnings": []}
+
+    def rollback_to_scene_snapshot(self, snapshot_id, confirm=False, remove_new_objects=False, verify=True, artifact_root=None):
+        if not confirm:
+            return {"status": "error", "message": "rollback_to_scene_snapshot requires confirm=True", "warnings": []}
+        snapshot = self._load_snapshot(snapshot_id, artifact_root)
+        target_objects = snapshot.get("state", {}).get("objects", {})
+        current_names = set(bpy.data.objects.keys())
+        restored, missing, removed = [], [], []
+        for name, state in target_objects.items():
+            obj = bpy.data.objects.get(name)
+            if not obj:
+                missing.append(name)
+                continue
+            obj.location = state.get("location", list(obj.location))
+            obj.rotation_euler = state.get("rotation_euler", list(obj.rotation_euler))
+            obj.scale = state.get("scale", list(obj.scale))
+            obj.hide_viewport = bool(state.get("hide_viewport", obj.hide_viewport))
+            obj.hide_render = bool(state.get("hide_render", obj.hide_render))
+            restored.append(name)
+        if remove_new_objects:
+            for name in sorted(current_names - set(target_objects)):
+                obj = bpy.data.objects.get(name)
+                if obj:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                    removed.append(name)
+        verification = self.create_scene_snapshot(label=f"rollback_after_{snapshot_id}", artifact_root=artifact_root) if verify else {}
+        result = {"status": "success", "snapshot_id": snapshot_id, "restored": restored, "missing": missing, "removed_new_objects": removed, "verification": verification, "warnings": ["Rollback restores transforms/visibility for existing objects; deleted object recreation is not supported"]}
+        self.record_operation_journal_entry("rollback_to_scene_snapshot", target=snapshot_id, summary=f"Rolled back to scene snapshot {snapshot_id}", risk_level="HIGH", rollback_status="performed", after_snapshot_id=verification.get("snapshot_id") if isinstance(verification, dict) else None, artifact_root=artifact_root)
+        return result
+
+    def undo_last_blender_operation(self, confirm=False):
+        if not confirm:
+            return {"status": "error", "message": "undo_last_blender_operation requires confirm=True", "warnings": []}
+        try:
+            bpy.ops.ed.undo()
+            result = {"status": "success", "undone": True, "warnings": ["Uses Blender undo stack; availability depends on the current session"]}
+        except Exception as exc:
+            result = {"status": "error", "undone": False, "message": str(exc), "warnings": ["Blender undo stack was not available"]}
+        self.record_operation_journal_entry("undo_last_blender_operation", summary="Requested Blender undo", risk_level="HIGH", rollback_status="performed" if result["status"] == "success" else "failed")
+        return result
+
+
 class SafetyPolicyService:
     def __init__(self, server):
         self.server = server
@@ -3260,6 +3595,7 @@ class BlenderMCPServer:
         self.modifier_service = ModifierService(self)
         self.collection_organization_service = CollectionOrganizationService(self)
         self.verified_edit_batch_service = VerifiedEditBatchService(self)
+        self.workspace_safety_diff_service = WorkspaceSafetyDiffService(self)
         self.provider_status_service = ProviderStatusService(self)
         self.polyhaven_service = PolyHavenService(self)
         self.sketchfab_service = SketchfabService(self)
@@ -3294,6 +3630,21 @@ class BlenderMCPServer:
         self.move_objects_to_collection = self.collection_organization_service.move_objects_to_collection
         self.delete_collection = self.collection_organization_service.delete_collection
         self.run_verified_edit_batch = self.verified_edit_batch_service.run_verified_edit_batch
+        self.get_task_workspace = self.workspace_safety_diff_service.get_task_workspace
+        self.create_workspace_task = self.workspace_safety_diff_service.create_workspace_task
+        self.update_workspace_task = self.workspace_safety_diff_service.update_workspace_task
+        self.list_workspace_tasks = self.workspace_safety_diff_service.list_workspace_tasks
+        self.add_workspace_todo = self.workspace_safety_diff_service.add_workspace_todo
+        self.update_workspace_todo = self.workspace_safety_diff_service.update_workspace_todo
+        self.list_workspace_todos = self.workspace_safety_diff_service.list_workspace_todos
+        self.record_operation_journal_entry = self.workspace_safety_diff_service.record_operation_journal_entry
+        self.get_operation_journal = self.workspace_safety_diff_service.get_operation_journal
+        self.create_scene_snapshot = self.workspace_safety_diff_service.create_scene_snapshot
+        self.list_scene_snapshots = self.workspace_safety_diff_service.list_scene_snapshots
+        self.diff_scene_snapshots = self.workspace_safety_diff_service.diff_scene_snapshots
+        self.detect_user_changes = self.workspace_safety_diff_service.detect_user_changes
+        self.rollback_to_scene_snapshot = self.workspace_safety_diff_service.rollback_to_scene_snapshot
+        self.undo_last_blender_operation = self.workspace_safety_diff_service.undo_last_blender_operation
         self.get_safety_status = self.safety_policy_service.get_safety_status
         self.execute_code = self.raw_code_execution_service.execute_code
         self.get_polyhaven_status = self.provider_status_service.get_polyhaven_status
@@ -3493,6 +3844,21 @@ class BlenderMCPServer:
             "move_objects_to_collection": self.move_objects_to_collection,
             "delete_collection": self.delete_collection,
             "run_verified_edit_batch": self.run_verified_edit_batch,
+            "get_task_workspace": self.get_task_workspace,
+            "create_workspace_task": self.create_workspace_task,
+            "update_workspace_task": self.update_workspace_task,
+            "list_workspace_tasks": self.list_workspace_tasks,
+            "add_workspace_todo": self.add_workspace_todo,
+            "update_workspace_todo": self.update_workspace_todo,
+            "list_workspace_todos": self.list_workspace_todos,
+            "record_operation_journal_entry": self.record_operation_journal_entry,
+            "get_operation_journal": self.get_operation_journal,
+            "create_scene_snapshot": self.create_scene_snapshot,
+            "list_scene_snapshots": self.list_scene_snapshots,
+            "diff_scene_snapshots": self.diff_scene_snapshots,
+            "detect_user_changes": self.detect_user_changes,
+            "rollback_to_scene_snapshot": self.rollback_to_scene_snapshot,
+            "undo_last_blender_operation": self.undo_last_blender_operation,
             "get_safety_status": self.get_safety_status,
             "execute_code": self.execute_code,
             "get_polyhaven_status": self.get_polyhaven_status,
@@ -3723,6 +4089,66 @@ class BlenderMCPServer:
     def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
         """Run a controlled allowlisted edit batch with before/after verification."""
         return self.verified_edit_batch_service.run_verified_edit_batch(label, operations, create_before_snapshot, create_after_snapshot, stop_on_error, max_operations, batch_allow_destructive, artifact_root)
+
+    def get_task_workspace(self, artifact_root=None):
+        """Get the persistent Phase 3 task workspace summary."""
+        return self.workspace_safety_diff_service.get_task_workspace(artifact_root)
+
+    def create_workspace_task(self, title, goal=None, assumptions=None, status="pending", task_id=None, artifact_root=None):
+        """Create a persistent task workspace entry."""
+        return self.workspace_safety_diff_service.create_workspace_task(title, goal, assumptions, status, task_id, artifact_root)
+
+    def update_workspace_task(self, task_id, status=None, goal=None, assumptions=None, rollback_status=None, verification=None, artifact_root=None):
+        """Update a persistent task workspace entry."""
+        return self.workspace_safety_diff_service.update_workspace_task(task_id, status, goal, assumptions, rollback_status, verification, artifact_root)
+
+    def list_workspace_tasks(self, status=None, artifact_root=None):
+        """List persistent task workspace entries."""
+        return self.workspace_safety_diff_service.list_workspace_tasks(status, artifact_root)
+
+    def add_workspace_todo(self, text, task_id=None, state="pending", todo_id=None, artifact_root=None):
+        """Add a persistent todo entry."""
+        return self.workspace_safety_diff_service.add_workspace_todo(text, task_id, state, todo_id, artifact_root)
+
+    def update_workspace_todo(self, todo_id, state=None, text=None, evidence=None, artifact_root=None):
+        """Update a persistent todo entry."""
+        return self.workspace_safety_diff_service.update_workspace_todo(todo_id, state, text, evidence, artifact_root)
+
+    def list_workspace_todos(self, task_id=None, state=None, artifact_root=None):
+        """List persistent todo entries."""
+        return self.workspace_safety_diff_service.list_workspace_todos(task_id, state, artifact_root)
+
+    def record_operation_journal_entry(self, operation_type, task_id=None, target=None, summary=None, risk_level="LOW", rollback_status="unknown", before_snapshot_id=None, after_snapshot_id=None, metadata=None, artifact_root=None):
+        """Record a durable operation journal entry."""
+        return self.workspace_safety_diff_service.record_operation_journal_entry(operation_type, task_id, target, summary, risk_level, rollback_status, before_snapshot_id, after_snapshot_id, metadata, artifact_root)
+
+    def get_operation_journal(self, task_id=None, limit=50, artifact_root=None):
+        """Read durable operation journal entries."""
+        return self.workspace_safety_diff_service.get_operation_journal(task_id, limit, artifact_root)
+
+    def create_scene_snapshot(self, label=None, task_id=None, include_verification_snapshot=False, artifact_root=None):
+        """Create a lightweight durable scene state snapshot."""
+        return self.workspace_safety_diff_service.create_scene_snapshot(label, task_id, include_verification_snapshot, artifact_root)
+
+    def list_scene_snapshots(self, artifact_root=None):
+        """List durable scene state snapshots."""
+        return self.workspace_safety_diff_service.list_scene_snapshots(artifact_root)
+
+    def diff_scene_snapshots(self, before_snapshot_id, after_snapshot_id, artifact_root=None):
+        """Diff two durable scene state snapshots."""
+        return self.workspace_safety_diff_service.diff_scene_snapshots(before_snapshot_id, after_snapshot_id, artifact_root)
+
+    def detect_user_changes(self, baseline_snapshot_id=None, artifact_root=None):
+        """Detect scene changes relative to a baseline snapshot."""
+        return self.workspace_safety_diff_service.detect_user_changes(baseline_snapshot_id, artifact_root)
+
+    def rollback_to_scene_snapshot(self, snapshot_id, confirm=False, remove_new_objects=False, verify=True, artifact_root=None):
+        """Rollback existing object transforms and visibility to a scene snapshot."""
+        return self.workspace_safety_diff_service.rollback_to_scene_snapshot(snapshot_id, confirm, remove_new_objects, verify, artifact_root)
+
+    def undo_last_blender_operation(self, confirm=False):
+        """Request Blender undo after explicit confirmation."""
+        return self.workspace_safety_diff_service.undo_last_blender_operation(confirm)
 
     def get_safety_status(self):
         """Get the current safety policy status."""

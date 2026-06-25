@@ -29,6 +29,7 @@ Optional checks:
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-modifier-ops
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-collection-ops
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-verified-edit-batch
+.\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-workspace-safety-diff
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --phase3-full
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-screenshot
 .\.venv\Scripts\python scripts/smoke_blender_addon_socket.py --include-script-registry
@@ -46,9 +47,10 @@ Success criteria:
 - Optional Phase 2 scene index, selection info, scene health, and object deep info smokes return structured JSON and do not mutate scene data.
 - Optional Phase 2 screenshot pack and verification snapshot smokes write local generated artifacts under `.overtli_blender/verification/`.
 - `--phase2-full` runs the default smoke plus safety status, Phase 2 inspection, screenshot pack, and verification snapshot checks. It does not run provider downloads, Geometry Nodes creation, raw code execution, or script execution.
-- `--phase3-full` runs a contained scene-editing scenario: it creates a unique `OVERTLI_PHASE3_SMOKE_<timestamp>` collection, a cube, a material, a bevel modifier, a duplicate, a verified edit batch, before/after verification snapshots, scene/object inspection, and cleanup for only the smoke-created object and collection names.
+- `--phase3-full` runs a contained Phase 3 scenario: it creates a unique `OVERTLI_PHASE3_SMOKE_<timestamp>` collection, a cube, a material, a bevel modifier, a duplicate, a verified edit batch, before/after verification snapshots, scene/object inspection, task workspace entries, todos, operation journal entries, scene snapshots, scene diff, user-change detection, rollback, and cleanup for only the smoke-created object and collection names.
+- `--include-workspace-safety-diff` runs only the master Phase 3 workspace, todo, journal, scene diff, user-change detection, and rollback checks.
 - Phase 3 smoke does not run raw code, does not download provider assets, does not import/export files, and does not delete arbitrary user objects.
-- Phase 3 generated verification artifacts are written under `.overtli_blender/verification/` and remain ignored by git.
+- Phase 3 generated verification and workspace artifacts are written under `.overtli_blender/` and remain ignored by git.
 - Optional screenshot smoke passes only when a visible viewport is available.
 - Optional script registry smoke registers, lists, executes, and clears a harmless temporary script.
 - Optional provider status smoke returns status-only responses without downloading assets.
@@ -58,4 +60,4 @@ Success criteria:
 
 If something fails, paste the full console output back into the task so the runtime issue can be isolated quickly.
 
-Generated Phase 2 artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/verification/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
+Generated Phase 2 and Phase 3 artifacts are local evidence only. The smoke harness passes the repository root as `artifact_root`, so live smoke artifacts are written under `.overtli_blender/` in this checkout even when Blender loaded the addon from the user add-ons directory. They are ignored by git via `.overtli_blender/` and should not be committed.
