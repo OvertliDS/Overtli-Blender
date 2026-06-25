@@ -9,7 +9,11 @@ from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
 from .advanced_material_tools import register_advanced_material_tools
+from .geometry_nodes_intelligence_tools import register_geometry_nodes_intelligence_tools
+from .geometry_nodes_modifier_tools import register_geometry_nodes_modifier_tools
+from .geometry_nodes_template_tools import register_geometry_nodes_template_tools
 from .geometry_nodes_tools import register_geometry_nodes_tools
+from .geometry_nodes_workflow_tools import register_geometry_nodes_workflow_tools
 from .hyper3d_tools import register_hyper3d_tools
 from .import_export_tools import register_import_export_tools
 from .lattice_tools import register_lattice_tools
@@ -21,6 +25,7 @@ from .material_texture_tools import register_material_texture_tools
 from .modifier_tools import register_modifier_tools
 from .polyhaven_tools import register_polyhaven_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
+from .procedural_asset_tools import register_procedural_asset_tools
 from .provider_status_tools import register_provider_status_tools
 from .observation_tools import register_observation_tools
 from .render_tools import register_render_tools
@@ -54,7 +59,11 @@ __all__ = [
     "register_deformation_tools",
     "register_dependency_tools",
     "register_advanced_material_tools",
+    "register_geometry_nodes_intelligence_tools",
+    "register_geometry_nodes_modifier_tools",
+    "register_geometry_nodes_template_tools",
     "register_geometry_nodes_tools",
+    "register_geometry_nodes_workflow_tools",
     "register_hyper3d_tools",
     "register_import_export_tools",
     "register_lattice_tools",
@@ -66,6 +75,7 @@ __all__ = [
     "register_modifier_tools",
     "register_polyhaven_tools",
     "register_presentation_workflow_tools",
+    "register_procedural_asset_tools",
     "register_provider_status_tools",
     "register_observation_tools",
     "register_render_tools",

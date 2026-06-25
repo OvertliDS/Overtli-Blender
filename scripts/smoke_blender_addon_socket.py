@@ -884,6 +884,79 @@ def run_phase5b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         print("PASS phase5b cleanup removed smoke-created scene data")
 
 
+def _assert_phase6a_workspace_ignored() -> None:
+    workspace = os.path.join(REPO_ROOT, ".overtli_blender", "geometry_nodes")
+    os.makedirs(workspace, exist_ok=True)
+    gitignore_path = os.path.join(REPO_ROOT, ".gitignore")
+    with open(gitignore_path, "r", encoding="utf-8") as file:
+        ignored = file.read()
+    if ".overtli_blender/" not in ignored:
+        raise RuntimeError(".overtli_blender/geometry_nodes artifacts are not ignored by git")
+
+
+def run_phase6a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    run_id = str(time.time_ns())
+    prefix = f"OVERTLI_PHASE6A_SMOKE_{run_id}"
+    collection_name = prefix
+    base_name = f"OVERTLI_PHASE6A_BASE_{run_id}"
+    material_name = f"OVERTLI_PHASE6A_MAT_{run_id}"
+    group_name = f"OVERTLI_PHASE6A_GROUP_{run_id}"
+    modifier_name = f"OVERTLI_PHASE6A_MOD_{run_id}"
+
+    try:
+        assert_success("create_collection phase6a", send_command(sock, timeout_seconds, "create_collection", {"collection_name": collection_name}))
+        assert_success("create_basic_material phase6a", send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.25, 0.55, 0.9, 1.0], "replace_existing": True}))
+        assert_success("create_primitive_object phase6a", send_command(sock, timeout_seconds, "create_primitive_object", {"primitive_type": "cube", "name": base_name, "collection_name": collection_name, "material_name": material_name}))
+        caps = assert_success("get_geometry_nodes_capabilities phase6a", send_command(sock, timeout_seconds, "get_geometry_nodes_capabilities"))
+        if "supports_geometry_nodes" not in caps:
+            raise RuntimeError("get_geometry_nodes_capabilities: missing supports_geometry_nodes")
+        assert_success("list_geometry_node_groups phase6a", send_command(sock, timeout_seconds, "list_geometry_node_groups", {"max_groups": 200}))
+        templates = assert_success("get_supported_geometry_node_templates phase6a", send_command(sock, timeout_seconds, "get_supported_geometry_node_templates"))
+        if "curve_rope" not in templates.get("templates", {}):
+            raise RuntimeError("get_supported_geometry_node_templates: missing curve_rope")
+        assert_success("create_geometry_node_group_from_template phase6a", send_command(sock, timeout_seconds, "create_geometry_node_group_from_template", {"template_name": "curve_rope", "node_group_name": group_name, "parameters": {"radius": 0.04, "length": 2.5}, "material_name": material_name, "replace_existing": True, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("get_geometry_node_group_deep_info phase6a", send_command(sock, timeout_seconds, "get_geometry_node_group_deep_info", {"node_group_name": group_name, "max_nodes": 40}))
+        assert_success("apply_geometry_nodes_modifier phase6a", send_command(sock, timeout_seconds, "apply_geometry_nodes_modifier", {"object_name": base_name, "node_group_name": group_name, "modifier_name": modifier_name, "input_values": {"Radius": 0.04}, "verify": True}))
+        assert_success("set_geometry_nodes_modifier_input phase6a", send_command(sock, timeout_seconds, "set_geometry_nodes_modifier_input", {"object_name": base_name, "modifier_name": modifier_name, "input_values": {"Radius": 0.05}}))
+        assert_success("list_geometry_nodes_modifiers phase6a", send_command(sock, timeout_seconds, "list_geometry_nodes_modifiers", {"object_name": base_name}))
+        assert_success("get_geometry_nodes_modifier_info phase6a", send_command(sock, timeout_seconds, "get_geometry_nodes_modifier_info", {"object_name": base_name, "modifier_name": modifier_name}))
+        assert_success("create_custom_geometry_node_recipe phase6a", send_command(sock, timeout_seconds, "create_custom_geometry_node_recipe", {"node_group_name": f"{prefix}_RECIPE", "recipe": {"inputs": [{"name": "Radius", "socket_type": "NodeSocketFloat", "default": 0.05}], "outputs": [{"name": "Geometry", "socket_type": "NodeSocketGeometry"}], "nodes": [{"id": "group_input", "node_type": "NodeGroupInput", "location": [0, 0]}, {"id": "group_output", "node_type": "NodeGroupOutput", "location": [300, 0]}], "metadata": {"purpose": "phase6a smoke"}}, "replace_existing": True, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_procedural_asset phase6a", send_command(sock, timeout_seconds, "create_procedural_asset", {"asset_type": "curve_rope", "asset_name": f"{prefix}_ROPE", "collection_name": collection_name, "material_name": material_name, "parameters": {"radius": 0.04, "length": 2.0}, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_scatter_system phase6a", send_command(sock, timeout_seconds, "create_scatter_system", {"target_object_name": base_name, "asset_name": f"{prefix}_SCATTER", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_curve_generator phase6a", send_command(sock, timeout_seconds, "create_curve_generator", {"asset_name": f"{prefix}_CURVE", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_radial_array_system phase6a", send_command(sock, timeout_seconds, "create_radial_array_system", {"source_object_name": base_name, "asset_name": f"{prefix}_RADIAL", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_panel_generator phase6a", send_command(sock, timeout_seconds, "create_panel_generator", {"asset_name": f"{prefix}_PANEL", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_cable_or_rope_generator phase6a", send_command(sock, timeout_seconds, "create_cable_or_rope_generator", {"asset_name": f"{prefix}_CABLE", "template_name": "curve_cable", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("create_terrain_noise_system phase6a", send_command(sock, timeout_seconds, "create_terrain_noise_system", {"asset_name": f"{prefix}_TERRAIN", "collection_name": collection_name, "material_name": material_name, "verify": True, "artifact_root": REPO_ROOT}))
+        assert_success("validate_geometry_node_group phase6a", send_command(sock, timeout_seconds, "validate_geometry_node_group", {"node_group_name": group_name}))
+        assert_success("create_geometry_nodes_preview phase6a", send_command(sock, timeout_seconds, "create_geometry_nodes_preview", {"node_group_name": group_name, "object_name": base_name, "label": prefix, "artifact_root": REPO_ROOT}))
+        assert_success("create_geometry_nodes_scene_kit phase6a", send_command(sock, timeout_seconds, "create_geometry_nodes_scene_kit", {"kit_id": prefix, "label": prefix, "object_names": [base_name], "node_group_names": [group_name], "include_preview": True, "overwrite": True, "artifact_root": REPO_ROOT}))
+        batch = assert_success("run_geometry_nodes_workflow_batch phase6a", send_command(sock, timeout_seconds, "run_geometry_nodes_workflow_batch", {"label": prefix, "artifact_root": REPO_ROOT, "operations": [{"command": "get_geometry_nodes_capabilities", "params": {}}, {"command": "list_geometry_node_groups", "params": {"max_groups": 200}}, {"command": "validate_geometry_node_group", "params": {"node_group_name": group_name}}]}))
+        if not batch.get("artifacts"):
+            raise RuntimeError("run_geometry_nodes_workflow_batch: missing manifest artifact")
+        assert_success("get_scene_index phase6a", send_command(sock, timeout_seconds, "get_scene_index", {"max_objects": 1000}))
+        assert_success("get_scene_health phase6a", send_command(sock, timeout_seconds, "get_scene_health"))
+    finally:
+        assert_success("remove_geometry_nodes_modifiers phase6a", send_command(sock, timeout_seconds, "remove_geometry_nodes_modifiers", {"prefix": "OVERTLI_PHASE6A_", "confirm": True}))
+        assert_success("delete_geometry_node_groups phase6a", send_command(sock, timeout_seconds, "delete_geometry_node_groups", {"prefix": "OVERTLI_PHASE6A_", "confirm": True}))
+        cleanup = assert_success("cleanup_asset_artifacts phase6a", send_command(sock, timeout_seconds, "cleanup_asset_artifacts", {"prefix": "OVERTLI_PHASE6A_", "confirm": True, "cleanup_scene_data": True, "cleanup_files": False, "artifact_root": REPO_ROOT}))
+        scene_assets = assert_success("list_scene_assets phase6a_cleanup_probe", send_command(sock, timeout_seconds, "list_scene_assets"))
+        groups = assert_success("list_geometry_node_groups phase6a_cleanup_probe", send_command(sock, timeout_seconds, "list_geometry_node_groups", {"max_groups": 1000}))
+        modifiers = assert_success("list_geometry_nodes_modifiers phase6a_cleanup_probe", send_command(sock, timeout_seconds, "list_geometry_nodes_modifiers"))
+        leftovers = {
+            "objects": [item.get("name") for item in scene_assets.get("objects", []) if item.get("name", "").startswith("OVERTLI_PHASE6A_")],
+            "collections": [item.get("name") for item in scene_assets.get("collections", []) if item.get("name", "").startswith("OVERTLI_PHASE6A_")],
+            "materials": [item.get("name") for item in scene_assets.get("materials", []) if item.get("name", "").startswith("OVERTLI_PHASE6A_")],
+            "node_groups": [item.get("name") for item in groups.get("node_groups", []) if item.get("name", "").startswith("OVERTLI_PHASE6A_")],
+            "modifiers": [item for item in modifiers.get("modifiers", []) if item.get("modifier_name", "").startswith("OVERTLI_PHASE6A_")],
+        }
+        remaining = {key: value for key, value in leftovers.items() if value}
+        if remaining:
+            raise RuntimeError(f"Phase 6A cleanup left smoke-created scene data: {remaining}; cleanup={cleanup}")
+        _assert_phase6a_workspace_ignored()
+        print("PASS phase6a cleanup removed smoke-created scene data")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -968,6 +1041,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-scene-kit", action="store_true", help="Run Phase 5B scene kit create/validate via the full contained scenario.")
     parser.add_argument("--include-asset-preview", action="store_true", help="Run Phase 5B asset preview creation via the full contained scenario.")
     parser.add_argument("--include-asset-workflow-batch", action="store_true", help="Run Phase 5B asset workflow batch via the full contained scenario.")
+    parser.add_argument("--include-geometry-nodes-capabilities", action="store_true", help="Run Phase 6A Geometry Nodes capability detection.")
+    parser.add_argument("--include-geometry-nodes-intelligence", action="store_true", help="Run Phase 6A Geometry Nodes inspection via the full contained scenario.")
+    parser.add_argument("--include-geometry-node-templates", action="store_true", help="Run Phase 6A template discovery via the full contained scenario.")
+    parser.add_argument("--include-geometry-node-recipe", action="store_true", help="Run Phase 6A custom recipe creation via the full contained scenario.")
+    parser.add_argument("--include-procedural-assets", action="store_true", help="Run Phase 6A procedural asset generation via the full contained scenario.")
+    parser.add_argument("--include-scatter-system", action="store_true", help="Run Phase 6A scatter system generation via the full contained scenario.")
+    parser.add_argument("--include-curve-generator", action="store_true", help="Run Phase 6A curve generator via the full contained scenario.")
+    parser.add_argument("--include-radial-array-system", action="store_true", help="Run Phase 6A radial array generation via the full contained scenario.")
+    parser.add_argument("--include-panel-generator", action="store_true", help="Run Phase 6A panel generator via the full contained scenario.")
+    parser.add_argument("--include-geometry-nodes-preview", action="store_true", help="Run Phase 6A Geometry Nodes preview creation via the full contained scenario.")
+    parser.add_argument("--include-geometry-nodes-workflow-batch", action="store_true", help="Run Phase 6A Geometry Nodes workflow batch via the full contained scenario.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -997,6 +1081,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase5b-full",
         action="store_true",
         help="Run a contained Phase 5B asset scan, dependency, export/import, scene-kit, batch, and cleanup scenario.",
+    )
+    parser.add_argument(
+        "--phase6a-full",
+        action="store_true",
+        help="Run a contained Phase 6A Geometry Nodes, procedural asset, preview, scene-kit, batch, and cleanup scenario.",
     )
     return parser
 
@@ -1147,6 +1236,24 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_asset_workflow_batch
             ):
                 run_phase5b_full_smoke(sock, args.timeout)
+
+            if args.include_geometry_nodes_capabilities:
+                assert_success("get_geometry_nodes_capabilities", send_command(sock, args.timeout, "get_geometry_nodes_capabilities"))
+
+            if (
+                args.phase6a_full
+                or args.include_geometry_nodes_intelligence
+                or args.include_geometry_node_templates
+                or args.include_geometry_node_recipe
+                or args.include_procedural_assets
+                or args.include_scatter_system
+                or args.include_curve_generator
+                or args.include_radial_array_system
+                or args.include_panel_generator
+                or args.include_geometry_nodes_preview
+                or args.include_geometry_nodes_workflow_batch
+            ):
+                run_phase6a_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

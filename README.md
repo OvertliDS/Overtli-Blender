@@ -106,6 +106,14 @@ Phase 5B asset workflow smoke:
 
 The Phase 5B smoke creates temporary `OVERTLI_PHASE5B_*` scene data, exports only its smoke-created object under `.overtli_blender/exports/`, imports only that exported local file into a smoke collection, writes asset scan/manifests/dependency reports/previews/scene kits under `.overtli_blender/`, runs an allowlisted asset workflow batch, and removes exact smoke-created scene data. It does not download provider assets, run raw code, import arbitrary user files, overwrite by default, or delete arbitrary files.
 
+Phase 6A Geometry Nodes procedural workflow smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase6a-full
+```
+
+The Phase 6A smoke creates temporary `OVERTLI_PHASE6A_*` objects, materials, collections, node groups, and Geometry Nodes modifiers; exercises capability detection, node group and modifier inspection, template discovery, safe template group creation, allowlisted recipe creation, modifier input setting, procedural rope/scatter/curve/radial/panel/cable/terrain generators, validation, previews, scene kits, and workflow batches; then removes exact smoke-created scene data. It writes ignored Geometry Nodes recipes, previews, workflow manifests, scene kit data, and verification snapshots under `.overtli_blender/`. It does not run raw code, download provider assets, apply modifiers destructively, create arbitrary node graphs, or touch arbitrary user objects.
+
 Generated verification and workspace artifacts are written under `.overtli_blender/` and are ignored by git.
 
 ## Upstream Credit
