@@ -146,3 +146,5 @@ PASS smoke harness completed
 - If `overtli_blender` cannot import, run `.\.venv\Scripts\python -m pip install -e .` again.
 - If Blender cannot see the addon, rebuild and reinstall the addon zip; the installed package must contain `overtli_blender_addon/__init__.py` with a top-level `bl_info` entry.
 - If a tool call reports connection refused, the MCP server started but the Blender addon socket is not running.
+- If path approval blocks an operation with `PATH_NOT_APPROVED`, move the target under an approved project/workspace root or use the project workspace/file access tools to inspect approved roots.
+- If package status fails, rebuild/reinstall the addon zip and run `.\.venv\Scripts\python scripts\addon_modularity_check.py --json`, `.\.venv\Scripts\python scripts\import_boundary_check.py --json`, and `.\.venv\Scripts\python scripts\final_release_handoff.py --json`.

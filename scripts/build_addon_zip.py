@@ -41,6 +41,9 @@ EXCLUDED_PATTERNS = [
     "blender_python_reference_5_1_md/",
     "diagnostics/",
     "release_candidate/",
+    "final_handoff/",
+    "review_packages/",
+    "api_docs/",
 ]
 
 FORBIDDEN_ZIP_PARTS = {
@@ -54,6 +57,10 @@ FORBIDDEN_ZIP_PARTS = {
     ".pytest_cache",
     "__pycache__",
     "Overtli-Blender_AIReview_Drive",
+    "release_candidate",
+    "final_handoff",
+    "review_packages",
+    "diagnostics",
 }
 FORBIDDEN_ZIP_NAMES = {"AGENTS.md", ".env", "AIReview.config.json"}
 REQUIRED_PACKAGE_FILES = {
@@ -142,6 +149,8 @@ def validate_zip(zip_path: Path, mode: str) -> dict:
             errors.append(f"missing required package files: {missing}")
     for name in names:
         path = Path(name)
+        if not name.startswith("overtli_blender_addon/"):
+            errors.append(f"zip entry is outside addon package root: {name}")
         if any(part in FORBIDDEN_ZIP_PARTS for part in path.parts):
             errors.append(f"forbidden path included: {name}")
         if path.name in FORBIDDEN_ZIP_NAMES:

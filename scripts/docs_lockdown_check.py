@@ -18,6 +18,10 @@ REQUIRED_DOCS = [
     "docs/release_candidate.md",
     "docs/migration_audit.md",
     "docs/mcp_setup.md",
+    "docs/final_handoff.md",
+    "docs/release_artifacts.md",
+    "docs/known_limitations.md",
+    "docs/troubleshooting.md",
 ]
 STALE_PUBLIC_PHRASES = [
     "single-file Blender addon entrypoint",
@@ -29,7 +33,17 @@ STALE_PUBLIC_PHRASES = [
 def run_check() -> dict:
     missing = [rel for rel in REQUIRED_DOCS if not (ROOT / rel).is_file()]
     stale = []
-    for rel in ["README.md", "docs/addon_install.md", "docs/install.md", "docs/mcp_setup.md", "docs/packaged_addon_migration.md"]:
+    for rel in [
+        "README.md",
+        "docs/addon_install.md",
+        "docs/install.md",
+        "docs/mcp_setup.md",
+        "docs/packaged_addon_migration.md",
+        "docs/final_handoff.md",
+        "docs/release_artifacts.md",
+        "docs/known_limitations.md",
+        "docs/troubleshooting.md",
+    ]:
         path = ROOT / rel
         if not path.is_file():
             continue
@@ -39,6 +53,10 @@ def run_check() -> dict:
                 stale.append({"path": rel, "phrase": phrase})
         if rel in {"docs/install.md", "docs/mcp_setup.md"} and "overtli_blender.server" not in text:
             stale.append({"path": rel, "phrase": "missing MCP server command"})
+        if rel in {"docs/final_handoff.md", "docs/release_artifacts.md"} and "final_release_handoff.py" not in text:
+            stale.append({"path": rel, "phrase": "missing final handoff command"})
+        if rel == "docs/troubleshooting.md" and "PATH_NOT_APPROVED" not in text:
+            stale.append({"path": rel, "phrase": "missing path approval troubleshooting"})
     return {"status": "passed" if not missing and not stale else "failed", "missing": missing, "stale": stale}
 
 

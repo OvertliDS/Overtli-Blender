@@ -11,6 +11,9 @@ DOCS = [
     ROOT / "docs" / "mcp_setup.md",
     ROOT / "docs" / "addon_install.md",
     ROOT / "docs" / "runtime_smoke.md",
+    ROOT / "docs" / "final_handoff.md",
+    ROOT / "docs" / "release_artifacts.md",
+    ROOT / "docs" / "troubleshooting.md",
 ]
 
 
@@ -31,6 +34,10 @@ def main() -> int:
             failures.append(f"{path.relative_to(ROOT)} missing venv creation command")
         if path.name == "mcp_setup.md" and "[mcp_servers.\"overtli-blender\"]" not in text:
             failures.append(f"{path.relative_to(ROOT)} missing Codex MCP stanza")
+        if path.name in {"final_handoff.md", "release_artifacts.md"} and "final_release_handoff.py" not in text:
+            failures.append(f"{path.relative_to(ROOT)} missing final handoff command")
+        if path.name == "troubleshooting.md" and "PATH_NOT_APPROVED" not in text:
+            failures.append(f"{path.relative_to(ROOT)} missing path approval troubleshooting")
         if path.name != "README.md" and "blender-mcp-enhanced" in text:
             failures.append(f"{path.relative_to(ROOT)} contains stale blender-mcp-enhanced")
     if failures:

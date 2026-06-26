@@ -1,5 +1,13 @@
 # Changelog
 
+## Phase 10B - Final RC Closure and v0.1.0 Handoff Prep
+
+- Added final addon modularity, import boundary, and handoff aggregate scripts.
+- Extended release-candidate checks with Phase 10B package, import, docs, security, compatibility, performance, and fault gates.
+- Added final handoff, release artifact, known limitation, and troubleshooting docs.
+- Added static tests for Phase 10B scripts, docs, clean addon zip boundaries, CI readiness, and MCP setup docs.
+- Kept Phase 10B feature-frozen: no new Blender creative capability breadth, no publishing, no tagging.
+
 ## Phase 10A - Modular Addon Package and Release-Candidate Hardening
 
 - Moved the Blender addon runtime out of the root entrypoint and into `overtli_blender_addon/`.

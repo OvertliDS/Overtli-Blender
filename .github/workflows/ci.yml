@@ -47,6 +47,13 @@ jobs:
         run: python -c "import overtli_blender; print(overtli_blender.__name__)"
       - name: Fast release check
         run: python scripts/release_check.py --fast --json
+      - name: Phase 10B static release gates
+        run: |
+          python scripts/addon_modularity_check.py --json
+          python scripts/build_addon_zip.py --mode package --verify --json
+          python scripts/import_boundary_check.py --json
+          python scripts/docs_lockdown_check.py --json
+          python scripts/release_candidate_check.py --json
       - name: Build package
         run: python scripts/build_python_package.py
 

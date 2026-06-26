@@ -103,9 +103,19 @@ Fast local release readiness check:
 .\.venv\Scripts\python scripts\release_check.py --fast
 ```
 
+Final release-candidate handoff check:
+
+```powershell
+.\.venv\Scripts\python scripts\final_release_handoff.py --json
+```
+
 Package and release helper docs:
 
 - [docs/release_check.md](docs/release_check.md)
+- [docs/final_handoff.md](docs/final_handoff.md)
+- [docs/release_artifacts.md](docs/release_artifacts.md)
+- [docs/known_limitations.md](docs/known_limitations.md)
+- [docs/troubleshooting.md](docs/troubleshooting.md)
 - [docs/development.md](docs/development.md)
 - [docs/runtime_governance.md](docs/runtime_governance.md)
 - [docs/command_registry.md](docs/command_registry.md)

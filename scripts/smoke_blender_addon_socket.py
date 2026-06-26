@@ -1438,6 +1438,16 @@ def run_addon_package_status_smoke(sock: socket.socket, timeout_seconds: float) 
     if "setup" not in dashboard and "status" not in dashboard:
         raise RuntimeError(f"get_runtime_dashboard package: malformed dashboard {dashboard}")
 
+    summary = {
+        "runtime_mode": "packaged_addon_socket",
+        "addon_package_path": "overtli_blender_addon",
+        "addon_version": addon_status.get("addon_version") or addon_status.get("version") or "unknown",
+        "server_command_count": registry.get("command_count"),
+        "tool_registry_count": registry.get("tool_count") or registry.get("mcp_tool_count") or registry.get("command_count"),
+        "packaged_runtime_status": "PACKAGED_RUNTIME_LIVE_VERIFIED",
+        "single_file_shim_status": "not_runtime_source_of_truth",
+    }
+    print("ADDON_PACKAGE_STATUS " + json.dumps(summary, sort_keys=True))
     print("PASS addon package status smoke")
 
 

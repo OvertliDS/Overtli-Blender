@@ -22,7 +22,9 @@ def run_check() -> dict:
 
     checks = {
         "migration_audit": migration_audit(ROOT),
+        "addon_modularity": run_script(["scripts/addon_modularity_check.py", "--json"]),
         "addon_zip_package_verify": run_script(["scripts/build_addon_zip.py", "--mode", "package", "--verify", "--json"]),
+        "import_boundaries": run_script(["scripts/import_boundary_check.py", "--json"]),
         "compatibility": run_script(["scripts/compatibility_check.py", "--json"]),
         "performance": run_script(["scripts/performance_check.py", "--fast", "--json"]),
         "security": run_script(["scripts/security_audit.py", "--json"]),

@@ -13,3 +13,10 @@ Architecture boundaries:
 - `overtli_blender_addon/shared/`: addon-local constants, schemas, and redaction helpers.
 
 MCP server imports must not import `bpy` or `overtli_blender_addon` at startup.
+
+Phase 10B verifies this boundary with:
+
+```powershell
+.\.venv\Scripts\python scripts\addon_modularity_check.py --json
+.\.venv\Scripts\python scripts\import_boundary_check.py --json
+```
