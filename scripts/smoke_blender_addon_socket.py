@@ -1371,6 +1371,51 @@ def run_phase9a_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
         send_command(sock, timeout_seconds, "delete_objects", {"object_names": created_objects, "confirm": True, "allow_missing": True})
 
 
+def run_phase9b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    for command_name, params in [
+        ("get_preferences_schema", {}),
+        ("get_runtime_preferences", {}),
+        ("validate_runtime_preferences", {}),
+        ("get_tool_profiles", {}),
+        ("get_active_tool_profile", {}),
+        ("preview_tool_profile", {"profile_name": "safe_scene"}),
+        ("recommend_tool_profile", {"task_description": "make a game-ready prop with baked textures"}),
+        ("get_visible_tool_budget", {}),
+        ("get_enabled_tool_packs", {}),
+        ("list_bundled_skill_packs", {}),
+        ("search_bundled_skill_packs", {"query": "reference modeling"}),
+        ("search_bundled_skill_packs", {"query": "texture baking"}),
+        ("search_bundled_skill_packs", {"query": "animation blocking"}),
+        ("get_bundled_skill_pack", {"skill_pack_id": "reference_modeling"}),
+        ("recommend_skill_packs", {"task_description": "repair broken project textures"}),
+        ("validate_skill_pack_readiness", {"skill_pack_id": "texture_baking"}),
+        ("list_addon_source_roots", {}),
+        ("plan_addon_operator_invocation", {"operator_id": "object.select_all", "properties": {"action": "SELECT"}}),
+        ("get_error_catalog", {}),
+        ("explain_error", {"code": "PATH_NOT_APPROVED"}),
+        ("get_remediation_steps", {"code": "PATH_NOT_APPROVED"}),
+        ("get_runtime_dashboard", {}),
+        ("get_approval_queue_summary", {}),
+        ("get_recent_operation_summary", {}),
+        ("get_setup_status", {}),
+        ("run_onboarding_checklist", {"fix_safe_defaults": False}),
+        ("run_product_polish_workflow_batch", {}),
+    ]:
+        allowed_statuses = {"success", "requires_approval"} if command_name == "plan_addon_operator_invocation" else None
+        result = assert_command_success(f"{command_name} phase9b", send_command(sock, timeout_seconds, command_name, params), allowed_statuses=allowed_statuses)
+        if command_name == "plan_addon_operator_invocation" and not result.get("approval_required"):
+            raise RuntimeError("plan_addon_operator_invocation: expected approval-required boundary")
+
+    scan_response = send_command(sock, timeout_seconds, "scan_addon_sources_readonly", {"root": REPO_ROOT, "max_files": 5})
+    if scan_response.get("status") != "success":
+        raise RuntimeError(f"scan_addon_sources_readonly transport failed: {scan_response}")
+    scan_result = scan_response.get("result", {})
+    if scan_result.get("status") not in {"success", "requires_approval", "blocked", "error"}:
+        raise RuntimeError(f"scan_addon_sources_readonly: unexpected result {scan_result}")
+    print("PASS scan_addon_sources_readonly phase9b bounded/no-execute check")
+    print("PASS phase9b full smoke completed without permission expansion or third-party execution")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1519,6 +1564,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-shot-workflow", action="store_true", help="Run Phase 9A shot workflow smoke through --phase9a-full.")
     parser.add_argument("--include-simulation-workflow", action="store_true", help="Run Phase 9A simulation workflow smoke through --phase9a-full.")
     parser.add_argument("--include-motion-validation", action="store_true", help="Run Phase 9A motion validation smoke through --phase9a-full.")
+    parser.add_argument("--include-preferences-status", action="store_true", help="Run Phase 9B preferences schema/status checks.")
+    parser.add_argument("--include-tool-profile-ux", action="store_true", help="Run Phase 9B tool profile UX checks.")
+    parser.add_argument("--include-bundled-skills", action="store_true", help="Run Phase 9B bundled skill pack checks.")
+    parser.add_argument("--include-addon-interop-readonly", action="store_true", help="Run Phase 9B read-only addon interop checks.")
+    parser.add_argument("--include-error-catalog", action="store_true", help="Run Phase 9B error catalog checks.")
+    parser.add_argument("--include-runtime-dashboard", action="store_true", help="Run Phase 9B runtime dashboard checks.")
+    parser.add_argument("--include-onboarding-checklist", action="store_true", help="Run Phase 9B onboarding checklist checks.")
+    parser.add_argument("--include-product-polish-batch", action="store_true", help="Run Phase 9B product polish batch checks.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1583,6 +1636,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase9a-full",
         action="store_true",
         help="Run Phase 9A animation, rigging, drivers, pose, shot, simulation, and validation smoke with smoke-created data.",
+    )
+    parser.add_argument(
+        "--phase9b-full",
+        action="store_true",
+        help="Run Phase 9B preferences, profiles, bundled skills, addon interop, errors, dashboard, onboarding, and polish checks.",
     )
     return parser
 
@@ -1844,6 +1902,19 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_motion_validation
             ):
                 run_phase9a_full_smoke(sock, args.timeout)
+
+            if (
+                args.phase9b_full
+                or args.include_preferences_status
+                or args.include_tool_profile_ux
+                or args.include_bundled_skills
+                or args.include_addon_interop_readonly
+                or args.include_error_catalog
+                or args.include_runtime_dashboard
+                or args.include_onboarding_checklist
+                or args.include_product_polish_batch
+            ):
+                run_phase9b_full_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

@@ -50,6 +50,13 @@ CATEGORIES = {
     "shot_workflows",
     "simulation_workflows",
     "motion_validation",
+    "product_ux",
+    "preferences",
+    "tool_profiles",
+    "bundled_skills",
+    "addon_interop",
+    "error_help",
+    "onboarding",
 }
 
 TOOL_PACKS = {
@@ -82,6 +89,13 @@ TOOL_PACKS = {
     "shot_workflows",
     "simulation_workflows",
     "motion_validation",
+    "product_ux",
+    "preferences",
+    "tool_profiles",
+    "bundled_skills",
+    "addon_interop",
+    "error_help",
+    "onboarding",
 }
 
 GOVERNANCE_COMMANDS = {
@@ -162,6 +176,20 @@ def _title(name: str) -> str:
 
 def _category(name: str, operation_type: str) -> str:
     lowered = name.lower()
+    if any(marker in lowered for marker in ("preference", "runtime_preferences")):
+        return "preferences"
+    if "tool_profile" in lowered or "tool_pack" in lowered or "visible_tool" in lowered:
+        return "tool_profiles"
+    if "bundled_skill" in lowered or "skill_pack_readiness" in lowered or name in {"activate_skill_pack", "deactivate_skill_pack", "recommend_skill_packs"}:
+        return "bundled_skills"
+    if "addon_source" in lowered or "addon_operator" in lowered or "addon_panel" in lowered or "addon_properties" in lowered or name == "execute_approved_addon_operator":
+        return "addon_interop"
+    if "error" in lowered or "remediation" in lowered:
+        return "error_help"
+    if "onboarding" in lowered or "setup_status" in lowered:
+        return "onboarding"
+    if "dashboard" in lowered or "approval_queue_summary" in lowered or "recent_operation_summary" in lowered or "product_polish" in lowered:
+        return "product_ux"
     if any(marker in lowered for marker in ("reference", "landmark")):
         if any(marker in lowered for marker in ("construction", "alignment")):
             return "reference_construction"
@@ -194,6 +222,20 @@ def _category(name: str, operation_type: str) -> str:
         return "shot_workflows"
     if "motion" in lowered:
         return "motion_validation"
+    if any(marker in lowered for marker in ("preference", "runtime_preferences")):
+        return "preferences"
+    if "tool_profile" in lowered or "tool_pack" in lowered or "visible_tool" in lowered:
+        return "tool_profiles"
+    if "bundled_skill" in lowered or "skill_pack_readiness" in lowered or name in {"activate_skill_pack", "deactivate_skill_pack", "recommend_skill_packs"}:
+        return "bundled_skills"
+    if "addon_source" in lowered or "addon_operator" in lowered or "addon_panel" in lowered or "addon_properties" in lowered or name == "execute_approved_addon_operator":
+        return "addon_interop"
+    if "error" in lowered or "remediation" in lowered:
+        return "error_help"
+    if "onboarding" in lowered or "setup_status" in lowered:
+        return "onboarding"
+    if "dashboard" in lowered or "approval_queue_summary" in lowered or "recent_operation_summary" in lowered or "product_polish" in lowered:
+        return "product_ux"
     if any(marker in lowered for marker in ("distance", "angle", "area", "volume", "unit", "bounds", "raycast", "nearest", "intersection", "clearance", "alignment", "scale_ratio", "measurement")):
         return "spatial_measurement"
     if any(marker in lowered for marker in ("cache", "artifact", "orphan")):
@@ -258,6 +300,8 @@ def _tool_pack(category: str) -> str:
         return "cloth_patterns"
     if category in {"advanced_animation", "action_library", "nla_workflows", "drivers", "rigging", "pose_library", "shot_workflows", "simulation_workflows", "motion_validation"}:
         return category
+    if category in {"product_ux", "preferences", "tool_profiles", "bundled_skills", "addon_interop", "error_help", "onboarding"}:
+        return category
     if category in {"core", "project", "workspace", "diagnostics"}:
         return "core"
     if category in {"scene", "verification", "selection", "deformation", "sculpting"}:
@@ -319,6 +363,14 @@ def _capabilities(metadata: Any, name: str, category: str) -> tuple[str, ...]:
         caps.add("simulation.write" if metadata.can_mutate_scene else "simulation.read")
     if category == "motion_validation":
         caps.add("motion.validate")
+    if category in {"product_ux", "tool_profiles", "preferences", "onboarding", "error_help"}:
+        caps.add("product.ux")
+    if category == "bundled_skills":
+        caps.add("skills.manage" if metadata.risk_level != RiskLevel.LOW else "skills.read")
+    if category == "addon_interop":
+        caps.add("addon.inspect")
+        if metadata.risk_level == RiskLevel.HIGH:
+            caps.add("addon.execute")
     if category == "knowledge":
         caps.add("knowledge.read")
         if metadata.can_write_files:

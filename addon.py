@@ -90,6 +90,34 @@ try:
         get_tool_spec as runtime_get_tool_spec,
         search_tools as runtime_search_tools,
     )
+    from overtli_blender.runtime.addon_interop import plan_operator_invocation as runtime_plan_operator_invocation
+    from overtli_blender.runtime.addon_interop import scan_addon_sources as runtime_scan_addon_sources
+    from overtli_blender.runtime.error_catalog import explain_error as runtime_explain_error
+    from overtli_blender.runtime.error_catalog import get_error_catalog as runtime_get_error_catalog
+    from overtli_blender.runtime.error_catalog import get_remediation_steps as runtime_get_remediation_steps
+    from overtli_blender.runtime.onboarding import run_setup_checks as runtime_run_setup_checks
+    from overtli_blender.runtime.preferences_schema import config_path as runtime_preferences_config_path
+    from overtli_blender.runtime.preferences_schema import deep_update as runtime_preferences_deep_update
+    from overtli_blender.runtime.preferences_schema import default_preferences as runtime_default_preferences
+    from overtli_blender.runtime.preferences_schema import load_preferences as runtime_load_preferences
+    from overtli_blender.runtime.preferences_schema import permission_expands as runtime_permission_expands
+    from overtli_blender.runtime.preferences_schema import preferences_schema as runtime_preferences_schema
+    from overtli_blender.runtime.preferences_schema import redact_sensitive_values as runtime_redact_sensitive_values
+    from overtli_blender.runtime.preferences_schema import save_preferences as runtime_save_preferences
+    from overtli_blender.runtime.preferences_schema import validate_preferences as runtime_validate_preferences
+    from overtli_blender.runtime.skill_pack_library import BUNDLED_SKILL_PACKS as RUNTIME_BUNDLED_SKILL_PACKS
+    from overtli_blender.runtime.skill_pack_library import get_bundled_skill_pack as runtime_get_bundled_skill_pack
+    from overtli_blender.runtime.skill_pack_library import list_bundled_skill_packs as runtime_list_bundled_skill_packs
+    from overtli_blender.runtime.skill_pack_library import recommend_skill_packs as runtime_recommend_skill_packs
+    from overtli_blender.runtime.skill_pack_library import search_bundled_skill_packs as runtime_search_bundled_skill_packs
+    from overtli_blender.runtime.tool_profiles import BUILTIN_TOOL_PROFILES as RUNTIME_BUILTIN_TOOL_PROFILES
+    from overtli_blender.runtime.tool_profiles import get_profile as runtime_get_tool_profile
+    from overtli_blender.runtime.tool_profiles import list_tool_profiles as runtime_list_tool_profiles
+    from overtli_blender.runtime.tool_profiles import preview_profile_change as runtime_preview_profile_change
+    from overtli_blender.runtime.tool_profiles import recommend_profile as runtime_recommend_tool_profile
+    from overtli_blender.runtime.ux_status import approval_queue_summary as runtime_approval_queue_summary
+    from overtli_blender.runtime.ux_status import recent_operation_summary as runtime_recent_operation_summary
+    from overtli_blender.runtime.ux_status import runtime_dashboard as runtime_build_dashboard
 except ModuleNotFoundError:
     class RiskLevel(str, Enum):
         LOW = "LOW"
@@ -595,6 +623,294 @@ except ModuleNotFoundError:
         return {"status": "success", "tool": spec}
     def runtime_get_recommended_tools_for_task(task, limit=8):
         return runtime_search_tools(task, limit=limit)
+
+    def runtime_preferences_config_path(repo_root=None, project_root=None):
+        base = Path(project_root) if project_root else Path(repo_root or os.getcwd())
+        if project_root:
+            return base / ".overtli" / "config.json"
+        return base / ".overtli_blender" / "config" / "runtime_preferences.json"
+
+    def runtime_default_preferences():
+        return {
+            "schema_version": 1,
+            "project": {"project_specific": True, "auto_initialize_workspace": False, "require_saved_blend_for_writes": True},
+            "filesystem": {"approved_roots": [], "approved_addon_source_roots": [], "permission_profile": "standard", "allow_external_reads": False, "allow_external_writes": False},
+            "security": {"strict_mode": False, "raw_python_enabled": False, "addon_interop_enabled": False, "require_approval_for_permission_expansion": True},
+            "artifacts": {"cache_policy": "project_scoped", "log_retention_days": 14, "operation_timeout_seconds": 120},
+            "mcp": {"host": "localhost", "port": 9876, "max_response_items": 200},
+            "knowledge": {"knowledge_roots": [], "docs_index_enabled": True},
+            "tool_profiles": {"active_profile": "safe_scene", "enabled_tool_packs": [], "active_skill_packs": [], "max_visible_tools": 80},
+            "providers": {"network_providers_enabled": False, "provider_downloads_enabled": False},
+            "diagnostics": {"log_level": "INFO", "diagnostics_enabled": True, "support_bundle_redaction": True},
+        }
+
+    def runtime_preferences_schema():
+        return {
+            "status": "success",
+            "schema_version": 1,
+            "sections": {
+                "Project": ["auto_initialize_workspace", "project_specific", "require_saved_blend_for_writes"],
+                "Filesystem": ["allow_external_reads", "allow_external_writes", "approved_addon_source_roots", "approved_roots", "permission_profile"],
+                "Security": ["addon_interop_enabled", "raw_python_enabled", "require_approval_for_permission_expansion", "strict_mode"],
+                "Artifacts": ["cache_policy", "log_retention_days", "operation_timeout_seconds"],
+                "MCP": ["host", "max_response_items", "port"],
+                "Knowledge": ["docs_index_enabled", "knowledge_roots"],
+                "Tool Profiles": ["active_profile", "active_skill_packs", "enabled_tool_packs", "max_visible_tools"],
+                "Providers": ["network_providers_enabled", "provider_downloads_enabled"],
+                "Diagnostics": ["diagnostics_enabled", "log_level", "support_bundle_redaction"],
+            },
+            "fallback": True,
+        }
+
+    def runtime_preferences_deep_update(target, changes):
+        for key, value in (changes or {}).items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                runtime_preferences_deep_update(target[key], value)
+            else:
+                target[key] = value
+        return target
+
+    def runtime_redact_sensitive_values(value):
+        markers = ("api_key", "apikey", "token", "secret", "password", "credential")
+        if isinstance(value, dict):
+            return {key: "<redacted>" if any(marker in str(key).lower() for marker in markers) else runtime_redact_sensitive_values(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [runtime_redact_sensitive_values(item) for item in value]
+        return value
+
+    def runtime_load_preferences(path=None):
+        target = Path(path) if path else runtime_preferences_config_path()
+        if not target.exists():
+            return runtime_default_preferences()
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except Exception:
+            return runtime_default_preferences()
+        prefs = runtime_default_preferences()
+        runtime_preferences_deep_update(prefs, data)
+        return prefs
+
+    def runtime_save_preferences(preferences, path=None):
+        target = Path(path) if path else runtime_preferences_config_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(runtime_redact_sensitive_values(preferences), indent=2, sort_keys=True), encoding="utf-8")
+        return target
+
+    def runtime_validate_preferences(preferences):
+        errors = []
+        warnings = []
+        profile = preferences.get("filesystem", {}).get("permission_profile", "standard")
+        if profile not in {"read_only", "standard", "trusted_project", "developer", "custom"}:
+            errors.append(f"Unknown permission profile: {profile}")
+        if preferences.get("security", {}).get("raw_python_enabled"):
+            warnings.append("Raw Python is enabled and should remain approval-gated.")
+        providers = preferences.get("providers", {})
+        if providers.get("provider_downloads_enabled") and not providers.get("network_providers_enabled"):
+            errors.append("Provider downloads require network providers to be enabled.")
+        return {"status": "success" if not errors else "error", "valid": not errors, "errors": errors, "warnings": warnings, "fallback": True}
+
+    def runtime_permission_expands(current, requested):
+        current_fs = current.get("filesystem", {})
+        requested_fs = requested.get("filesystem", {})
+        if set(requested_fs.get("approved_roots", [])) - set(current_fs.get("approved_roots", [])):
+            return True
+        if set(requested_fs.get("approved_addon_source_roots", [])) - set(current_fs.get("approved_addon_source_roots", [])):
+            return True
+        rank = {"read_only": 0, "standard": 1, "trusted_project": 2, "developer": 3, "custom": 1}
+        if rank.get(requested_fs.get("permission_profile", current_fs.get("permission_profile", "standard")), 1) > rank.get(current_fs.get("permission_profile", "standard"), 1):
+            return True
+        for section, key in [("security", "raw_python_enabled"), ("security", "addon_interop_enabled"), ("providers", "network_providers_enabled"), ("providers", "provider_downloads_enabled")]:
+            if requested.get(section, {}).get(key) and not current.get(section, {}).get(key):
+                return True
+        return False
+
+    @dataclass(frozen=True)
+    class _FallbackToolProfile:
+        name: str
+        label: str
+        description: str
+        enabled_tool_packs: tuple[str, ...]
+        max_visible_tools: int = 80
+        permission_profile: str = "standard"
+        hidden_risky_tools: bool = True
+
+        def to_dict(self):
+            return {
+                "name": self.name,
+                "label": self.label,
+                "description": self.description,
+                "enabled_tool_packs": list(self.enabled_tool_packs),
+                "max_visible_tools": self.max_visible_tools,
+                "permission_profile": self.permission_profile,
+                "hidden_risky_tools": self.hidden_risky_tools,
+                "fallback": True,
+            }
+
+    RUNTIME_BUILTIN_TOOL_PROFILES = {
+        "safe_scene": _FallbackToolProfile("safe_scene", "Safe Scene", "Conservative scene inspection and structured edit profile.", ("core", "scene_intelligence", "verified_editing")),
+        "artist": _FallbackToolProfile("artist", "Artist", "Broader artist workflow profile with approval-gated risky tools.", ("core", "scene_intelligence", "verified_editing", "materials", "asset_workflows"), 100),
+        "technical_director": _FallbackToolProfile("technical_director", "Technical Director", "Advanced project and addon workflow profile.", ("core", "scene_intelligence", "verified_editing", "materials", "asset_workflows", "addon_knowledge"), 120, "developer"),
+    }
+
+    def runtime_list_tool_profiles():
+        return {"status": "success", "profiles": [profile.to_dict() for profile in RUNTIME_BUILTIN_TOOL_PROFILES.values()], "fallback": True}
+
+    def runtime_get_tool_profile(name):
+        return RUNTIME_BUILTIN_TOOL_PROFILES.get(name)
+
+    def runtime_preview_profile_change(current, requested):
+        profile = runtime_get_tool_profile(requested)
+        if not profile:
+            return {"status": "error", "message": f"Unknown tool profile: {requested}"}
+        requires_approval = profile.permission_profile == "developer" and current != requested
+        return {"status": "success", "current_profile": current, "requested_profile": profile.to_dict(), "requires_approval": requires_approval, "fallback": True}
+
+    def runtime_recommend_tool_profile(task_description, current_context=None):
+        text = f"{task_description} {current_context or {}}".lower()
+        if any(term in text for term in ("addon", "operator", "python", "developer", "source")):
+            name = "technical_director"
+        elif any(term in text for term in ("material", "texture", "bake", "uv", "pbr")):
+            name = "artist"
+        elif any(term in text for term in ("review", "diagnose", "inspect", "read only")):
+            name = "safe_scene"
+        else:
+            name = "safe_scene"
+        return {"status": "success", "recommended_profile": RUNTIME_BUILTIN_TOOL_PROFILES[name].to_dict(), "reason": f"Matched task terms to {name} fallback profile.", "fallback": True}
+
+    @dataclass(frozen=True)
+    class _FallbackSkillPack:
+        skill_pack_id: str
+        title: str
+        intent_patterns: tuple[str, ...]
+        tool_packs: tuple[str, ...]
+        risk_level: str = "LOW"
+
+        def to_dict(self):
+            return {
+                "skill_pack_id": self.skill_pack_id,
+                "title": self.title,
+                "intent_patterns": list(self.intent_patterns),
+                "method_rules": ["inspect first", "prefer non-destructive workflow", "verify before claiming success"],
+                "anti_patterns": ["blind execution", "overwriting user assets", "claiming visual success without evidence"],
+                "required_inspection": ["scene summary", "selection state", "workspace status"],
+                "tool_packs": list(self.tool_packs),
+                "preflight": ["project initialized", "approved roots configured", "relevant tools enabled"],
+                "execution_stages": ["plan", "prepare", "execute gated operations", "verify"],
+                "verification_stages": ["structural check", "artifact or screenshot when applicable", "operation summary"],
+                "rollback_strategy": "scene snapshot or generated artifact cleanup depending on operation",
+                "blender_version_notes": "Fallback metadata active because bundled runtime package was unavailable.",
+                "known_limitations": ["Does not execute workflows automatically.", "High-risk operations still require explicit approval."],
+                "examples": list(self.intent_patterns),
+                "risk_level": self.risk_level,
+                "fallback": True,
+            }
+
+    def _fallback_skill_pack(skill_pack_id, title, intents, tool_packs, risk="LOW"):
+        return _FallbackSkillPack(skill_pack_id, title, tuple(intents), tuple(tool_packs), risk)
+
+    RUNTIME_BUNDLED_SKILL_PACKS = {
+        "reference_modeling": _fallback_skill_pack("reference_modeling", "Reference Modeling", ("match a reference image", "model from reference"), ("reference_construction", "spatial_measurement", "advanced_modeling")),
+        "hard_surface_modeling": _fallback_skill_pack("hard_surface_modeling", "Hard Surface Modeling", ("hard surface armor", "panel lines", "beveled prop"), ("advanced_modeling", "geometry_nodes", "verified_editing")),
+        "organic_proportion_editing": _fallback_skill_pack("organic_proportion_editing", "Organic Proportion Editing", ("bigger body part", "stylized proportion"), ("verified_editing", "sculpt_workflows", "spatial_measurement")),
+        "procedural_modeling": _fallback_skill_pack("procedural_modeling", "Procedural Modeling", ("procedural building", "scatter", "radial array"), ("geometry_nodes", "advanced_modeling")),
+        "geometry_nodes_patterns": _fallback_skill_pack("geometry_nodes_patterns", "Geometry Nodes Patterns", ("geometry nodes recipe", "node group"), ("geometry_nodes",)),
+        "pbr_material_authoring": _fallback_skill_pack("pbr_material_authoring", "PBR Material Authoring", ("pbr material", "normal roughness metallic"), ("materials", "texture_baking")),
+        "texture_baking": _fallback_skill_pack("texture_baking", "Texture Baking", ("bake normal and ORM maps", "bake textures"), ("texture_baking", "materials"), "MEDIUM"),
+        "texture_painting_preflight": _fallback_skill_pack("texture_painting_preflight", "Texture Painting Preflight", ("paint decal", "texture paint"), ("materials", "texture_baking")),
+        "sculpt_refinement": _fallback_skill_pack("sculpt_refinement", "Sculpt Refinement", ("sculpt refinement", "smooth region"), ("sculpt_workflows", "verified_editing"), "MEDIUM"),
+        "cloth_pattern_workflow": _fallback_skill_pack("cloth_pattern_workflow", "Cloth Pattern Workflow", ("cloth cape", "cloth panel"), ("cloth_patterns", "simulation_workflows"), "MEDIUM"),
+        "character_rigging": _fallback_skill_pack("character_rigging", "Character Rigging", ("character rig", "ik chain"), ("rigging", "pose_library"), "MEDIUM"),
+        "animation_blocking": _fallback_skill_pack("animation_blocking", "Animation Blocking", ("animation shot", "blocking keys"), ("advanced_animation", "action_library", "shot_workflows")),
+        "product_rendering": _fallback_skill_pack("product_rendering", "Product Rendering", ("product render", "studio shot"), ("animation_presentation", "materials")),
+        "cinematic_lighting": _fallback_skill_pack("cinematic_lighting", "Cinematic Lighting", ("cinematic lighting", "shot lighting"), ("animation_presentation", "shot_workflows")),
+        "game_asset_export": _fallback_skill_pack("game_asset_export", "Game Asset Export", ("game-ready prop", "export glb"), ("asset_workflows", "texture_baking"), "MEDIUM"),
+        "scene_cleanup": _fallback_skill_pack("scene_cleanup", "Scene Cleanup", ("clean imported model", "scene cleanup"), ("verified_editing", "cache_management"), "MEDIUM"),
+        "addon_development": _fallback_skill_pack("addon_development", "Addon Development", ("create addon", "validate addon"), ("addon_knowledge", "addon_interop", "release_diagnostics"), "HIGH"),
+        "project_repair": _fallback_skill_pack("project_repair", "Project Repair", ("repair broken project textures", "missing assets"), ("project_runtime", "file_access", "asset_workflows")),
+        "diagnostics_review": _fallback_skill_pack("diagnostics_review", "Diagnostics Review", ("diagnose addon connection", "why failed"), ("release_diagnostics", "error_help", "onboarding")),
+    }
+
+    def runtime_list_bundled_skill_packs():
+        return {"status": "success", "skill_packs": [pack.to_dict() for pack in RUNTIME_BUNDLED_SKILL_PACKS.values()], "fallback": True}
+
+    def runtime_get_bundled_skill_pack(pack_id):
+        pack = RUNTIME_BUNDLED_SKILL_PACKS.get(pack_id)
+        return {"status": "success", "skill_pack": pack.to_dict(), "fallback": True} if pack else {"status": "error", "message": f"Unknown bundled skill pack: {pack_id}"}
+
+    def runtime_search_bundled_skill_packs(query, top_k=10):
+        q = str(query or "").lower()
+        terms = [term for term in q.split() if term.strip()]
+        matches = []
+        for pack in RUNTIME_BUNDLED_SKILL_PACKS.values():
+            haystack = " ".join([pack.skill_pack_id, pack.title, *pack.intent_patterns, *pack.tool_packs]).lower()
+            score = sum(3 if term in pack.skill_pack_id else 1 for term in terms if term in haystack)
+            if not terms or score:
+                matches.append((score, pack))
+        matches.sort(key=lambda item: (-item[0], item[1].skill_pack_id))
+        results = [pack.to_dict() for _, pack in matches[: max(1, min(int(top_k), 25))]]
+        return {"status": "success", "query": query, "results": results, "fallback": True}
+
+    def runtime_recommend_skill_packs(task, limit=5):
+        results = runtime_search_bundled_skill_packs(task, top_k=limit)["results"]
+        return {"status": "success", "recommendations": results, "reason": "Ranked by task term matches.", "fallback": True}
+
+    def runtime_scan_addon_sources(root, approved_roots=None, max_files=80, max_bytes=1000000):
+        candidate = Path(root).expanduser().resolve()
+        approved = []
+        for item in approved_roots or []:
+            try:
+                approved.append(Path(item).expanduser().resolve())
+            except Exception:
+                continue
+        if not candidate.exists() or not candidate.is_dir():
+            return {"status": "error", "message": f"Addon source root does not exist: {str(candidate).replace(str(Path.home()), '~')}", "fallback": True}
+        if approved and not any(candidate == item or item in candidate.parents for item in approved):
+            return {"status": "requires_approval", "message": "Addon source root is not approved for read-only inspection.", "root": str(candidate).replace(str(Path.home()), "~"), "fallback": True}
+        return {
+            "status": "success",
+            "root": str(candidate).replace(str(Path.home()), "~"),
+            "files_scanned": 0,
+            "files_skipped": 0,
+            "operators": [],
+            "panels": [],
+            "properties": [],
+            "bl_info": {},
+            "scan_id": hashlib.sha256(str(candidate).encode("utf-8")).hexdigest()[:16],
+            "warnings": ["Phase 9B fallback mode: metadata-only scan placeholder; no addon code imported or executed."],
+            "limits": {"max_files": max_files, "max_bytes": max_bytes},
+            "fallback": True,
+        }
+
+    def runtime_plan_operator_invocation(operator_id, parameters=None, confirm=False):
+        return {"status": "requires_approval", "approval_required": True, "operator_id": operator_id, "parameters": parameters or {}, "message": "Third-party addon operator execution is approval-gated.", "fallback": True}
+
+    def runtime_get_error_catalog():
+        return {"status": "success", "errors": [{"code": "RUNTIME_FALLBACK_ACTIVE", "summary": "The bundled runtime package was unavailable and addon fallback mode is active."}], "fallback": True}
+
+    def runtime_explain_error(error_code=None, message=None):
+        return {"status": "success", "error_code": error_code or "RUNTIME_FALLBACK_ACTIVE", "summary": message or "Addon fallback mode is active.", "fallback": True}
+
+    def runtime_get_remediation_steps(error_code=None):
+        return {"status": "success", "steps": ["Install or refresh the addon package with its bundled src/overtli_blender runtime.", "Restart the Overtli-Blender socket server."], "fallback": True}
+
+    def runtime_run_setup_checks(repo_root=None, blend_path=None, preferences=None):
+        return {"status": "success", "checks": [{"name": "addon_server", "status": "warning", "message": "Running in fallback mode."}], "fallback": True}
+
+    def runtime_approval_queue_summary(queue=None):
+        if hasattr(queue, "get_pending_approvals"):
+            queue = queue.get_pending_approvals()
+        approvals = (queue or {}).get("approvals", [])
+        return {"status": "success", "pending_count": len(approvals), "approvals": approvals, "fallback": True}
+
+    def runtime_recent_operation_summary(operations=None, limit=20):
+        if hasattr(operations, "list_recent_operations"):
+            operations = operations.list_recent_operations(limit)
+        items = (operations or {}).get("operations") or (operations or {}).get("recent_operations") or []
+        failures = [item for item in items if item.get("status") not in {None, "success"}]
+        return {"status": "success", "operation_count": len(items), "failure_count": len(failures), "operations": items[:limit], "failures": failures[:10], "fallback": True}
+
+    def runtime_build_dashboard(preferences=None, active_profile=None, setup=None, approvals=None, operations=None):
+        return {"status": "success", "preferences": runtime_redact_sensitive_values(preferences or runtime_default_preferences()), "active_profile": active_profile, "setup": setup, "approvals": approvals, "operations": operations, "fallback": True}
 
     @dataclass(frozen=True)
     class _FallbackCommandSafetyMetadata:
@@ -10401,6 +10717,266 @@ class AnimationRiggingWorkflowBatchService:
 PHASE9A_COMMANDS = ["get_animation_system_capabilities", "inspect_animation_system", "list_actions", "get_action_deep_info", "create_action", "duplicate_action", "rename_action", "assign_action", "delete_actions", "insert_keyframe_batch", "edit_keyframes", "retime_action", "set_fcurve_interpolation", "add_fcurve_modifier", "remove_fcurve_modifier", "validate_fcurves", "create_nla_track", "add_action_to_nla", "edit_nla_strip", "mute_nla_track", "delete_nla_tracks", "validate_nla_stack", "create_driver_from_dsl", "validate_driver_dsl", "list_drivers", "get_driver_info", "remove_drivers", "create_rig_template", "create_control_bones", "create_ik_chain", "add_rig_constraint", "remove_rig_constraints", "add_custom_rig_properties", "validate_rig", "inspect_pose", "create_pose_snapshot", "apply_pose_snapshot", "create_pose_asset", "list_pose_assets", "compare_poses", "delete_pose_assets", "create_shot_range", "create_camera_cut", "create_timeline_marker", "create_shot_plan", "validate_shot_plan", "create_motion_path_preview", "validate_motion", "get_simulation_capabilities", "inspect_simulation_state", "configure_rigidbody_basic", "configure_cloth_simulation_advanced", "configure_softbody_basic", "configure_hair_curve_dynamics_basic", "get_simulation_cache_status", "simulate_preview_range", "bake_simulation_cache", "clear_simulation_cache", "run_animation_rigging_workflow_batch"]
 
 
+class PreferencesConfigurationService:
+    def __init__(self, server):
+        self.server = server
+        self.path = runtime_preferences_config_path(ADDON_ROOT)
+        self.preferences = runtime_load_preferences(self.path)
+
+    def get_preferences_schema(self):
+        return runtime_preferences_schema()
+
+    def get_runtime_preferences(self):
+        return {"status": "success", "config_path": str(self.path), "preferences": runtime_redact_sensitive_values(self.preferences)}
+
+    def validate_runtime_preferences(self):
+        result = runtime_validate_preferences(self.preferences)
+        result["config_path"] = str(self.path)
+        return result
+
+    def update_runtime_preferences(self, changes, confirm=False):
+        requested = json.loads(json.dumps(self.preferences))
+        runtime_preferences_deep_update(requested, changes or {})
+        validation = runtime_validate_preferences(requested)
+        if validation.get("status") != "success":
+            return validation
+        if runtime_permission_expands(self.preferences, requested) and not confirm:
+            return {"status": "requires_approval", "approval_required": True, "message": "Preference change expands permissions and requires confirmation.", "validation": validation}
+        self.preferences = requested
+        path = runtime_save_preferences(self.preferences, self.path)
+        return {"status": "success", "config_path": str(path), "preferences": runtime_redact_sensitive_values(self.preferences), "validation": validation}
+
+    def reset_runtime_preferences(self, confirm=False, preview=True):
+        defaults = runtime_default_preferences()
+        if preview and not confirm:
+            return {"status": "requires_approval", "approval_required": True, "message": "Reset preview generated. Confirm to write defaults.", "preview": runtime_redact_sensitive_values(defaults)}
+        self.preferences = defaults
+        path = runtime_save_preferences(self.preferences, self.path)
+        return {"status": "success", "config_path": str(path), "preferences": runtime_redact_sensitive_values(self.preferences)}
+
+
+class ToolProfileService:
+    def __init__(self, server):
+        self.server = server
+
+    def get_tool_profiles(self):
+        return runtime_list_tool_profiles()
+
+    def get_active_tool_profile(self):
+        prefs = self.server.preferences_configuration_service.preferences
+        name = prefs.get("tool_profiles", {}).get("active_profile", "safe_scene")
+        profile = runtime_get_tool_profile(name) or runtime_get_tool_profile("safe_scene")
+        return {"status": "success", "profile": profile.to_dict()}
+
+    def set_active_tool_profile(self, profile_name, confirm=False):
+        prefs = self.server.preferences_configuration_service.preferences
+        current = prefs.get("tool_profiles", {}).get("active_profile", "safe_scene")
+        preview = runtime_preview_profile_change(current, profile_name)
+        if preview.get("status") != "success":
+            return preview
+        if preview.get("requires_approval") and not confirm:
+            return {"status": "requires_approval", "approval_required": True, "message": "Profile increases risk and requires confirmation.", "preview": preview}
+        profile = runtime_get_tool_profile(profile_name)
+        prefs.setdefault("tool_profiles", {})["active_profile"] = profile_name
+        prefs["tool_profiles"]["enabled_tool_packs"] = list(profile.enabled_tool_packs)
+        prefs.setdefault("filesystem", {})["permission_profile"] = profile.permission_profile
+        runtime_save_preferences(prefs, self.server.preferences_configuration_service.path)
+        return {"status": "success", "profile": profile.to_dict(), "enabled_tool_packs": list(profile.enabled_tool_packs)}
+
+    def preview_tool_profile(self, profile_name):
+        prefs = self.server.preferences_configuration_service.preferences
+        return runtime_preview_profile_change(prefs.get("tool_profiles", {}).get("active_profile", "safe_scene"), profile_name)
+
+    def get_visible_tool_budget(self):
+        active = self.get_active_tool_profile()["profile"]
+        registry = command_registry_report()
+        return {"status": "success", "active_packs": active["enabled_tool_packs"], "estimated_visible_tool_count": min(active["max_visible_tools"], registry.get("command_count", 0)), "hidden_packs": sorted(set(registry.get("tool_packs", [])) - set(active["enabled_tool_packs"])), "high_risk_hidden_tools": active["hidden_risky_tools"], "recommended_compact_core": ["get_runtime_dashboard", "search_tools", "explain_error", "get_setup_status"]}
+
+    def get_enabled_tool_packs(self):
+        prefs = self.server.preferences_configuration_service.preferences
+        enabled = prefs.get("tool_profiles", {}).get("enabled_tool_packs")
+        if not enabled:
+            enabled = self.get_active_tool_profile()["profile"]["enabled_tool_packs"]
+        return {"status": "success", "enabled_tool_packs": enabled}
+
+    def set_enabled_tool_packs(self, tool_packs, confirm=False):
+        known = set(command_registry_report().get("tool_packs", []))
+        unknown = sorted(set(tool_packs or []) - known)
+        if unknown:
+            return {"status": "error", "message": f"Unknown tool packs: {unknown}"}
+        high_risk_packs = {"addon_interop", "drivers", "simulation_workflows"}
+        if high_risk_packs.intersection(tool_packs or []) and not confirm:
+            return {"status": "requires_approval", "approval_required": True, "message": "Enabling high-risk tool packs requires confirmation.", "high_risk_packs": sorted(high_risk_packs.intersection(tool_packs or []))}
+        prefs = self.server.preferences_configuration_service.preferences
+        prefs.setdefault("tool_profiles", {})["enabled_tool_packs"] = list(tool_packs or [])
+        runtime_save_preferences(prefs, self.server.preferences_configuration_service.path)
+        return {"status": "success", "enabled_tool_packs": prefs["tool_profiles"]["enabled_tool_packs"]}
+
+    def recommend_tool_profile(self, task_description, current_context=None):
+        return runtime_recommend_tool_profile(task_description, current_context)
+
+
+class BundledSkillPackService:
+    def __init__(self, server):
+        self.server = server
+
+    def list_bundled_skill_packs(self):
+        return runtime_list_bundled_skill_packs()
+
+    def get_bundled_skill_pack(self, skill_pack_id):
+        return runtime_get_bundled_skill_pack(skill_pack_id)
+
+    def search_bundled_skill_packs(self, query, top_k=10):
+        return runtime_search_bundled_skill_packs(query, top_k)
+
+    def activate_skill_pack(self, skill_pack_id, confirm=False):
+        pack = RUNTIME_BUNDLED_SKILL_PACKS.get(skill_pack_id)
+        if not pack:
+            return {"status": "error", "message": f"Unknown bundled skill pack: {skill_pack_id}"}
+        if pack.risk_level == "HIGH" and not confirm:
+            return {"status": "requires_approval", "approval_required": True, "message": "High-risk skill pack activation requires confirmation.", "skill_pack": pack.to_dict()}
+        prefs = self.server.preferences_configuration_service.preferences
+        active = set(prefs.setdefault("tool_profiles", {}).setdefault("active_skill_packs", []))
+        active.add(skill_pack_id)
+        prefs["tool_profiles"]["active_skill_packs"] = sorted(active)
+        runtime_save_preferences(prefs, self.server.preferences_configuration_service.path)
+        return {"status": "success", "active_skill_packs": prefs["tool_profiles"]["active_skill_packs"], "skill_pack": pack.to_dict()}
+
+    def deactivate_skill_pack(self, skill_pack_id):
+        prefs = self.server.preferences_configuration_service.preferences
+        active = set(prefs.setdefault("tool_profiles", {}).setdefault("active_skill_packs", []))
+        active.discard(skill_pack_id)
+        prefs["tool_profiles"]["active_skill_packs"] = sorted(active)
+        runtime_save_preferences(prefs, self.server.preferences_configuration_service.path)
+        return {"status": "success", "active_skill_packs": prefs["tool_profiles"]["active_skill_packs"]}
+
+    def recommend_skill_packs(self, task_description):
+        return runtime_recommend_skill_packs(task_description)
+
+    def validate_skill_pack_readiness(self, skill_pack_id, context=None):
+        pack = RUNTIME_BUNDLED_SKILL_PACKS.get(skill_pack_id)
+        if not pack:
+            return {"status": "error", "message": f"Unknown bundled skill pack: {skill_pack_id}"}
+        enabled = set(self.server.tool_profile_service.get_enabled_tool_packs().get("enabled_tool_packs", []))
+        missing = sorted(set(pack.tool_packs) - enabled)
+        prefs = self.server.preferences_configuration_service.preferences
+        blockers = []
+        if missing:
+            blockers.append("required tool packs disabled")
+        if not prefs.get("filesystem", {}).get("approved_roots"):
+            blockers.append("no approved roots configured")
+        return {"status": "success", "ready": not blockers, "skill_pack": pack.to_dict(), "missing_tool_packs": missing, "blockers": blockers, "context": context or {}}
+
+
+class AddonInteropInspectionService:
+    def __init__(self, server):
+        self.server = server
+        self.last_scan = None
+
+    def list_addon_source_roots(self):
+        roots = []
+        try:
+            for path in bpy.utils.script_paths():
+                addon_dir = os.path.join(path, "addons")
+                if os.path.isdir(addon_dir):
+                    roots.append(addon_dir)
+        except Exception:
+            pass
+        approved = self.server.preferences_configuration_service.preferences.get("filesystem", {}).get("approved_addon_source_roots", [])
+        return {"status": "success", "roots": [{"path": p.replace(str(Path.home()), "~"), "approved": p in approved} for p in sorted(set(roots + approved))]}
+
+    def scan_addon_sources_readonly(self, root, max_files=80, max_bytes=1000000):
+        approved = self.server.preferences_configuration_service.preferences.get("filesystem", {}).get("approved_addon_source_roots", [])
+        result = runtime_scan_addon_sources(root, approved, max_files=max_files, max_bytes=max_bytes)
+        if result.get("status") == "success":
+            self.last_scan = result
+        return result
+
+    def get_addon_source_summary(self, scan_id=None):
+        if not self.last_scan:
+            return {"status": "blocked", "message": "No read-only addon source scan has been run."}
+        if scan_id and self.last_scan.get("scan_id") != scan_id:
+            return {"status": "error", "message": f"Unknown scan_id: {scan_id}"}
+        return {"status": "success", "summary": self.last_scan}
+
+    def _search_scan(self, key, query, scan_id=None, limit=20):
+        summary = self.get_addon_source_summary(scan_id)
+        if summary.get("status") != "success":
+            return summary
+        terms = [t.lower() for t in str(query).split() if t.strip()]
+        items = summary["summary"].get(key, [])
+        matches = []
+        for item in items:
+            haystack = json.dumps(item).lower()
+            if not terms or any(t in haystack for t in terms):
+                matches.append(item)
+        return {"status": "success", "results": matches[: max(1, min(int(limit), 50))]}
+
+    def search_addon_operators(self, query, scan_id=None, limit=20):
+        return self._search_scan("operators", query, scan_id, limit)
+
+    def search_addon_panels(self, query, scan_id=None, limit=20):
+        return self._search_scan("panels", query, scan_id, limit)
+
+    def search_addon_properties(self, query, scan_id=None, limit=20):
+        return self._search_scan("properties", query, scan_id, limit)
+
+    def plan_addon_operator_invocation(self, operator_id, addon_module=None, properties=None):
+        return runtime_plan_operator_invocation(operator_id, addon_module, properties)
+
+    def execute_approved_addon_operator(self, approval_id, operator_id, properties=None):
+        return {"status": "requires_approval", "approval_required": True, "message": "Third-party addon operator execution is not automatic in Phase 9B. Use exact approval through the governance runtime before any execution.", "approval_id": approval_id, "operator_id": operator_id, "properties": properties or {}}
+
+
+class UserFacingErrorService:
+    def __init__(self, server): self.server = server
+    def get_error_catalog(self): return runtime_get_error_catalog()
+    def explain_error(self, code, context=None): return runtime_explain_error(code, context)
+    def get_remediation_steps(self, code): return runtime_get_remediation_steps(code)
+
+
+class OnboardingWorkflowService:
+    def __init__(self, server): self.server = server
+    def get_setup_status(self): return runtime_run_setup_checks(self.server.preferences_configuration_service.preferences, ADDON_ROOT)
+    def run_onboarding_checklist(self, fix_safe_defaults=False, confirm=False):
+        result = self.get_setup_status()
+        if fix_safe_defaults and not confirm:
+            result["status"] = "requires_approval"
+            result["approval_required"] = True
+            result["message"] = "Safe defaults require confirmation before writing preferences."
+        return result
+
+
+class RuntimeUXStatusService:
+    def __init__(self, server): self.server = server
+    def get_runtime_dashboard(self):
+        prefs = self.server.preferences_configuration_service.preferences
+        profile = self.server.tool_profile_service.get_active_tool_profile().get("profile", {})
+        setup = self.server.onboarding_workflow_service.get_setup_status()
+        approvals = DEFAULT_APPROVAL_RUNTIME.get_pending_approvals()
+        operations = DEFAULT_OPERATION_RUNTIME.list_recent_operations(20)
+        return runtime_build_dashboard(prefs, profile, setup, approvals, operations)
+    def get_approval_queue_summary(self): return runtime_approval_queue_summary(DEFAULT_APPROVAL_RUNTIME.get_pending_approvals())
+    def get_recent_operation_summary(self): return runtime_recent_operation_summary(DEFAULT_OPERATION_RUNTIME.list_recent_operations(20))
+
+
+class ProductPolishWorkflowBatchService:
+    def __init__(self, server): self.server = server
+    def run_product_polish_workflow_batch(self):
+        return {
+            "status": "success",
+            "checks": {
+                "preferences": self.server.preferences_configuration_service.validate_runtime_preferences(),
+                "setup": self.server.onboarding_workflow_service.get_setup_status(),
+                "tool_profile": self.server.tool_profile_service.get_active_tool_profile(),
+                "dashboard": self.server.runtime_ux_status_service.get_runtime_dashboard(),
+                "error_catalog": {"status": "success", "count": len(runtime_get_error_catalog().get("errors", []))},
+            },
+            "permissions_expanded": False,
+            "third_party_code_executed": False,
+        }
+
+
 class BlenderMCPServer:
     def __init__(self, host='localhost', port=9876):
         self.host = host
@@ -10524,6 +11100,14 @@ class BlenderMCPServer:
         self.simulation_workflow_service = SimulationWorkflowService(self)
         self.motion_validation_service = MotionValidationService(self)
         self.animation_rigging_workflow_batch_service = AnimationRiggingWorkflowBatchService(self)
+        self.preferences_configuration_service = PreferencesConfigurationService(self)
+        self.tool_profile_service = ToolProfileService(self)
+        self.bundled_skill_pack_service = BundledSkillPackService(self)
+        self.addon_interop_inspection_service = AddonInteropInspectionService(self)
+        self.user_facing_error_service = UserFacingErrorService(self)
+        self.onboarding_workflow_service = OnboardingWorkflowService(self)
+        self.runtime_ux_status_service = RuntimeUXStatusService(self)
+        self.product_polish_workflow_batch_service = ProductPolishWorkflowBatchService(self)
 
         for _name, _service in {
             "get_modeling_capabilities": self.mesh_schema_construction_service,
@@ -10621,6 +11205,43 @@ class BlenderMCPServer:
             "bake_simulation_cache": self.simulation_workflow_service,
             "clear_simulation_cache": self.simulation_workflow_service,
             "run_animation_rigging_workflow_batch": self.animation_rigging_workflow_batch_service,
+            "get_preferences_schema": self.preferences_configuration_service,
+            "get_runtime_preferences": self.preferences_configuration_service,
+            "update_runtime_preferences": self.preferences_configuration_service,
+            "validate_runtime_preferences": self.preferences_configuration_service,
+            "reset_runtime_preferences": self.preferences_configuration_service,
+            "get_tool_profiles": self.tool_profile_service,
+            "get_active_tool_profile": self.tool_profile_service,
+            "set_active_tool_profile": self.tool_profile_service,
+            "preview_tool_profile": self.tool_profile_service,
+            "get_visible_tool_budget": self.tool_profile_service,
+            "get_enabled_tool_packs": self.tool_profile_service,
+            "set_enabled_tool_packs": self.tool_profile_service,
+            "recommend_tool_profile": self.tool_profile_service,
+            "list_bundled_skill_packs": self.bundled_skill_pack_service,
+            "get_bundled_skill_pack": self.bundled_skill_pack_service,
+            "search_bundled_skill_packs": self.bundled_skill_pack_service,
+            "activate_skill_pack": self.bundled_skill_pack_service,
+            "deactivate_skill_pack": self.bundled_skill_pack_service,
+            "recommend_skill_packs": self.bundled_skill_pack_service,
+            "validate_skill_pack_readiness": self.bundled_skill_pack_service,
+            "list_addon_source_roots": self.addon_interop_inspection_service,
+            "scan_addon_sources_readonly": self.addon_interop_inspection_service,
+            "get_addon_source_summary": self.addon_interop_inspection_service,
+            "search_addon_operators": self.addon_interop_inspection_service,
+            "search_addon_panels": self.addon_interop_inspection_service,
+            "search_addon_properties": self.addon_interop_inspection_service,
+            "plan_addon_operator_invocation": self.addon_interop_inspection_service,
+            "execute_approved_addon_operator": self.addon_interop_inspection_service,
+            "get_error_catalog": self.user_facing_error_service,
+            "explain_error": self.user_facing_error_service,
+            "get_remediation_steps": self.user_facing_error_service,
+            "get_runtime_dashboard": self.runtime_ux_status_service,
+            "get_approval_queue_summary": self.runtime_ux_status_service,
+            "get_recent_operation_summary": self.runtime_ux_status_service,
+            "get_setup_status": self.onboarding_workflow_service,
+            "run_onboarding_checklist": self.onboarding_workflow_service,
+            "run_product_polish_workflow_batch": self.product_polish_workflow_batch_service,
             "get_bake_capabilities": self.bake_capabilities_service,
             "validate_bake_setup": self.bake_preflight_service,
             "estimate_bake_cost": self.bake_preflight_service,
@@ -10995,6 +11616,43 @@ class BlenderMCPServer:
         self.export_project_review_package = self.review_package_export_service.export_project_review_package
         self.validate_review_package = self.review_package_export_service.validate_review_package
         self.run_advanced_knowledge_workflow_batch = self.advanced_knowledge_workflow_batch_service.run_advanced_knowledge_workflow_batch
+        self.get_preferences_schema = self.preferences_configuration_service.get_preferences_schema
+        self.get_runtime_preferences = self.preferences_configuration_service.get_runtime_preferences
+        self.update_runtime_preferences = self.preferences_configuration_service.update_runtime_preferences
+        self.validate_runtime_preferences = self.preferences_configuration_service.validate_runtime_preferences
+        self.reset_runtime_preferences = self.preferences_configuration_service.reset_runtime_preferences
+        self.get_tool_profiles = self.tool_profile_service.get_tool_profiles
+        self.get_active_tool_profile = self.tool_profile_service.get_active_tool_profile
+        self.set_active_tool_profile = self.tool_profile_service.set_active_tool_profile
+        self.preview_tool_profile = self.tool_profile_service.preview_tool_profile
+        self.get_visible_tool_budget = self.tool_profile_service.get_visible_tool_budget
+        self.get_enabled_tool_packs = self.tool_profile_service.get_enabled_tool_packs
+        self.set_enabled_tool_packs = self.tool_profile_service.set_enabled_tool_packs
+        self.recommend_tool_profile = self.tool_profile_service.recommend_tool_profile
+        self.list_bundled_skill_packs = self.bundled_skill_pack_service.list_bundled_skill_packs
+        self.get_bundled_skill_pack = self.bundled_skill_pack_service.get_bundled_skill_pack
+        self.search_bundled_skill_packs = self.bundled_skill_pack_service.search_bundled_skill_packs
+        self.activate_skill_pack = self.bundled_skill_pack_service.activate_skill_pack
+        self.deactivate_skill_pack = self.bundled_skill_pack_service.deactivate_skill_pack
+        self.recommend_skill_packs = self.bundled_skill_pack_service.recommend_skill_packs
+        self.validate_skill_pack_readiness = self.bundled_skill_pack_service.validate_skill_pack_readiness
+        self.list_addon_source_roots = self.addon_interop_inspection_service.list_addon_source_roots
+        self.scan_addon_sources_readonly = self.addon_interop_inspection_service.scan_addon_sources_readonly
+        self.get_addon_source_summary = self.addon_interop_inspection_service.get_addon_source_summary
+        self.search_addon_operators = self.addon_interop_inspection_service.search_addon_operators
+        self.search_addon_panels = self.addon_interop_inspection_service.search_addon_panels
+        self.search_addon_properties = self.addon_interop_inspection_service.search_addon_properties
+        self.plan_addon_operator_invocation = self.addon_interop_inspection_service.plan_addon_operator_invocation
+        self.execute_approved_addon_operator = self.addon_interop_inspection_service.execute_approved_addon_operator
+        self.get_error_catalog = self.user_facing_error_service.get_error_catalog
+        self.explain_error = self.user_facing_error_service.explain_error
+        self.get_remediation_steps = self.user_facing_error_service.get_remediation_steps
+        self.get_runtime_dashboard = self.runtime_ux_status_service.get_runtime_dashboard
+        self.get_approval_queue_summary = self.runtime_ux_status_service.get_approval_queue_summary
+        self.get_recent_operation_summary = self.runtime_ux_status_service.get_recent_operation_summary
+        self.get_setup_status = self.onboarding_workflow_service.get_setup_status
+        self.run_onboarding_checklist = self.onboarding_workflow_service.run_onboarding_checklist
+        self.run_product_polish_workflow_batch = self.product_polish_workflow_batch_service.run_product_polish_workflow_batch
 
     def start(self):
         if self.running:
@@ -11349,6 +12007,43 @@ class BlenderMCPServer:
             "bake_simulation_cache": self.bake_simulation_cache,
             "clear_simulation_cache": self.clear_simulation_cache,
             "run_animation_rigging_workflow_batch": self.run_animation_rigging_workflow_batch,
+            "get_preferences_schema": self.get_preferences_schema,
+            "get_runtime_preferences": self.get_runtime_preferences,
+            "update_runtime_preferences": self.update_runtime_preferences,
+            "validate_runtime_preferences": self.validate_runtime_preferences,
+            "reset_runtime_preferences": self.reset_runtime_preferences,
+            "get_tool_profiles": self.get_tool_profiles,
+            "get_active_tool_profile": self.get_active_tool_profile,
+            "set_active_tool_profile": self.set_active_tool_profile,
+            "preview_tool_profile": self.preview_tool_profile,
+            "get_visible_tool_budget": self.get_visible_tool_budget,
+            "get_enabled_tool_packs": self.get_enabled_tool_packs,
+            "set_enabled_tool_packs": self.set_enabled_tool_packs,
+            "recommend_tool_profile": self.recommend_tool_profile,
+            "list_bundled_skill_packs": self.list_bundled_skill_packs,
+            "get_bundled_skill_pack": self.get_bundled_skill_pack,
+            "search_bundled_skill_packs": self.search_bundled_skill_packs,
+            "activate_skill_pack": self.activate_skill_pack,
+            "deactivate_skill_pack": self.deactivate_skill_pack,
+            "recommend_skill_packs": self.recommend_skill_packs,
+            "validate_skill_pack_readiness": self.validate_skill_pack_readiness,
+            "list_addon_source_roots": self.list_addon_source_roots,
+            "scan_addon_sources_readonly": self.scan_addon_sources_readonly,
+            "get_addon_source_summary": self.get_addon_source_summary,
+            "search_addon_operators": self.search_addon_operators,
+            "search_addon_panels": self.search_addon_panels,
+            "search_addon_properties": self.search_addon_properties,
+            "plan_addon_operator_invocation": self.plan_addon_operator_invocation,
+            "execute_approved_addon_operator": self.execute_approved_addon_operator,
+            "get_error_catalog": self.get_error_catalog,
+            "explain_error": self.explain_error,
+            "get_remediation_steps": self.get_remediation_steps,
+            "get_runtime_dashboard": self.get_runtime_dashboard,
+            "get_approval_queue_summary": self.get_approval_queue_summary,
+            "get_recent_operation_summary": self.get_recent_operation_summary,
+            "get_setup_status": self.get_setup_status,
+            "run_onboarding_checklist": self.run_onboarding_checklist,
+            "run_product_polish_workflow_batch": self.run_product_polish_workflow_batch,
             "get_timeline_info": self.get_timeline_info,
             "list_animated_objects": self.list_animated_objects,
             "get_animation_deep_info": self.get_animation_deep_info,
@@ -13525,6 +14220,36 @@ class BlenderMCPServer:
     #endregion
 
 # Blender UI Panel
+class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    tool_profile: EnumProperty(
+        name="Tool Profile",
+        description="Default user-facing Overtli tool profile",
+        items=[
+            ("minimal", "Minimal", "Compact read-only setup"),
+            ("read_only_review", "Read Only Review", "Inspection and diagnostics"),
+            ("safe_scene", "Safe Scene", "Default non-destructive scene work"),
+            ("materials", "Materials", "Material and texture workflows"),
+            ("modeling", "Modeling", "Modeling and reference workflows"),
+            ("animation", "Animation", "Animation, rigging, and shot workflows"),
+            ("full_standard", "Full Standard", "Broad standard tool surface"),
+            ("developer", "Developer", "Addon development and interop tools"),
+        ],
+        default="safe_scene",
+    )
+    show_diagnostics: BoolProperty(name="Show Diagnostics Hints", default=True)
+    approved_roots_hint: StringProperty(name="Approved Roots Hint", default="Use MCP preferences commands to add roots with approval.")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Overtli-Blender Runtime UX")
+        layout.prop(self, "tool_profile")
+        layout.prop(self, "show_diagnostics")
+        layout.prop(self, "approved_roots_hint")
+        layout.label(text="Permission expansion, raw Python, and third-party operator execution are MCP approval-gated.")
+
+
 class BLENDERMCP_PT_Panel(bpy.types.Panel):
     bl_label = "Blender MCP"
     bl_idname = "BLENDERMCP_PT_Panel"
@@ -13537,6 +14262,9 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
         scene = context.scene
 
         layout.prop(scene, "blendermcp_port")
+        layout.label(text=f"Tool Profile: {getattr(context.preferences.addons.get(__name__, None), 'preferences', None).tool_profile if context.preferences.addons.get(__name__, None) else 'safe_scene'}")
+        layout.label(text="Security: approvals required for risky operations")
+        layout.label(text="Diagnostics: use get_runtime_dashboard or run onboarding checklist")
         layout.prop(scene, "blendermcp_use_polyhaven", text="Use assets from Poly Haven")
 
         layout.prop(scene, "blendermcp_use_hyper3d", text="Use Hyper3D Rodin 3D model generation")
@@ -13660,6 +14388,7 @@ def register():
         default=""
     )
 
+    bpy.utils.register_class(BLENDERMCP_AddonPreferences)
     bpy.utils.register_class(BLENDERMCP_PT_Panel)
     bpy.utils.register_class(BLENDERMCP_OT_SetFreeTrialHyper3DAPIKey)
     bpy.utils.register_class(BLENDERMCP_OT_StartServer)
@@ -13674,6 +14403,7 @@ def unregister():
         del bpy.types.blendermcp_server
 
     bpy.utils.unregister_class(BLENDERMCP_PT_Panel)
+    bpy.utils.unregister_class(BLENDERMCP_AddonPreferences)
     bpy.utils.unregister_class(BLENDERMCP_OT_SetFreeTrialHyper3DAPIKey)
     bpy.utils.unregister_class(BLENDERMCP_OT_StartServer)
     bpy.utils.unregister_class(BLENDERMCP_OT_StopServer)

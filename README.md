@@ -1,5 +1,21 @@
 # Overtli-Blender
 
+## Phase 9B Product UX
+
+Phase 9B adds user-facing runtime UX over the existing command library:
+
+- runtime preferences schema and validation
+- safe permission/profile persistence
+- built-in tool profiles and visible tool budgets
+- bundled skill pack library and readiness checks
+- read-only third-party addon source inspection
+- approval-gated third-party operator planning
+- user-friendly error catalog and remediation hints
+- onboarding/setup checks
+- runtime dashboard, approval queue, and recent operation summaries
+
+See `docs/preferences.md`, `docs/tool_profiles.md`, `docs/bundled_skill_packs.md`, `docs/addon_interoperability.md`, `docs/error_handling.md`, `docs/onboarding.md`, and `docs/runtime_dashboard.md`.
+
 Overtli-Blender is a local-first Blender MCP addon/server for AI-assisted Blender workflows.
 It connects Blender to MCP clients through a socket bridge, with shared context, inspection tools, scripting helpers, provider status checks, Geometry Nodes helpers, raw code execution, and a built-in safety policy.
 

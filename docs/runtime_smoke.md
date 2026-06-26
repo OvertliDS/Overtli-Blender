@@ -1,5 +1,30 @@
 # Runtime Smoke
 
+## Phase 9B Product UX Smoke
+
+Phase 9B adds a non-destructive product UX smoke:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase9b-full
+```
+
+The scenario checks preferences, tool profiles, visible tool budget, bundled skill packs, read-only addon interop boundaries, error catalog remediation, runtime dashboard, approval queue, recent operations, onboarding, and product polish batch.
+
+Individual flags are also available:
+
+```text
+--include-preferences-status
+--include-tool-profile-ux
+--include-bundled-skills
+--include-addon-interop-readonly
+--include-error-catalog
+--include-runtime-dashboard
+--include-onboarding-checklist
+--include-product-polish-batch
+```
+
+The Phase 9B smoke does not expand permissions, execute third-party addon code, run raw Python, delete files, or write outside approved generated workspace locations.
+
 ## Phase 9A
 
 Run the contained Phase 9A animation, rigging, driver, pose, shot, and simulation smoke after refreshing or reloading the Blender addon:

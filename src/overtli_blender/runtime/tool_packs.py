@@ -54,6 +54,13 @@ TOOL_PACK_DEFINITIONS = {
     "shot_workflows": ToolPack("shot_workflows", "Shot Workflows", "Shot ranges, camera cuts, timeline markers, shot plans, and validation.", ("shot_workflows", "rendering")),
     "simulation_workflows": ToolPack("simulation_workflows", "Simulation Workflows", "Simulation capabilities, bounded setup, cache status, and approval-gated preview/bake/clear.", ("simulation_workflows", "cache_management", "cloth_patterns")),
     "motion_validation": ToolPack("motion_validation", "Motion Validation", "Motion, driver, NLA, rig, shot, and simulation validation reports.", ("motion_validation", "advanced_animation", "rigging")),
+    "product_ux": ToolPack("product_ux", "Product UX", "Runtime dashboard, approval summaries, recent operation summaries, and product polish checks.", ("product_ux", "core", "diagnostics")),
+    "preferences": ToolPack("preferences", "Preferences", "Runtime preference schema, validation, persistence, and reset workflows.", ("preferences", "project", "files")),
+    "tool_profiles": ToolPack("tool_profiles", "Tool Profiles", "User-facing profile presets, visible tool budget, and tool-pack activation UX.", ("tool_profiles", "core")),
+    "bundled_skills": ToolPack("bundled_skills", "Bundled Skills", "Bundled skill pack library, search, recommendations, activation, and readiness checks.", ("bundled_skills", "knowledge")),
+    "addon_interop": ToolPack("addon_interop", "Addon Interoperability", "Read-only third-party addon source inspection and approval-gated operator invocation plans.", ("addon_interop", "addon_management")),
+    "error_help": ToolPack("error_help", "Error Help", "User-friendly error catalog, explanations, and remediation steps.", ("error_help", "diagnostics")),
+    "onboarding": ToolPack("onboarding", "Onboarding", "Guided setup checks and safe default readiness.", ("onboarding", "diagnostics", "project")),
 }
 
 

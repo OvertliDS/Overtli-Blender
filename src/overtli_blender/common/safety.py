@@ -423,7 +423,37 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
     command_map.update(_phase8a_safety_map())
     command_map.update(_phase8b_safety_map())
     command_map.update(_phase9a_safety_map())
+    command_map.update(_phase9b_safety_map())
     return command_map
+
+
+def _phase9b_safety_map() -> dict[str, CommandSafetyMetadata]:
+    low = [
+        "get_preferences_schema", "get_runtime_preferences", "validate_runtime_preferences",
+        "get_tool_profiles", "get_active_tool_profile", "preview_tool_profile",
+        "get_visible_tool_budget", "get_enabled_tool_packs", "recommend_tool_profile",
+        "list_bundled_skill_packs", "get_bundled_skill_pack", "search_bundled_skill_packs",
+        "recommend_skill_packs", "validate_skill_pack_readiness", "list_addon_source_roots",
+        "get_addon_source_summary", "search_addon_operators", "search_addon_panels",
+        "search_addon_properties", "plan_addon_operator_invocation", "get_error_catalog",
+        "explain_error", "get_remediation_steps", "get_runtime_dashboard",
+        "get_approval_queue_summary", "get_recent_operation_summary", "get_setup_status",
+        "run_product_polish_workflow_batch",
+    ]
+    medium = [
+        "update_runtime_preferences", "reset_runtime_preferences", "set_active_tool_profile",
+        "set_enabled_tool_packs", "activate_skill_pack", "deactivate_skill_pack",
+        "scan_addon_sources_readonly", "run_onboarding_checklist",
+    ]
+    high = ["execute_approved_addon_operator"]
+    specs: dict[str, CommandSafetyMetadata] = {}
+    for name in low:
+        specs[name] = _spec(name, OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE, warnings=("phase9b-product-ux",))
+    for name in medium:
+        specs[name] = _spec(name, OperationType.UPDATE_KNOWLEDGE if "skill" in name else OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_write_files=name in {"update_runtime_preferences", "reset_runtime_preferences", "scan_addon_sources_readonly", "run_onboarding_checklist"}, warnings=("phase9b-approval-required-if-risk-expands",))
+    for name in high:
+        specs[name] = _spec(name, OperationType.INSTALL_ADDON, RiskLevel.HIGH, Reversibility.UNKNOWN, can_execute_code=True, strict_blocked=True, warnings=("explicit-approval-required", "exact-third-party-operator-only"))
+    return specs
 
 
 def _phase9a_safety_map() -> dict[str, CommandSafetyMetadata]:

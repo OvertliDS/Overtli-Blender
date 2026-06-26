@@ -1,4 +1,5 @@
 from .addon_development_tools import register_addon_development_tools
+from .addon_interop_tools import register_addon_interop_tools
 from .addon_management_tools import register_addon_management_tools
 from .advanced_knowledge_workflow_tools import register_advanced_knowledge_workflow_tools
 from .action_library_tools import register_action_library_tools
@@ -7,6 +8,7 @@ from .api_knowledge_tools import register_api_knowledge_tools
 from .animation_tools import register_animation_tools
 from .asset_library_tools import register_asset_library_tools
 from .asset_workflow_tools import register_asset_workflow_tools
+from .bundled_skill_tools import register_bundled_skill_tools
 from .camera_tools import register_camera_tools
 from .cache_tools import register_cache_tools
 from .code_execution_tools import register_code_execution_tools
@@ -16,6 +18,7 @@ from .context_tools import register_context_tools
 from .deformation_tools import register_deformation_tools
 from .dependency_tools import register_dependency_tools
 from .driver_tools import register_driver_tools
+from .error_catalog_tools import register_error_catalog_tools
 from .advanced_material_tools import register_advanced_material_tools
 from .fcurve_tools import register_fcurve_tools
 from .file_access_tools import register_file_access_tools
@@ -36,8 +39,10 @@ from .material_texture_tools import register_material_texture_tools
 from .modifier_tools import register_modifier_tools
 from .motion_validation_tools import register_motion_validation_tools
 from .nla_tools import register_nla_tools
+from .onboarding_tools import register_onboarding_tools
 from .polyhaven_tools import register_polyhaven_tools
 from .pose_library_tools import register_pose_library_tools
+from .preferences_tools import register_preferences_tools
 from .presentation_workflow_tools import register_presentation_workflow_tools
 from .procedural_asset_tools import register_procedural_asset_tools
 from .project_workspace_tools import register_project_workspace_tools
@@ -54,6 +59,8 @@ from .scene_intelligence_tools import register_scene_intelligence_tools
 from .scene_kit_tools import register_scene_kit_tools
 from .spatial_tools import register_spatial_tools
 from .task_graph_tools import register_task_graph_tools
+from .tool_profile_tools import register_tool_profile_tools
+from .ux_status_tools import register_ux_status_tools
 from .selection_tools import register_selection_tools
 from .shape_key_tools import register_shape_key_tools
 from .shader_graph_tools import register_shader_graph_tools
@@ -74,6 +81,7 @@ from .workspace_tools import register_workspace_tools
 __all__ = [
     "register_all_tools",
     "register_addon_development_tools",
+    "register_addon_interop_tools",
     "register_addon_management_tools",
     "register_advanced_knowledge_workflow_tools",
     "register_action_library_tools",
@@ -82,6 +90,7 @@ __all__ = [
     "register_animation_tools",
     "register_asset_library_tools",
     "register_asset_workflow_tools",
+    "register_bundled_skill_tools",
     "register_camera_tools",
     "register_cache_tools",
     "register_code_execution_tools",
@@ -91,6 +100,7 @@ __all__ = [
     "register_deformation_tools",
     "register_dependency_tools",
     "register_driver_tools",
+    "register_error_catalog_tools",
     "register_advanced_material_tools",
     "register_fcurve_tools",
     "register_file_access_tools",
@@ -111,8 +121,10 @@ __all__ = [
     "register_modifier_tools",
     "register_motion_validation_tools",
     "register_nla_tools",
+    "register_onboarding_tools",
     "register_polyhaven_tools",
     "register_pose_library_tools",
+    "register_preferences_tools",
     "register_presentation_workflow_tools",
     "register_procedural_asset_tools",
     "register_project_workspace_tools",
@@ -129,6 +141,8 @@ __all__ = [
     "register_scene_kit_tools",
     "register_spatial_tools",
     "register_task_graph_tools",
+    "register_tool_profile_tools",
+    "register_ux_status_tools",
     "register_selection_tools",
     "register_shape_key_tools",
     "register_shader_graph_tools",

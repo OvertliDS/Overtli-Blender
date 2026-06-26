@@ -1,5 +1,15 @@
 # Changelog
 
+## Phase 9B - Product UX, Preferences, Skill Packs, and Addon Interoperability
+
+- Added runtime preferences schema, persistence, validation, and approval-gated permission expansion.
+- Added built-in tool profiles, tool-pack visibility controls, visible tool budgets, and profile recommendations.
+- Added bundled skill pack library, search, recommendations, activation, and readiness checks.
+- Added read-only third-party addon source inspection with AST parsing and no source execution.
+- Added approval-required addon operator invocation planning boundary.
+- Added user-facing error catalog, remediation steps, onboarding checks, runtime dashboard, approval queue summary, recent operation summary, and product polish batch.
+- Added Phase 9B smoke flags and public docs for the new UX surfaces.
+
 ## Unreleased
 
 - Added Phase 9A advanced animation, rigging, drivers, simulation, pose/action library, and shot workflow command surfaces.
