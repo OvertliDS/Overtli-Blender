@@ -21,6 +21,7 @@ def test_packaged_addon_scaffold_exists() -> None:
 
 def test_build_script_mentions_packaged_layout() -> None:
     text = (ROOT / "scripts" / "build_addon_zip.py").read_text(encoding="utf-8")
-    assert "--layout" in text
-    assert "experimental_package_layout" in text
+    assert "--mode" in text
+    assert "package-root" in text
+    assert "legacy-shim" not in text
     assert "overtli_blender_addon" in text

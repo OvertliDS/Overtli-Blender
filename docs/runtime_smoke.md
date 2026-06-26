@@ -1,5 +1,26 @@
 # Runtime Smoke
 
+## Phase 10A Release Candidate Smoke
+
+After installing the package addon zip, enabling Overtli-Blender, and starting the socket server in Blender, run:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --include-addon-package-status
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --release-candidate-full
+```
+
+`--include-addon-package-status` checks packaged addon status, command registry visibility, and runtime dashboard availability.
+
+`--release-candidate-full` runs the required baseline smoke plus safety status, package status, governance metadata, and Phase 9B product/addon interop checks. It does not run provider downloads or raw code.
+
+For a heavier manual local check across all contained phase smokes:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --release-candidate-all-phases
+```
+
+`--release-candidate-all-phases` runs the contained Phase 2 through Phase 9B full smoke scenarios plus package status. Use it only with Blender open and a disposable/test scene when you want broad behavior preservation evidence.
+
 ## Phase 9B Product UX Smoke
 
 Phase 9B adds a non-destructive product UX smoke:

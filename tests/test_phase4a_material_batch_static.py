@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 ADVANCED_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/advanced_material_tools.py").read_text(encoding="utf-8")
 PREVIEW_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/material_preview_tools.py").read_text(encoding="utf-8")
 

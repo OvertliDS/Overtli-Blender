@@ -60,13 +60,15 @@ socket command names remain stable.
 
 ## Install
 
-Use an editable install during development:
+Create a local virtual environment and install the MCP package:
 
 ```powershell
-python -m pip install -e .
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\python -m pip install -e .
 ```
 
-The Python distribution is `overtli-blender`, the import package lives at `src/overtli_blender`, and `addon.py` remains the single-file Blender addon entrypoint.
+The Python distribution is `overtli-blender`, the import package lives at `src/overtli_blender`, and the Blender addon runtime lives in `overtli_blender_addon/`.
 
 The primary console command is:
 
@@ -74,13 +76,19 @@ The primary console command is:
 overtli-blender
 ```
 
-See [docs/install.md](docs/install.md) and [docs/addon_install.md](docs/addon_install.md) for repeatable install steps.
+See [docs/install.md](docs/install.md), [docs/mcp_setup.md](docs/mcp_setup.md), and [docs/addon_install.md](docs/addon_install.md) for repeatable install and MCP client setup steps.
+
+For MCP clients, register the venv Python module command:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server
+```
 
 ## Blender Addon Setup
 
-1. Open Blender.
-2. Install or enable `addon.py` in `Edit > Preferences > Add-ons`.
-3. Start the addon socket server from the Blender MCP UI.
+1. Build the addon zip with `.\.venv\Scripts\python scripts\build_addon_zip.py --mode package --verify`.
+2. Open Blender and install `.overtli_blender/release/addon_zip/overtli_blender_addon_0.1.0.zip`.
+3. Enable Overtli-Blender and start the addon socket server from the sidebar UI.
 4. Leave the socket on `localhost:9876` unless you intentionally changed it.
 
 ## Runtime Smoke

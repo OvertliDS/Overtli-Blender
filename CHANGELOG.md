@@ -1,5 +1,13 @@
 # Changelog
 
+## Phase 10A - Modular Addon Package and Release-Candidate Hardening
+
+- Moved the Blender addon runtime out of the root entrypoint and into `overtli_blender_addon/`.
+- Split addon code into core, runtime, registration, preferences, UI, operators, adapters, shared helpers, and domain service modules.
+- Made `scripts/build_addon_zip.py` package-first with allowlist contents, manifest hashes, JSON/list output, and zip verification.
+- Added compatibility, performance, security, fault-injection, docs-lockdown, migration-audit, and release-candidate check surfaces.
+- Updated static tests to inspect the packaged addon runtime as the source of truth.
+
 ## Phase 9B - Product UX, Preferences, Skill Packs, and Addon Interoperability
 
 - Added runtime preferences schema, persistence, validation, and approval-gated permission expansion.
@@ -27,15 +35,15 @@ All notable public Overtli-Blender changes are summarized here. Private planning
 
 ## Unreleased / Current Development
 
-### Phase 7B - Runtime Governance, Tool Packs, and Packaged Addon Scaffold
+### Phase 7B - Runtime Governance, Tool Packs, and Packaged Addon Foundation
 - Added a source-owned `CommandSpec` registry for existing socket commands and governance commands.
 - Added tool pack discovery/search, permission profiles, two-phase approval records, operation response envelopes, operation runtime skeletons, and structured log helpers.
 - Added governance MCP wrappers and socket command support without renaming existing tools.
-- Added Phase 7B smoke flags, release-check gates, public governance docs, and an experimental packaged addon scaffold/build layout.
+- Added Phase 7B smoke flags, release-check gates, public governance docs, and initial packaged addon build layout.
 
 ### Phase 7A - Release Hardening and Distribution Readiness
 - Added local release readiness checks through `scripts/release_check.py`.
-- Added public-safe single-file addon zip packaging through `scripts/build_addon_zip.py`.
+- Added public-safe addon zip packaging through `scripts/build_addon_zip.py`.
 - Added wheel/sdist build validation through `scripts/build_python_package.py`.
 - Added public-safe diagnostic bundle export through `scripts/export_diagnostic_bundle.py`.
 - Added install documentation checks through `scripts/check_install_docs.py`.

@@ -109,8 +109,41 @@ def test_runtime_smoke_script_mentions_expected_commands_and_flags() -> None:
         "--include-capability-policy",
         "--include-log-status",
         "--phase7b-full",
+        "--include-addon-package-status",
+        "--release-candidate-full",
+        "--release-candidate-all-phases",
     ]:
         assert text in SMOKE_TEXT
+
+
+def test_runtime_smoke_phase10a_release_candidate_flags_are_safe_wrappers() -> None:
+    for text in [
+        "def run_addon_package_status_smoke",
+        "def run_release_candidate_full_smoke",
+        "def run_release_candidate_all_phases_smoke",
+        "get_addon_management_status",
+        "get_command_registry_report",
+        "get_runtime_dashboard",
+    ]:
+        assert text in SMOKE_TEXT
+
+    rc_start = SMOKE_TEXT.index("def run_release_candidate_full_smoke")
+    rc_end = SMOKE_TEXT.index("def run_release_candidate_all_phases_smoke")
+    rc_block = SMOKE_TEXT[rc_start:rc_end]
+    for text in [
+        "run_optional_safety_status_smoke",
+        "run_addon_package_status_smoke",
+        "run_phase7b_governance_smoke",
+        "run_phase9b_full_smoke",
+    ]:
+        assert text in rc_block
+    for text in [
+        "execute_code",
+        "download_polyhaven_asset",
+        "download_sketchfab_model",
+        "create_rodin_job",
+    ]:
+        assert text not in rc_block
 
 
 def test_runtime_smoke_phase7b_full_is_metadata_only() -> None:

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _addon_command_names() -> set[str]:
-    tree = ast.parse((ROOT / "addon.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "overtli_blender_addon" / "runtime" / "socket_server.py").read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "_build_command_handlers":

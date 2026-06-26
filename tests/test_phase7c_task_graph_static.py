@@ -10,6 +10,6 @@ def test_phase7c_task_graph_schema_and_time_revision_exist() -> None:
         assert marker in task_runtime
     time_runtime = (ROOT / "src/overtli_blender/runtime/time_revision.py").read_text(encoding="utf-8")
     assert "class TimeRevisionTracker" in time_runtime
-    addon = (ROOT / "addon.py").read_text(encoding="utf-8")
+    from tests._addon_source import ADDON_PACKAGE_SOURCE as addon
     for klass in ["TaskGraphService", "TimeRevisionService"]:
         assert f"class {klass}" in addon

@@ -5,7 +5,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = [ROOT / "README.md", ROOT / "docs" / "install.md", ROOT / "docs" / "addon_install.md", ROOT / "docs" / "runtime_smoke.md"]
+DOCS = [
+    ROOT / "README.md",
+    ROOT / "docs" / "install.md",
+    ROOT / "docs" / "mcp_setup.md",
+    ROOT / "docs" / "addon_install.md",
+    ROOT / "docs" / "runtime_smoke.md",
+]
 
 
 def main() -> int:
@@ -21,6 +27,10 @@ def main() -> int:
             failures.append(f"{path.relative_to(ROOT)} missing src/overtli_blender")
         if "smoke_blender_addon_socket.py" not in text:
             failures.append(f"{path.relative_to(ROOT)} missing runtime smoke command")
+        if path.name in {"install.md", "mcp_setup.md"} and "py -3.12 -m venv .venv" not in text:
+            failures.append(f"{path.relative_to(ROOT)} missing venv creation command")
+        if path.name == "mcp_setup.md" and "[mcp_servers.\"overtli-blender\"]" not in text:
+            failures.append(f"{path.relative_to(ROOT)} missing Codex MCP stanza")
         if path.name != "README.md" and "blender-mcp-enhanced" in text:
             failures.append(f"{path.relative_to(ROOT)} contains stale blender-mcp-enhanced")
     if failures:

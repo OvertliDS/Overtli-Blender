@@ -1,33 +1,27 @@
 # Blender Addon Install
 
-`addon.py` is the single-file Overtli-Blender addon entrypoint for the `overtli-blender` package. You can install that file directly or install the zip produced by `scripts/build_addon_zip.py`.
+The Python MCP package is `overtli-blender`; the Blender addon package is installed separately from the addon zip.
 
-## Install `addon.py`
-
-1. Open Blender.
-2. Go to `Edit > Preferences > Add-ons`.
-3. Choose `Install from Disk` or `Install`.
-4. Select `addon.py` from the repository root.
-5. Enable `Overtli-Blender`.
-6. In the Overtli-Blender panel, start the socket server.
-7. Leave the default host and port as `localhost:9876` unless you intentionally changed them.
-
-## Install Addon Zip
-
-Build the zip:
+The primary Blender addon zip is the clean package zip built by:
 
 ```powershell
-.\.venv\Scripts\python scripts\build_addon_zip.py
+.\.venv\Scripts\python scripts\build_addon_zip.py --mode package --verify
 ```
 
-Then use the same Blender add-on install UI and select the generated zip under `.overtli_blender/release/addon_zip/`.
+Install the generated zip from:
 
-## Smoke Check
+```text
+.overtli_blender/release/addon_zip/overtli_blender_addon_0.1.0.zip
+```
 
-With Blender open and the socket server started:
+In Blender, open `Edit > Preferences > Add-ons > Install`, select the zip, enable `Overtli-Blender`, then start the socket server from the Overtli-Blender sidebar panel.
+
+After the socket server is running, verify the bridge from the repository root:
 
 ```powershell
-.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --include-addon-package-status
 ```
 
-Full manual smoke commands are documented in [runtime_smoke.md](runtime_smoke.md). Do not run provider downloads or raw code smoke unless you explicitly intend to test those optional flows.
+The repository-root `addon.py` is only the Blender entrypoint that imports `overtli_blender_addon`; it is not the addon runtime and should not be copied by itself.
+
+If the addon installs but does not appear in Blender's Add-ons list, rebuild the zip and reinstall the generated package zip. The installed addon folder should contain `overtli_blender_addon/__init__.py` with a top-level `bl_info` entry; Blender uses that package metadata for addon discovery.

@@ -1,25 +1,13 @@
 # Packaged Addon Migration
 
-Phase 7B creates an experimental packaged addon scaffold:
+Phase 10A makes `overtli_blender_addon/` the canonical Blender-side runtime.
 
-```text
-overtli_blender_addon/
-  __init__.py
-  registration.py
-  preferences.py
-  runtime/
-  services/
-```
+The root `addon.py` is intentionally small and delegates to the package entrypoint. Runtime code is organized under:
 
-`addon.py` remains the stable addon entrypoint and install target. The packaged
-layout exists to make future migration smaller and safer.
+- `overtli_blender_addon/core.py` for shared Blender-side imports, fallbacks, constants, and pure helpers.
+- `overtli_blender_addon/runtime/` for socket server, dispatcher, command context, response, logging, approval, operation, and registry bridges.
+- `overtli_blender_addon/services/` for domain services such as scene, materials, assets, geometry nodes, baking, modeling, animation, workspace, diagnostics, addon management, and product UX.
+- `overtli_blender_addon/ui/`, `preferences.py`, `operators.py`, and `registration.py` for Blender UI and lifecycle.
+- `overtli_blender_addon/adapters/` and `shared/` for compatibility and addon-local contracts.
 
-`scripts/build_addon_zip.py` now supports:
-
-- `--layout legacy`: current single-file addon zip.
-- `--layout packaged`: experimental package-layout zip.
-- `--layout both`: build both outputs. This is the default.
-
-The packaged zip is labeled `experimental_package_layout`. Future phases should
-move services gradually and keep smoke compatibility with `addon.py` until the
-packaged runtime is equivalent.
+The addon zip is built from an allowlist and has one install root: `overtli_blender_addon/`. It must not include repository-private docs, tests, scripts, Memory Bank files, generated artifacts, AI review tooling, `.env`, or API mirrors.

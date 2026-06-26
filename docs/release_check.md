@@ -77,6 +77,8 @@ CI does not:
 Live Blender smoke remains manual:
 
 ```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-addon-package-status
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --release-candidate-full
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase2-full
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase3-full
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --phase4a-full

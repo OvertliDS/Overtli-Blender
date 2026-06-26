@@ -147,6 +147,36 @@ def check_addon_entrypoint() -> None:
     text = (ROOT / "addon.py").read_text(encoding="utf-8")
     if "bl_info" not in text or "Overtli-Blender" not in text:
         raise RuntimeError("addon.py missing bl_info or Overtli-Blender identity")
+    if len(text.splitlines()) > 300:
+        raise RuntimeError("addon.py must remain a thin Blender entrypoint")
+    if "class BlenderMCPServer" in text or "class SharedContextService" in text:
+        raise RuntimeError("addon.py must not contain runtime/service implementations")
+
+
+def check_addon_package_structure() -> None:
+    required = [
+        "overtli_blender_addon/__init__.py",
+        "overtli_blender_addon/core.py",
+        "overtli_blender_addon/bl_info.py",
+        "overtli_blender_addon/registration.py",
+        "overtli_blender_addon/preferences.py",
+        "overtli_blender_addon/operators.py",
+        "overtli_blender_addon/runtime/dispatcher.py",
+        "overtli_blender_addon/runtime/socket_server.py",
+        "overtli_blender_addon/services/context.py",
+        "overtli_blender_addon/services/scene.py",
+        "overtli_blender_addon/services/materials.py",
+        "overtli_blender_addon/services/geometry_nodes.py",
+        "overtli_blender_addon/services/product_ux.py",
+    ]
+    missing = [rel for rel in required if not (ROOT / rel).is_file()]
+    if missing:
+        raise RuntimeError(f"missing packaged addon modules: {missing}")
+    if (ROOT / "overtli_blender_addon" / "legacy_runtime.py").exists():
+        raise RuntimeError("legacy_runtime.py monolith must not exist")
+    server_text = (ROOT / "overtli_blender_addon" / "runtime" / "socket_server.py").read_text(encoding="utf-8")
+    if "class BlenderMCPServer" not in server_text or "def _build_command_handlers" not in server_text:
+        raise RuntimeError("packaged socket server missing command runtime")
 
 
 def check_smoke_script_static() -> None:
@@ -241,7 +271,7 @@ def main() -> int:
     warnings: list[str] = []
     record(checks, "python_version", lambda: sys.version_info >= (3, 10) or (_ for _ in ()).throw(RuntimeError("Python >=3.10 required")))
     record(checks, "git_status", check_git_status)
-    record(checks, "compileall", lambda: require_command([sys.executable, "-m", "compileall", "addon.py", "main.py", "src", "scripts", "tests"]))
+    record(checks, "compileall", lambda: require_command([sys.executable, "-m", "compileall", "addon.py", "main.py", "src", "scripts", "tests", "overtli_blender_addon"]))
     record(checks, "pytest", lambda: require_command([sys.executable, "-m", "pytest"]))
     record(checks, "import_overtli_blender", check_import)
     record(checks, "pyproject", check_pyproject)
@@ -250,6 +280,7 @@ def main() -> int:
         record(checks, "privacy_scan", check_privacy_scan)
         record(checks, "stale_identity_scan", check_stale_identity_scan)
     record(checks, "addon_entrypoint", check_addon_entrypoint)
+    record(checks, "addon_package_structure", check_addon_package_structure)
     record(checks, "smoke_script_static", check_smoke_script_static)
     record(checks, "phase7b_governance_static", check_phase7b_governance_static)
     if args.full:

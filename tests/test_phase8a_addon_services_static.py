@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON
 
 
 def test_phase8a_addon_service_classes_exist():

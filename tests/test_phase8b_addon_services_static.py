@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-ADDON_TEXT = Path("addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 
 
 def test_phase8b_addon_service_classes_exist():

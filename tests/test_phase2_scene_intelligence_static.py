@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 SCENE_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/scene_intelligence_tools.py").read_text(encoding="utf-8")
 
 

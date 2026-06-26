@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 VERIFICATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/verification_tools.py").read_text(encoding="utf-8")
 GITIGNORE_TEXT = (ROOT / ".gitignore").read_text(encoding="utf-8")
 RUNTIME_DOCS_TEXT = (ROOT / "docs/runtime_smoke.md").read_text(encoding="utf-8")

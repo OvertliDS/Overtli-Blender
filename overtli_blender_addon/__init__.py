@@ -1,16 +1,16 @@
-"""Experimental packaged addon layout for Overtli-Blender.
+"""Packaged Blender addon entrypoint for Overtli-Blender."""
 
-The production addon remains `addon.py` during Phase 7B. This package is the
-migration scaffold that future phases will fill by moving services gradually.
-"""
+from __future__ import annotations
 
+# Blender's addon discovery reads this module directly and expects a literal
+# top-level bl_info assignment. Do not replace this with an imported alias.
 bl_info = {
     "name": "Overtli-Blender",
     "author": "OvertliDS",
     "version": (0, 1, 0),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > Overtli-Blender",
-    "description": "Experimental packaged Overtli-Blender addon layout.",
+    "description": "Local-first Blender MCP socket addon.",
     "category": "Interface",
 }
 

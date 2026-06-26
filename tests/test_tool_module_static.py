@@ -35,7 +35,7 @@ SKETCHFAB_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/sketchfab_tools.py").r
 HYPER3D_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/hyper3d_tools.py").read_text(encoding="utf-8")
 GEOMETRY_NODES_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/geometry_nodes_tools.py").read_text(encoding="utf-8")
 SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 
 
 def test_context_tools_module_exists_and_registers_tools() -> None:

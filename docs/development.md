@@ -11,12 +11,13 @@ The package identity is:
 - distribution: `overtli-blender`
 - import package: `src/overtli_blender`
 - console command: `overtli-blender`
-- addon entrypoint: `addon.py`
+- addon package: `overtli_blender_addon/`
+- Blender entrypoint: `addon.py`
 
 ## Static Validation
 
 ```powershell
-.\.venv\Scripts\python -m compileall addon.py main.py src scripts tests
+.\.venv\Scripts\python -m compileall addon.py main.py src scripts tests overtli_blender_addon
 .\.venv\Scripts\python -m pytest
 .\.venv\Scripts\python scripts\release_check.py --fast
 ```
@@ -25,7 +26,7 @@ The package identity is:
 
 ```powershell
 .\.venv\Scripts\python scripts\build_python_package.py
-.\.venv\Scripts\python scripts\build_addon_zip.py
+.\.venv\Scripts\python scripts\build_addon_zip.py --mode package --verify
 ```
 
 `scripts/build_python_package.py` writes standard Python artifacts under `dist/`. `scripts/build_addon_zip.py` writes ignored addon zip artifacts under `.overtli_blender/release/addon_zip/`.

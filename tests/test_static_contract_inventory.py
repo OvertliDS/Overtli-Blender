@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER_TEXT = (ROOT / "src/overtli_blender/server.py").read_text(encoding="utf-8")
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 CONTEXT_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/context_tools.py").read_text(encoding="utf-8")
 COLLECTION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/collection_tools.py").read_text(encoding="utf-8")
 DEFORMATION_TOOLS_TEXT = (ROOT / "src/overtli_blender/tools/deformation_tools.py").read_text(encoding="utf-8")

@@ -1416,6 +1416,61 @@ def run_phase9b_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     print("PASS phase9b full smoke completed without permission expansion or third-party execution")
 
 
+def run_addon_package_status_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    addon_status = assert_command_success(
+        "get_addon_management_status package",
+        send_command(sock, timeout_seconds, "get_addon_management_status"),
+    )
+    if not addon_status.get("supports_addon_inspection"):
+        raise RuntimeError(f"get_addon_management_status: addon inspection unavailable: {addon_status}")
+
+    registry = _unwrap_governance_envelope(
+        "get_command_registry_report package",
+        send_command(sock, timeout_seconds, "get_command_registry_report"),
+    )
+    if registry.get("status") != "success" or registry.get("command_count", 0) < 100:
+        raise RuntimeError(f"get_command_registry_report package: {registry}")
+
+    dashboard = assert_command_success(
+        "get_runtime_dashboard package",
+        send_command(sock, timeout_seconds, "get_runtime_dashboard"),
+    )
+    if "setup" not in dashboard and "status" not in dashboard:
+        raise RuntimeError(f"get_runtime_dashboard package: malformed dashboard {dashboard}")
+
+    print("PASS addon package status smoke")
+
+
+def run_release_candidate_full_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    run_optional_safety_status_smoke(sock, timeout_seconds)
+    run_addon_package_status_smoke(sock, timeout_seconds)
+    run_phase7b_governance_smoke(sock, timeout_seconds)
+    run_phase9b_full_smoke(sock, timeout_seconds)
+    print("PASS release-candidate full smoke completed")
+
+
+def run_release_candidate_all_phases_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    for runner in [
+        run_phase2_full_smoke,
+        run_phase3_full_smoke,
+        run_phase4a_full_smoke,
+        run_phase4b_full_smoke,
+        run_phase5a_full_smoke,
+        run_phase5b_full_smoke,
+        run_phase6a_full_smoke,
+        run_phase6b_full_smoke,
+        run_phase7b_governance_smoke,
+        run_phase7c_full_smoke,
+        run_phase8a_full_smoke,
+        run_phase8b_full_smoke,
+        run_phase9a_full_smoke,
+        run_phase9b_full_smoke,
+    ]:
+        runner(sock, timeout_seconds)
+    run_addon_package_status_smoke(sock, timeout_seconds)
+    print("PASS release-candidate all-phases smoke completed")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Smoke-test the Overtli-Blender addon socket directly.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Addon socket host (default: localhost)")
@@ -1641,6 +1696,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase9b-full",
         action="store_true",
         help="Run Phase 9B preferences, profiles, bundled skills, addon interop, errors, dashboard, onboarding, and polish checks.",
+    )
+    parser.add_argument(
+        "--include-addon-package-status",
+        action="store_true",
+        help="Run packaged addon status, registry, and dashboard checks.",
+    )
+    parser.add_argument(
+        "--release-candidate-full",
+        action="store_true",
+        help="Run conservative Phase 10A release-candidate live smoke without provider downloads or raw code.",
+    )
+    parser.add_argument(
+        "--release-candidate-all-phases",
+        action="store_true",
+        help="Run all contained phase full smokes from Phase 2 through 9B plus package status.",
     )
     return parser
 
@@ -1915,6 +1985,15 @@ def main(argv: list[str] | None = None) -> int:
                 or args.include_product_polish_batch
             ):
                 run_phase9b_full_smoke(sock, args.timeout)
+
+            if args.include_addon_package_status:
+                run_addon_package_status_smoke(sock, args.timeout)
+
+            if args.release_candidate_full:
+                run_release_candidate_full_smoke(sock, args.timeout)
+
+            if args.release_candidate_all_phases:
+                run_release_candidate_all_phases_smoke(sock, args.timeout)
 
         print("PASS smoke harness completed")
         return 0

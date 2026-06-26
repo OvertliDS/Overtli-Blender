@@ -1,6 +1,25 @@
 # Install
 
-This project has two local install surfaces: the Python MCP package and the Blender addon entrypoint.
+This project has two local install surfaces: the Python MCP package and the packaged Blender addon zip.
+
+For complete MCP client setup, including virtual environment creation and MCP client registration, see [mcp_setup.md](mcp_setup.md).
+
+## Virtual Environment
+
+From the repository root:
+
+```powershell
+cd "D:\AI\custom mcp\Overtli-Blender"
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+```
+
+If the Python launcher is not available, create `.venv` with any installed Python 3.10+ interpreter:
+
+```powershell
+"C:\Path\To\Python312\python.exe" -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+```
 
 ## Python Package
 
@@ -22,17 +41,35 @@ The package name is `overtli-blender`, the import package is `src/overtli_blende
 overtli-blender
 ```
 
+For MCP clients, register the venv Python module command:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server
+```
+
+Codex TOML example:
+
+```toml
+[mcp_servers."overtli-blender"]
+command = "D:\\AI\\custom mcp\\Overtli-Blender\\.venv\\Scripts\\python.exe"
+args = [ "-m", "overtli_blender.server" ]
+
+[mcp_servers."overtli-blender".env]
+BLENDER_HOST = "localhost"
+BLENDER_PORT = "9876"
+```
+
 Quick checks:
 
 ```powershell
 .\.venv\Scripts\python -c "import overtli_blender; print(overtli_blender.__name__)"
-.\.venv\Scripts\python -m compileall addon.py main.py src scripts tests
+.\.venv\Scripts\python -m compileall addon.py main.py src scripts tests overtli_blender_addon
 .\.venv\Scripts\python -m pytest
 ```
 
 ## Blender Addon
 
-Use [addon_install.md](addon_install.md) for Blender UI steps. `addon.py` remains the single-file Blender entrypoint.
+Use [addon_install.md](addon_install.md) for Blender UI steps. Build and install the package zip; do not copy the repository-root entrypoint by itself.
 
 ## Socket Smoke
 

@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_phase7c_reference_service_tracks_calibration_and_landmarks() -> None:
-    addon = (ROOT / "addon.py").read_text(encoding="utf-8")
+    from tests._addon_source import ADDON_PACKAGE_SOURCE as addon
     assert "class ReferenceImageService" in addon
     for marker in ['"references", "images"', "scale_calibration", "landmarks", "copy_into_project", "empty_display_type"]:
         assert marker in addon

@@ -9,12 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_addon_zip_builder_public_safe_contract() -> None:
     text = (ROOT / "scripts" / "build_addon_zip.py").read_text(encoding="utf-8")
     for needle in [
-        "addon.py",
+        "PACKAGE_ROOT",
         "overtli_blender_addon_",
         ".overtli_blender",
         "release",
         "addon_zip",
-        "files_included",
+        "included_files",
         "zip_sha256",
         "source_commit",
         "memory_bank",

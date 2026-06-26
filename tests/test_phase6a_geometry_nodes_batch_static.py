@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON_TEXT = (ROOT / "addon.py").read_text(encoding="utf-8")
+from tests._addon_source import ADDON_PACKAGE_SOURCE as ADDON_TEXT
 SMOKE_TEXT = (ROOT / "scripts" / "smoke_blender_addon_socket.py").read_text(encoding="utf-8")
 REGISTRY_TEXT = (ROOT / "src" / "overtli_blender" / "tools" / "registry.py").read_text(encoding="utf-8")
 INIT_TEXT = (ROOT / "src" / "overtli_blender" / "tools" / "__init__.py").read_text(encoding="utf-8")
