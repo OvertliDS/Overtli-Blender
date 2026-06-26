@@ -1,5 +1,12 @@
 # Changelog
 
+## Phase 10C - ChatGPT Browser Connector and Remote MCP Bridge
+
+- Added Streamable HTTP MCP bridge startup flags while preserving stdio as the default local MCP transport.
+- Added `chatgpt_browser_default` and `remote_browser_safe` profiles for compact browser connector discovery and approval-heavy remote use.
+- Added ChatGPT browser connector docs, prompt checklist, metadata JSON, static/live connector check script, and release/docs gate coverage.
+- Added `/health`, `/metadata`, and documented `/mcp` endpoint behavior for local tunnel development.
+
 ## Phase 10B - Final RC Closure and v0.1.0 Handoff Prep
 
 - Added final addon modularity, import boundary, and handoff aggregate scripts.

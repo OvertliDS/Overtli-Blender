@@ -15,6 +15,12 @@ DOCS = [
     ROOT / "docs" / "release_artifacts.md",
     ROOT / "docs" / "troubleshooting.md",
 ]
+CHATGPT_DOCS = [
+    ROOT / "docs" / "chatgpt_browser_connector.md",
+    ROOT / "docs" / "chatgpt_connector_prompts.md",
+    ROOT / "config" / "chatgpt_connector_metadata.json",
+    ROOT / "scripts" / "chatgpt_connector_check.py",
+]
 
 
 def main() -> int:
@@ -40,6 +46,18 @@ def main() -> int:
             failures.append(f"{path.relative_to(ROOT)} missing path approval troubleshooting")
         if path.name != "README.md" and "blender-mcp-enhanced" in text:
             failures.append(f"{path.relative_to(ROOT)} contains stale blender-mcp-enhanced")
+    for path in CHATGPT_DOCS:
+        if not path.is_file():
+            failures.append(f"missing {path.relative_to(ROOT)}")
+    browser_doc = ROOT / "docs" / "chatgpt_browser_connector.md"
+    if browser_doc.is_file():
+        text = browser_doc.read_text(encoding="utf-8")
+        for required in ["Developer mode", "Settings -> Connectors -> Create", "/mcp", "MCP Inspector", "Always ask"]:
+            if required not in text:
+                failures.append(f"{browser_doc.relative_to(ROOT)} missing {required}")
+    mcp_setup = ROOT / "docs" / "mcp_setup.md"
+    if mcp_setup.is_file() and "chatgpt_browser_connector.md" not in mcp_setup.read_text(encoding="utf-8"):
+        failures.append("docs/mcp_setup.md missing ChatGPT browser connector reference")
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)

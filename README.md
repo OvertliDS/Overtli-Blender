@@ -84,6 +84,14 @@ For MCP clients, register the venv Python module command:
 .\.venv\Scripts\python -m overtli_blender.server
 ```
 
+For ChatGPT.com browser developer-mode connector testing, use the Streamable HTTP bridge:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server --transport http --host 127.0.0.1 --port 2091 --profile chatgpt_browser_default --remote-safety remote_browser_safe
+```
+
+The local MCP endpoint is `http://127.0.0.1:2091/mcp`; ChatGPT needs an HTTPS tunnel URL ending in `/mcp`. See [docs/chatgpt_browser_connector.md](docs/chatgpt_browser_connector.md) and [docs/chatgpt_connector_prompts.md](docs/chatgpt_connector_prompts.md).
+
 ## Blender Addon Setup
 
 1. Build the addon zip with `.\.venv\Scripts\python scripts\build_addon_zip.py --mode package --verify`.

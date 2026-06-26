@@ -60,6 +60,7 @@ def build_handoff(handoff_id: str | None = None) -> tuple[Path, dict]:
         "compatibility_check": _run(["scripts/compatibility_check.py", "--json"]),
         "performance_check": _run(["scripts/performance_check.py", "--fast", "--json"]),
         "fault_injection_check": _run(["scripts/fault_injection_check.py", "--json"]),
+        "chatgpt_connector_check": _run(["scripts/chatgpt_connector_check.py", "--static", "--json"]),
         "diagnostic_bundle_export": _run(["scripts/export_diagnostic_bundle.py"]),
     }
 
@@ -93,6 +94,7 @@ def build_handoff(handoff_id: str | None = None) -> tuple[Path, dict]:
     test_summary = {
         "pytest": "covered by release_check_fast in this aggregate",
         "static_phase10b_scripts": ["addon_modularity_check", "import_boundary_check", "final_release_handoff"],
+        "static_phase10c_scripts": ["chatgpt_connector_check"],
         "checks": {name: result["status"] for name, result in checks.items()},
     }
     smoke_summary = {
@@ -118,6 +120,7 @@ def build_handoff(handoff_id: str | None = None) -> tuple[Path, dict]:
             "- Live Blender socket verification is local/manual and is not run by CI.",
             "- `overtli_blender_addon/runtime/socket_server.py` remains the largest runtime module, though root `addon.py` is a thin entrypoint.",
             "- Provider downloads and raw Python execution remain opt-in/high-risk surfaces.",
+            "- ChatGPT.com browser connector creation and golden-prompt testing remain manual through a local-development HTTPS tunnel.",
         ],
     )
     _write_text(
@@ -126,6 +129,7 @@ def build_handoff(handoff_id: str | None = None) -> tuple[Path, dict]:
             "# Next Steps",
             "",
             "- If decision is `ship_candidate`, draft the v0.1.0 tag/release only after explicit user approval.",
+            "- Manually create the ChatGPT.com developer-mode connector from the tunnel `/mcp` URL before claiming browser validation.",
             "- If decision is `needs_fixes`, resolve failed gates before release prep.",
             "- If decision is `blocked`, stop feature work and resolve package/security/privacy blockers.",
         ],

@@ -22,6 +22,8 @@ REQUIRED_DOCS = [
     "docs/release_artifacts.md",
     "docs/known_limitations.md",
     "docs/troubleshooting.md",
+    "docs/chatgpt_browser_connector.md",
+    "docs/chatgpt_connector_prompts.md",
 ]
 STALE_PUBLIC_PHRASES = [
     "single-file Blender addon entrypoint",
@@ -57,6 +59,12 @@ def run_check() -> dict:
             stale.append({"path": rel, "phrase": "missing final handoff command"})
         if rel == "docs/troubleshooting.md" and "PATH_NOT_APPROVED" not in text:
             stale.append({"path": rel, "phrase": "missing path approval troubleshooting"})
+        if rel == "docs/mcp_setup.md" and "chatgpt_browser_connector.md" not in text:
+            stale.append({"path": rel, "phrase": "missing ChatGPT browser connector link"})
+        if rel == "docs/chatgpt_browser_connector.md":
+            for required in ["Developer mode", "Settings -> Connectors -> Create", "/mcp", "MCP Inspector", "local/tunnel development"]:
+                if required not in text:
+                    stale.append({"path": rel, "phrase": f"missing {required}"})
     return {"status": "passed" if not missing and not stale else "failed", "missing": missing, "stale": stale}
 
 

@@ -229,6 +229,33 @@ def check_phase7b_governance_static() -> None:
         raise RuntimeError("command registry unexpectedly small")
 
 
+def check_chatgpt_browser_connector_static() -> None:
+    required = [
+        "docs/chatgpt_browser_connector.md",
+        "docs/chatgpt_connector_prompts.md",
+        "config/chatgpt_connector_metadata.json",
+        "scripts/chatgpt_connector_check.py",
+    ]
+    missing = [rel for rel in required if not (ROOT / rel).is_file()]
+    if missing:
+        raise RuntimeError(f"missing ChatGPT connector files: {missing}")
+    from overtli_blender.runtime.tool_profiles import get_profile
+    from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
+
+    profile = get_profile("chatgpt_browser_default")
+    if profile is None:
+        raise RuntimeError("missing chatgpt_browser_default profile")
+    if profile.max_visible_tools > 100:
+        raise RuntimeError("chatgpt_browser_default visible tool budget is too large")
+    if profile.permission_profile != "remote_browser_safe":
+        raise RuntimeError("chatgpt_browser_default must use remote_browser_safe")
+    if "raw_python" in PROFILE_CAPABILITIES.get("remote_browser_safe", set()):
+        raise RuntimeError("remote_browser_safe must not include raw_python")
+    mcp_setup = (ROOT / "docs" / "mcp_setup.md").read_text(encoding="utf-8")
+    if "chatgpt_browser_connector.md" not in mcp_setup or "/mcp" not in mcp_setup:
+        raise RuntimeError("docs/mcp_setup.md missing ChatGPT browser connector /mcp reference")
+
+
 def run_full_checks(checks: dict[str, str], args: argparse.Namespace, warnings: list[str]) -> None:
     if not args.skip_build:
         def build_package() -> None:
@@ -283,6 +310,7 @@ def main() -> int:
     record(checks, "addon_package_structure", check_addon_package_structure)
     record(checks, "smoke_script_static", check_smoke_script_static)
     record(checks, "phase7b_governance_static", check_phase7b_governance_static)
+    record(checks, "chatgpt_browser_connector_static", check_chatgpt_browser_connector_static)
     if args.full:
         run_full_checks(checks, args, warnings)
 

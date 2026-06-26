@@ -305,7 +305,8 @@ def test_phase4b_tool_modules_exist_and_register_tools() -> None:
 
 def test_server_imports_and_registers_context_tools() -> None:
     assert "from overtli_blender.tools.registry import register_all_tools" in SERVER_TEXT
-    assert "register_all_tools(mcp, get_blender_connection, image_type=Image)" in SERVER_TEXT
+    assert "register_all_tools(server, get_blender_connection, image_type=Image)" in SERVER_TEXT
+    assert "mcp = create_mcp_server()" in SERVER_TEXT
 
 
 def test_server_no_longer_defines_execute_blender_code() -> None:

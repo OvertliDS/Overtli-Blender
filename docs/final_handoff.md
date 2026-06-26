@@ -19,6 +19,7 @@ Run from the repository root:
 .\.venv\Scripts\python scripts\compatibility_check.py --json
 .\.venv\Scripts\python scripts\performance_check.py --fast --json
 .\.venv\Scripts\python scripts\fault_injection_check.py --json
+.\.venv\Scripts\python scripts\chatgpt_connector_check.py --static --json
 .\.venv\Scripts\python scripts\export_diagnostic_bundle.py
 .\.venv\Scripts\python scripts\final_release_handoff.py --json
 ```
@@ -61,3 +62,14 @@ Then sync the generated `Overtli-Blender_AIReview_Drive/` mirror through the loc
 - `blocked`: package, import-boundary, security, or privacy gates failed.
 
 Do not create a GitHub tag, GitHub release, PyPI upload, or public release artifact until the user explicitly approves v0.1.0 release handoff.
+
+## ChatGPT Browser Connector
+
+Phase 10C adds local/tunnel developer-mode connector prep for ChatGPT.com:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server --transport http --host 127.0.0.1 --port 2091 --profile chatgpt_browser_default --remote-safety remote_browser_safe
+.\.venv\Scripts\python scripts\chatgpt_connector_check.py --static --json
+```
+
+Manual ChatGPT browser validation requires an HTTPS tunnel URL ending in `/mcp`; see [chatgpt_browser_connector.md](chatgpt_browser_connector.md). Keep browser permissions approval-heavy.

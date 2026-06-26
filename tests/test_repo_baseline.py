@@ -16,6 +16,9 @@ def test_required_repo_files_exist() -> None:
         "src/overtli_blender/server.py",
         "src/overtli_blender/__init__.py",
         "docs/README.md",
+        "docs/chatgpt_browser_connector.md",
+        "config/chatgpt_connector_metadata.json",
+        "scripts/chatgpt_connector_check.py",
         "tests/test_repo_baseline.py",
         "tests/test_static_contract_inventory.py",
     ]

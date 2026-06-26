@@ -63,6 +63,52 @@ def assert_success(name: str, response: dict, require_result_dict: bool = True) 
     return result if isinstance(result, dict) else {}
 
 
+def run_chatgpt_browser_readiness_static() -> None:
+    from overtli_blender.server import build_server_status, create_mcp_server, _parse_args
+    from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
+    from overtli_blender.runtime.tool_profiles import get_profile
+
+    profile = get_profile("chatgpt_browser_default")
+    if profile is None:
+        raise RuntimeError("chatgpt_browser_default profile is missing")
+    if profile.permission_profile != "remote_browser_safe":
+        raise RuntimeError("chatgpt_browser_default must use remote_browser_safe")
+    if profile.max_visible_tools > 100:
+        raise RuntimeError("chatgpt_browser_default visible tool budget is too large")
+    remote_caps = PROFILE_CAPABILITIES.get("remote_browser_safe", set())
+    for blocked in ["raw_python", "filesystem.external.write", "filesystem.delete", "addon.execute"]:
+        if blocked in remote_caps:
+            raise RuntimeError(f"remote_browser_safe must not include {blocked}")
+    server = create_mcp_server(profile="chatgpt_browser_default", remote_safety="remote_browser_safe")
+    visible = set(server._tool_manager._tools)  # type: ignore[attr-defined]
+    high_risk_operator_tool = "execute_" + "approved_addon_operator"
+    for hidden in ["execute_code", "execute_blender_code", "download_polyhaven_asset", high_risk_operator_tool]:
+        if hidden in visible:
+            raise RuntimeError(f"{hidden} must not be visible in chatgpt_browser_default")
+    for required in ["search_tools", "get_tool_spec", "discover_tool_packs", "get_permission_profile"]:
+        if required not in visible:
+            raise RuntimeError(f"{required} must remain visible in chatgpt_browser_default")
+    status = build_server_status(_parse_args(["--transport", "http", "--profile", "chatgpt_browser_default", "--remote-safety", "remote_browser_safe"]))
+    if not status["mcp_url"].endswith("/mcp"):
+        raise RuntimeError("HTTP MCP URL must end in /mcp")
+    print(f"PASS chatgpt_browser_readiness visible_tools={len(visible)} mcp_url={status['mcp_url']}")
+
+
+def run_remote_mcp_profile_static() -> None:
+    from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
+    from overtli_blender.runtime.tool_profiles import get_profile
+
+    profile = get_profile("chatgpt_browser_default")
+    remote_caps = PROFILE_CAPABILITIES.get("remote_browser_safe")
+    if profile is None or remote_caps is None:
+        raise RuntimeError("ChatGPT browser profile or remote safety profile is missing")
+    if "execute_code" not in profile.hidden_risky_tools:
+        raise RuntimeError("ChatGPT browser profile must hide execute_code")
+    if {"network.providers", "raw_python", "filesystem.delete", "filesystem.external.write"} & set(remote_caps):
+        raise RuntimeError("remote_browser_safe includes a blocked high-risk capability")
+    print("PASS remote_mcp_profile chatgpt_browser_default remote_browser_safe")
+
+
 def run_required_smoke(sock: socket.socket, timeout_seconds: float) -> None:
     for command_name in [
         "get_scene_info",
@@ -1637,6 +1683,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-runtime-dashboard", action="store_true", help="Run Phase 9B runtime dashboard checks.")
     parser.add_argument("--include-onboarding-checklist", action="store_true", help="Run Phase 9B onboarding checklist checks.")
     parser.add_argument("--include-product-polish-batch", action="store_true", help="Run Phase 9B product polish batch checks.")
+    parser.add_argument("--include-chatgpt-browser-readiness", action="store_true", help="Run static ChatGPT browser connector readiness checks without requiring live HTTP.")
+    parser.add_argument("--include-remote-mcp-profile", action="store_true", help="Run static remote MCP profile checks for chatgpt_browser_default and remote_browser_safe.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1730,6 +1778,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.include_chatgpt_browser_readiness:
+            run_chatgpt_browser_readiness_static()
+        if args.include_remote_mcp_profile:
+            run_remote_mcp_profile_static()
+        static_only = (
+            (args.include_chatgpt_browser_readiness or args.include_remote_mcp_profile)
+            and not any(
+                value
+                for key, value in vars(args).items()
+                if key not in {"host", "port", "timeout", "include_chatgpt_browser_readiness", "include_remote_mcp_profile"}
+                and isinstance(value, bool)
+            )
+        )
+        if static_only:
+            print("PASS smoke harness completed")
+            return 0
+
         with socket.create_connection((args.host, args.port), timeout=args.timeout) as sock:
             print(f"Connected to {args.host}:{args.port}")
             run_required_smoke(sock, args.timeout)

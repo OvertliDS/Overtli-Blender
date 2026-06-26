@@ -13,6 +13,16 @@ After installing the package addon zip, enabling Overtli-Blender, and starting t
 
 `--release-candidate-full` runs the required baseline smoke plus safety status, package status, governance metadata, and Phase 9B product/addon interop checks. It does not run provider downloads or raw code.
 
+Phase 10C adds static/local browser-connector readiness flags:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-chatgpt-browser-readiness
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-remote-mcp-profile
+.\.venv\Scripts\python scripts\chatgpt_connector_check.py --static --json
+```
+
+These checks verify the `chatgpt_browser_default` profile, `remote_browser_safe` policy, connector metadata, and `/mcp` documentation. They do not require ChatGPT.com, a public tunnel, or live HTTP in CI.
+
 For a heavier manual local check across all contained phase smokes:
 
 ```powershell

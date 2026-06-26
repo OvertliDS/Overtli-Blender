@@ -30,3 +30,11 @@ Live release-candidate smoke requires Blender with the packaged addon enabled an
 ```
 
 For MCP client setup, including `.venv` creation and AI model access through stdio registration, see [mcp_setup.md](mcp_setup.md).
+
+For ChatGPT.com browser connector readiness, run:
+
+```powershell
+.\.venv\Scripts\python scripts\chatgpt_connector_check.py --static --json
+```
+
+The browser connector setup is documented in [chatgpt_browser_connector.md](chatgpt_browser_connector.md). Its connector URL must end in `/mcp`, and live ChatGPT testing remains manual through a local-development HTTPS tunnel.

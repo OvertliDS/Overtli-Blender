@@ -5,6 +5,8 @@ Overtli-Blender has two pieces that must both be running for AI models to use Bl
 1. The Blender addon package, installed from the addon zip, starts the local socket server inside Blender.
 2. The Python MCP package, installed in the repository virtual environment, exposes stdio tools to MCP clients and forwards tool calls to the Blender socket.
 
+For ChatGPT.com browser developer-mode connectors, use the HTTP bridge guide instead: [chatgpt_browser_connector.md](chatgpt_browser_connector.md). Browser connectors need an HTTPS-reachable `/mcp` endpoint and cannot launch the local stdio command directly.
+
 Do not copy the repository root into Blender. Do not install the root `addon.py` by itself.
 
 ## 1. Create The Virtual Environment
@@ -57,6 +59,28 @@ The installed console script is:
 ```
 
 MCP clients usually launch the server themselves through stdio, so you normally register the command instead of keeping a separate terminal open.
+
+## 2A. Optional ChatGPT.com Browser Connector HTTP Bridge
+
+Local stdio setup above remains the default for Codex and local MCP clients. For ChatGPT.com browser testing, start the additional Streamable HTTP bridge:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server --transport http --host 127.0.0.1 --port 2091 --profile chatgpt_browser_default --remote-safety remote_browser_safe
+```
+
+Documented connector endpoint:
+
+```text
+http://127.0.0.1:2091/mcp
+```
+
+Use a local-development tunnel to provide an HTTPS URL for ChatGPT:
+
+```text
+https://<your-tunnel-host>/mcp
+```
+
+See [chatgpt_browser_connector.md](chatgpt_browser_connector.md) for tunnel setup, ChatGPT developer-mode steps, MCP Inspector validation, and browser smoke prompts.
 
 ## 3. Build And Install The Blender Addon
 
