@@ -518,11 +518,56 @@ class RenderSettingsService:
     def __init__(self, server):
         self.server = server
 
+    @staticmethod
+    def _enum_values(owner, property_name):
+        try:
+            prop = owner.bl_rna.properties[property_name]
+            return [item.identifier for item in prop.enum_items]
+        except Exception:
+            return []
+
+    def get_supported_color_management(self):
+        settings = bpy.context.scene.view_settings
+        return {
+            "status": "success",
+            "blender_version": ".".join(str(part) for part in bpy.app.version),
+            "view_transform": self._enum_values(settings, "view_transform"),
+            "look": self._enum_values(settings, "look"),
+            "exposure": float(settings.exposure),
+            "gamma": float(settings.gamma),
+            "active": {
+                "view_transform": settings.view_transform,
+                "look": settings.look,
+                "exposure": float(settings.exposure),
+                "gamma": float(settings.gamma),
+            },
+            "warnings": [],
+        }
+
+    @staticmethod
+    def _compatible_choice(preferred, supported):
+        if not preferred:
+            return None
+        if preferred in supported:
+            return preferred
+        lowered = {item.lower(): item for item in supported}
+        if str(preferred).lower() in lowered:
+            return lowered[str(preferred).lower()]
+        aliases = {
+            "filmic": ["Filmic", "AgX", "AgX - SDR", "Standard"],
+            "agx": ["AgX", "AgX - SDR", "AgX - Base Display P3", "Standard"],
+            "agx - medium high contrast": ["AgX - Medium High Contrast", "Medium High Contrast", "High Contrast", "None"],
+        }
+        for candidate in aliases.get(str(preferred).lower(), []):
+            if candidate in supported:
+                return candidate
+        return supported[0] if supported else None
+
     def get_render_settings(self):
         scene = bpy.context.scene
-        return {"status": "success", "engine": scene.render.engine, "resolution": {"x": int(scene.render.resolution_x), "y": int(scene.render.resolution_y), "percentage": int(scene.render.resolution_percentage)}, "fps": int(scene.render.fps), "frame_range": {"start": int(scene.frame_start), "end": int(scene.frame_end), "current": int(scene.frame_current)}, "filepath": scene.render.filepath, "image_format": scene.render.image_settings.file_format, "cycles_samples": int(getattr(scene.cycles, "samples", 0)) if hasattr(scene, "cycles") else None, "warnings": []}
+        return {"status": "success", "engine": scene.render.engine, "resolution": {"x": int(scene.render.resolution_x), "y": int(scene.render.resolution_y), "percentage": int(scene.render.resolution_percentage)}, "fps": int(scene.render.fps), "frame_range": {"start": int(scene.frame_start), "end": int(scene.frame_end), "current": int(scene.frame_current)}, "filepath": scene.render.filepath, "image_format": scene.render.image_settings.file_format, "cycles_samples": int(getattr(scene.cycles, "samples", 0)) if hasattr(scene, "cycles") else None, "color_management": {"view_transform": scene.view_settings.view_transform, "look": scene.view_settings.look, "exposure": float(scene.view_settings.exposure), "gamma": float(scene.view_settings.gamma)}, "warnings": []}
 
-    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False):
+    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False, auto_compatible=False):
         scene = bpy.context.scene
         before = self.get_render_settings()
         if engine:
@@ -546,6 +591,11 @@ class RenderSettingsService:
         if color_management:
             for key, value in color_management.items():
                 if hasattr(scene.view_settings, key):
+                    if auto_compatible and key in {"view_transform", "look"}:
+                        supported = self._enum_values(scene.view_settings, key)
+                        mapped = self._compatible_choice(value, supported)
+                        if mapped is not None:
+                            value = mapped
                     setattr(scene.view_settings, key, value)
         return {"status": "success", "before": before, "after": self.get_render_settings(), "warnings": ["Render settings were clamped for smoke-safe cost"] if clamp_for_smoke else []}
 

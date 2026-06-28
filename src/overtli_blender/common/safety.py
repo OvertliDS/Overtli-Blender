@@ -132,9 +132,16 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
         "list_verification_snapshots": _spec("list_verification_snapshots", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_supported_edit_operations": _spec("get_supported_edit_operations", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "create_primitive_object": _spec("create_primitive_object", OperationType.CREATE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
+        "create_box": _spec("create_box", OperationType.CREATE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
         "transform_object": _spec("transform_object", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True),
+        "transform_object_dimensions": _spec("transform_object_dimensions", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True),
         "duplicate_object": _spec("duplicate_object", OperationType.CREATE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
         "delete_objects": _spec("delete_objects", OperationType.CLEANUP, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=True, strict_blocked=True, warnings=("explicit-confirmation-required",)),
+        "clear_scene": _spec("clear_scene", OperationType.CLEANUP, RiskLevel.HIGH, Reversibility.PARTIAL, can_mutate_scene=True, strict_blocked=True, warnings=("dry-run-default", "explicit-confirmation-required", "prefix-bound-cleanup-supported")),
+        "scene_cleanup_plan": _spec("scene_cleanup_plan", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
+        "validate_ground_contact": _spec("validate_ground_contact", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
+        "align_object_to_surface": _spec("align_object_to_surface", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True),
+        "validate_scene_composition": _spec("validate_scene_composition", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "set_object_visibility": _spec("set_object_visibility", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
         "create_basic_material": _spec("create_basic_material", OperationType.MATERIAL, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
         "assign_material": _spec("assign_material", OperationType.MATERIAL, RiskLevel.MEDIUM, Reversibility.PARTIAL, can_mutate_scene=True),
@@ -201,6 +208,7 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
         "list_animated_objects": _spec("list_animated_objects", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_animation_deep_info": _spec("get_animation_deep_info", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_render_settings": _spec("get_render_settings", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
+        "get_supported_color_management": _spec("get_supported_color_management", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_compositor_status": _spec("get_compositor_status", OperationType.OBSERVE, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "set_current_frame": _spec("set_current_frame", OperationType.ANIMATE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True, warnings=("mutates-current-frame-state",)),
         "set_timeline_range": _spec("set_timeline_range", OperationType.ANIMATE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_mutate_scene=True),
@@ -284,6 +292,9 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
         "get_task_workspace": _spec("get_task_workspace", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE, can_write_files=True),
         "create_workspace_task": _spec("create_workspace_task", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
         "update_workspace_task": _spec("update_workspace_task", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
+        "complete_workspace_task": _spec("complete_workspace_task", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
+        "create_scene_plan": _spec("create_scene_plan", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
+        "list_scene_plan": _spec("list_scene_plan", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "list_workspace_tasks": _spec("list_workspace_tasks", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "add_workspace_todo": _spec("add_workspace_todo", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
         "update_workspace_todo": _spec("update_workspace_todo", OperationType.UPDATE_KNOWLEDGE, RiskLevel.MEDIUM, Reversibility.REVERSIBLE, can_write_files=True),
@@ -397,6 +408,7 @@ def build_command_safety_map() -> dict[str, CommandSafetyMetadata]:
         "approve_operation": _spec("approve_operation", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "deny_operation": _spec("deny_operation", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "execute_approved_operation": _spec("execute_approved_operation", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, warnings=("executes-only-with-approval-record",)),
+        "approve_and_execute_operation": _spec("approve_and_execute_operation", OperationType.EDIT, RiskLevel.MEDIUM, Reversibility.PARTIAL, warnings=("approves-and-executes-existing-approval-record",)),
         "expire_approval": _spec("expire_approval", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "get_operation_status": _spec("get_operation_status", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
         "list_recent_operations": _spec("list_recent_operations", OperationType.VERIFY, RiskLevel.LOW, Reversibility.REVERSIBLE),
@@ -566,7 +578,8 @@ def _phase8a_safety_map() -> dict[str, CommandSafetyMetadata]:
 
 def _phase7c_safety_map() -> dict[str, CommandSafetyMetadata]:
     low = [
-        "get_project_status", "resolve_project_workspace", "get_file_access_policy", "validate_path_access",
+        "get_project_status", "get_loaded_project_folder", "resolve_project_workspace", "detect_drive_roots",
+        "get_file_access_policy", "validate_path_access",
         "list_approved_roots", "scan_project_files", "get_cache_status", "list_tasks", "get_task",
         "get_task_graph", "detect_stale_tasks", "get_session_time", "get_scene_revision",
         "get_recent_operations", "get_changes_since_revision", "list_reference_images",
@@ -574,8 +587,9 @@ def _phase7c_safety_map() -> dict[str, CommandSafetyMetadata]:
         "get_oriented_bounds",
     ]
     medium = [
-        "initialize_project_workspace", "validate_project_layout", "repair_project_layout", "register_blend_file",
-        "create_project_backup", "collect_project_dependencies", "add_approved_root", "remove_approved_root",
+        "initialize_temp_workspace", "initialize_project_workspace", "validate_project_layout", "repair_project_layout", "register_blend_file",
+        "resave_project_folder", "plan_project_folder_move", "create_project_backup", "collect_project_dependencies",
+        "add_approved_root", "remove_approved_root", "approve_drive_roots",
         "write_project_text_file", "copy_file_into_project", "read_project_text_file", "plan_file_delete",
         "plan_cache_cleanup", "pin_artifact", "unpin_artifact", "find_orphaned_artifacts",
         "compact_operation_history", "create_task", "update_task", "set_task_status", "link_task_artifact",
@@ -589,7 +603,7 @@ def _phase7c_safety_map() -> dict[str, CommandSafetyMetadata]:
         "measure_object_to_reference", "plan_rename", "batch_rename_datablocks",
     ]
     high = [
-        "save_project_as", "restore_project_backup", "set_file_access_policy", "execute_approved_file_delete",
+        "save_project_as", "promote_temp_workspace_to_project", "move_project_folder", "restore_project_backup", "set_file_access_policy", "execute_approved_file_delete",
         "execute_cache_cleanup", "remove_reference_image", "execute_rename", "batch_rename_files",
         "rename_project", "repair_references_after_rename",
     ]

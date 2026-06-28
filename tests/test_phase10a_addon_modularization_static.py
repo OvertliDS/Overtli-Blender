@@ -56,11 +56,32 @@ def test_packaged_addon_init_has_literal_bl_info_for_blender_discovery() -> None
     assert bl_info["category"] == "Interface"
 
 
+def test_packaged_addon_register_reloads_child_modules_after_reinstall() -> None:
+    text = (ROOT / "overtli_blender_addon" / "__init__.py").read_text(encoding="utf-8")
+    assert "def _reload_child_modules" in text
+    assert "importlib.invalidate_caches()" in text
+    assert "__pycache__" in text
+    assert "os.remove(os.path.join(current_root, filename))" in text
+    assert "sys.modules.pop(module_name, None)" in text
+    assert "name.startswith(prefix)" in text
+    assert '"overtli_blender."' in text
+    assert 'name == "overtli_blender"' in text
+    assert text.index("_reload_child_modules()") < text.index("from .registration import register as register_package")
+
+
 def test_packaged_addon_does_not_require_requests_to_register() -> None:
     text = (ROOT / "overtli_blender_addon" / "core.py").read_text(encoding="utf-8")
     assert "except ModuleNotFoundError:" in text
     assert "Optional dependency 'requests' is not available in Blender Python" in text
     assert "requests = _MissingRequests()" in text
+
+
+def test_packaged_addon_uses_lazy_runtime_registry_wrappers() -> None:
+    text = (ROOT / "overtli_blender_addon" / "core.py").read_text(encoding="utf-8")
+    assert 'importlib.import_module("overtli_blender.runtime.command_registry")' in text
+    assert 'importlib.import_module("overtli_blender.runtime.tool_packs")' in text
+    assert "def command_registry_report():" in text
+    assert "def runtime_search_tools(query, category=None, tool_pack=None, risk_max=None, limit=20):" in text
 
 
 def test_service_implementations_are_in_package_source() -> None:

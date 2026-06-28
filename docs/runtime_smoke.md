@@ -13,15 +13,32 @@ After installing the package addon zip, enabling Overtli-Blender, and starting t
 
 `--release-candidate-full` runs the required baseline smoke plus safety status, package status, governance metadata, and Phase 9B product/addon interop checks. It does not run provider downloads or raw code.
 
-Phase 10C adds static/local browser-connector readiness flags:
+Phase 10C/10D adds static/local browser-connector readiness flags:
 
 ```powershell
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-chatgpt-browser-readiness
 .\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --include-remote-mcp-profile
 .\.venv\Scripts\python scripts\chatgpt_connector_check.py --static --json
+.\.venv\Scripts\python scripts\chatgpt_connector_check.py --browser-write-profile --json
 ```
 
-These checks verify the `chatgpt_browser_default` profile, `remote_browser_safe` policy, connector metadata, and `/mcp` documentation. They do not require ChatGPT.com, a public tunnel, or live HTTP in CI.
+These checks verify the `browser_full_standard` profile, `browser_standard` policy, backward-compatible aliases, connector metadata, approval mode defaults, safe structured write visibility, and `/mcp` documentation. They do not require ChatGPT.com, a public tunnel, or live HTTP in CI.
+
+With Blender open and the addon socket running, Phase 10D browser mutation smoke is:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --include-browser-mutation-path
+```
+
+It creates and verifies an `OVERTLI_BROWSER_SMOKE_*` cube/material using safe structured tools, creates a verification snapshot, cleans up exact smoke data, and fails if `execute_approved_operation` or `approve_and_execute_operation` is missing or if `object_count remains 0` after a claimed mutation.
+
+The stricter approval-gated path is:
+
+```powershell
+.\.venv\Scripts\python scripts\smoke_blender_addon_socket.py --timeout 30 --include-browser-approval-execution-path
+```
+
+It prepares a `create_primitive_object` operation, executes it with `approve_and_execute_operation`, verifies the created object in scene info, and cleans up. If this reports `Unknown command type: approve_and_execute_operation`, rebuild and reinstall `.overtli_blender\release\addon_zip\overtli_blender_addon_0.1.0.zip`, restart the addon socket, and rerun the check.
 
 For a heavier manual local check across all contained phase smokes:
 

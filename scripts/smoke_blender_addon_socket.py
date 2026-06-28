@@ -68,27 +68,32 @@ def run_chatgpt_browser_readiness_static() -> None:
     from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
     from overtli_blender.runtime.tool_profiles import get_profile
 
-    profile = get_profile("chatgpt_browser_default")
+    profile = get_profile("browser_full_standard")
+    legacy = get_profile("chatgpt_browser_default")
     if profile is None:
-        raise RuntimeError("chatgpt_browser_default profile is missing")
-    if profile.permission_profile != "remote_browser_safe":
-        raise RuntimeError("chatgpt_browser_default must use remote_browser_safe")
-    if profile.max_visible_tools > 100:
-        raise RuntimeError("chatgpt_browser_default visible tool budget is too large")
-    remote_caps = PROFILE_CAPABILITIES.get("remote_browser_safe", set())
+        raise RuntimeError("browser_full_standard profile is missing")
+    if legacy is None or legacy.to_dict() != profile.to_dict():
+        raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
+    if profile.permission_profile != "browser_standard":
+        raise RuntimeError("browser_full_standard must use browser_standard")
+    if profile.max_visible_tools > 160:
+        raise RuntimeError("browser_full_standard visible tool budget is too large")
+    remote_caps = PROFILE_CAPABILITIES.get("browser_standard", set())
     for blocked in ["raw_python", "filesystem.external.write", "filesystem.delete", "addon.execute"]:
         if blocked in remote_caps:
-            raise RuntimeError(f"remote_browser_safe must not include {blocked}")
-    server = create_mcp_server(profile="chatgpt_browser_default", remote_safety="remote_browser_safe")
+            raise RuntimeError(f"browser_standard must not include {blocked}")
+    if "scene.write" not in remote_caps:
+        raise RuntimeError("browser_standard must allow safe structured scene writes")
+    server = create_mcp_server(profile="browser_full_standard", remote_safety="browser_standard")
     visible = set(server._tool_manager._tools)  # type: ignore[attr-defined]
     high_risk_operator_tool = "execute_" + "approved_addon_operator"
     for hidden in ["execute_code", "execute_blender_code", "download_polyhaven_asset", high_risk_operator_tool]:
         if hidden in visible:
-            raise RuntimeError(f"{hidden} must not be visible in chatgpt_browser_default")
-    for required in ["search_tools", "get_tool_spec", "discover_tool_packs", "get_permission_profile"]:
+            raise RuntimeError(f"{hidden} must not be visible in browser_full_standard")
+    for required in ["search_tools", "get_tool_spec", "discover_tool_packs", "get_permission_profile", "execute_approved_operation", "approve_and_execute_operation", "create_primitive_object", "create_basic_material", "assign_material", "create_verification_snapshot"]:
         if required not in visible:
-            raise RuntimeError(f"{required} must remain visible in chatgpt_browser_default")
-    status = build_server_status(_parse_args(["--transport", "http", "--profile", "chatgpt_browser_default", "--remote-safety", "remote_browser_safe"]))
+            raise RuntimeError(f"{required} must remain visible in browser_full_standard")
+    status = build_server_status(_parse_args(["--transport", "http", "--profile", "browser_full_standard", "--remote-safety", "browser_standard"]))
     if not status["mcp_url"].endswith("/mcp"):
         raise RuntimeError("HTTP MCP URL must end in /mcp")
     print(f"PASS chatgpt_browser_readiness visible_tools={len(visible)} mcp_url={status['mcp_url']}")
@@ -98,15 +103,107 @@ def run_remote_mcp_profile_static() -> None:
     from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
     from overtli_blender.runtime.tool_profiles import get_profile
 
-    profile = get_profile("chatgpt_browser_default")
-    remote_caps = PROFILE_CAPABILITIES.get("remote_browser_safe")
+    profile = get_profile("browser_full_standard")
+    legacy = get_profile("chatgpt_browser_default")
+    remote_caps = PROFILE_CAPABILITIES.get("browser_standard")
+    legacy_caps = PROFILE_CAPABILITIES.get("remote_browser_safe")
     if profile is None or remote_caps is None:
-        raise RuntimeError("ChatGPT browser profile or remote safety profile is missing")
+        raise RuntimeError("browser_full_standard profile or browser_standard profile is missing")
+    if legacy is None or legacy.to_dict() != profile.to_dict():
+        raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
+    if legacy_caps != remote_caps:
+        raise RuntimeError("remote_browser_safe must alias browser_standard")
     if "execute_code" not in profile.hidden_risky_tools:
-        raise RuntimeError("ChatGPT browser profile must hide execute_code")
+        raise RuntimeError("browser_full_standard profile must hide execute_code")
     if {"network.providers", "raw_python", "filesystem.delete", "filesystem.external.write"} & set(remote_caps):
-        raise RuntimeError("remote_browser_safe includes a blocked high-risk capability")
-    print("PASS remote_mcp_profile chatgpt_browser_default remote_browser_safe")
+        raise RuntimeError("browser_standard includes a blocked high-risk capability")
+    print("PASS remote_mcp_profile browser_full_standard browser_standard")
+
+
+def run_browser_mutation_path_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(time.time_ns())
+    object_name = f"OVERTLI_BROWSER_SMOKE_CUBE_{stamp}"
+    material_name = f"OVERTLI_BROWSER_SMOKE_MAT_{stamp}"
+    before = assert_success("browser_mutation_before_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    before_count = int(before.get("object_count", 0))
+    search = assert_success("browser_mutation_search_tools", send_command(sock, timeout_seconds, "search_tools", {"query": "create cube", "limit": 50}))
+    if "create_primitive_object" not in json.dumps(search):
+        raise RuntimeError("browser mutation smoke: search_tools did not reveal create_primitive_object")
+    created = assert_success(
+        "browser_mutation_create_cube",
+        send_command(
+            sock,
+            timeout_seconds,
+            "create_primitive_object",
+            {"primitive_type": "CUBE", "name": object_name, "location": [0, 0, 0], "scale": [1, 1, 1], "verify": True, "ctx": {"source": "browser_mutation_smoke"}},
+        ),
+    )
+    if created.get("status") == "requires_approval":
+        approval_id = created.get("approval", {}).get("approval_id") or created.get("approval_id")
+        if not approval_id:
+            raise RuntimeError(f"browser mutation smoke: approval required without approval_id: {created}")
+        assert_success("browser_mutation_approve_and_execute", send_command(sock, timeout_seconds, "approve_and_execute_operation", {"approval_id": approval_id, "expected_command_name": "create_primitive_object"}))
+    assert_success(
+        "browser_mutation_create_material",
+        send_command(sock, timeout_seconds, "create_basic_material", {"name": material_name, "base_color": [0.1, 0.25, 1.0, 1.0], "roughness": 0.55}),
+    )
+    assert_success(
+        "browser_mutation_assign_material",
+        send_command(sock, timeout_seconds, "assign_material", {"object_name": object_name, "material_name": material_name, "verify": True}),
+    )
+    assert_success(
+        "browser_mutation_snapshot",
+        send_command(sock, timeout_seconds, "create_verification_snapshot", {"label": f"browser_mutation_{stamp}", "include_screenshots": False}),
+    )
+    after = assert_success("browser_mutation_after_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    if int(after.get("object_count", 0)) <= before_count:
+        raise RuntimeError(f"browser mutation smoke: object_count did not increase after create; before={before_count} after={after.get('object_count')}")
+    if object_name not in json.dumps(after):
+        raise RuntimeError(f"browser mutation smoke: {object_name} missing after claimed mutation")
+    assert_success("browser_mutation_cleanup_object", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [object_name], "confirm": True, "ctx": {"source": "browser_mutation_smoke_cleanup"}}), require_result_dict=False)
+    assert_success("browser_mutation_cleanup_material", send_command(sock, timeout_seconds, "delete_materials", {"material_names": [material_name], "confirm": True}), require_result_dict=False)
+    final_scene = assert_success("browser_mutation_final_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    if object_name in json.dumps(final_scene):
+        raise RuntimeError(f"browser mutation smoke cleanup failed for {object_name}")
+    print("PASS browser_mutation_path safe_structured_create_verify_cleanup")
+
+
+def _extract_approval_id(payload: dict) -> str | None:
+    for candidate in [
+        payload,
+        payload.get("approval") if isinstance(payload.get("approval"), dict) else {},
+        payload.get("result") if isinstance(payload.get("result"), dict) else {},
+        payload.get("result", {}).get("approval") if isinstance(payload.get("result"), dict) and isinstance(payload.get("result", {}).get("approval"), dict) else {},
+    ]:
+        if isinstance(candidate, dict) and isinstance(candidate.get("approval_id"), str):
+            return candidate["approval_id"]
+    return None
+
+
+def run_browser_approval_execution_path_smoke(sock: socket.socket, timeout_seconds: float) -> None:
+    stamp = str(time.time_ns())
+    object_name = f"OVERTLI_BROWSER_APPROVAL_CUBE_{stamp}"
+    params = {"primitive_type": "CUBE", "name": object_name, "location": [0, 0, 0], "scale": [1, 1, 1], "verify": True, "ctx": {"source": "browser_approval_smoke"}}
+    assert_success("browser_approval_before_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    prepared = assert_success(
+        "browser_approval_prepare_operation",
+        send_command(sock, timeout_seconds, "prepare_operation", {"command_name": "create_primitive_object", "params": params, "ctx": {"source": "browser_approval_prepare"}}),
+    )
+    approval_id = _extract_approval_id(prepared)
+    if not approval_id:
+        raise RuntimeError(f"browser approval smoke: missing approval_id: {prepared}")
+    assert_success(
+        "browser_approval_approve_and_execute",
+        send_command(sock, timeout_seconds, "approve_and_execute_operation", {"approval_id": approval_id, "expected_command_name": "create_primitive_object"}),
+    )
+    after = assert_success("browser_approval_after_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    if object_name not in json.dumps(after):
+        raise RuntimeError(f"browser approval smoke: {object_name} missing after approved execution")
+    assert_success("browser_approval_cleanup", send_command(sock, timeout_seconds, "delete_objects", {"object_names": [object_name], "confirm": True, "ctx": {"source": "browser_approval_cleanup"}}), require_result_dict=False)
+    final_scene = assert_success("browser_approval_final_scene", send_command(sock, timeout_seconds, "get_scene_info"))
+    if object_name in json.dumps(final_scene):
+        raise RuntimeError(f"browser approval smoke cleanup failed for {object_name}")
+    print("PASS browser_approval_execution_path prepare_approve_execute_verify_cleanup")
 
 
 def run_required_smoke(sock: socket.socket, timeout_seconds: float) -> None:
@@ -1124,7 +1221,7 @@ def run_phase7b_governance_smoke(sock: socket.socket, timeout_seconds: float) ->
         raise RuntimeError(f"prepare_operation: {approval}")
     approval_id = approval["approval"]["approval_id"]
 
-    approved = _unwrap_governance_envelope("approve_operation", send_command(sock, timeout_seconds, "approve_operation", {"approval_id": approval_id}))
+    approved = _unwrap_governance_envelope("approve_operation", send_command(sock, timeout_seconds, "approve_operation", {"approval_id": approval_id, "approve_only": True}))
     if approved.get("status") != "success":
         raise RuntimeError(f"approve_operation: {approved}")
 
@@ -1685,6 +1782,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-product-polish-batch", action="store_true", help="Run Phase 9B product polish batch checks.")
     parser.add_argument("--include-chatgpt-browser-readiness", action="store_true", help="Run static ChatGPT browser connector readiness checks without requiring live HTTP.")
     parser.add_argument("--include-remote-mcp-profile", action="store_true", help="Run static remote MCP profile checks for chatgpt_browser_default and remote_browser_safe.")
+    parser.add_argument("--include-browser-mutation-path", action="store_true", help="Run Phase 10D browser mutation path smoke with smoke-created cube/material data.")
+    parser.add_argument("--include-browser-approval-execution-path", action="store_true", help="Run Phase 10D approved browser mutation path smoke with prepare, approve, execute, verify, and cleanup.")
     parser.add_argument(
         "--phase2-full",
         action="store_true",
@@ -1798,6 +1897,12 @@ def main(argv: list[str] | None = None) -> int:
         with socket.create_connection((args.host, args.port), timeout=args.timeout) as sock:
             print(f"Connected to {args.host}:{args.port}")
             run_required_smoke(sock, args.timeout)
+
+            if args.include_browser_mutation_path:
+                run_browser_mutation_path_smoke(sock, args.timeout)
+
+            if args.include_browser_approval_execution_path:
+                run_browser_approval_execution_path_smoke(sock, args.timeout)
 
             if args.include_screenshot:
                 run_optional_screenshot_smoke(sock, args.timeout)

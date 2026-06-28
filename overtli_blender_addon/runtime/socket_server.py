@@ -308,12 +308,18 @@ class BlenderMCPServer:
             "plan_bake_cleanup": self.bake_workflow_batch_service,
             "execute_bake_cleanup": self.bake_workflow_batch_service,
             "run_verified_bake_workflow": self.bake_workflow_batch_service,
+            "get_loaded_project_folder": self.project_workspace_service,
             "resolve_project_workspace": self.project_workspace_service,
+            "initialize_temp_workspace": self.project_workspace_service,
+            "promote_temp_workspace_to_project": self.project_workspace_service,
             "initialize_project_workspace": self.project_workspace_service,
             "validate_project_layout": self.project_workspace_service,
             "repair_project_layout": self.project_workspace_service,
             "register_blend_file": self.project_workspace_service,
             "save_project_as": self.project_workspace_service,
+            "resave_project_folder": self.project_workspace_service,
+            "plan_project_folder_move": self.project_workspace_service,
+            "move_project_folder": self.project_workspace_service,
             "create_project_backup": self.project_workspace_service,
             "restore_project_backup": self.project_workspace_service,
             "collect_project_dependencies": self.project_workspace_service,
@@ -323,6 +329,8 @@ class BlenderMCPServer:
             "list_approved_roots": self.file_access_policy_service,
             "add_approved_root": self.file_access_policy_service,
             "remove_approved_root": self.file_access_policy_service,
+            "detect_drive_roots": self.file_access_policy_service,
+            "approve_drive_roots": self.file_access_policy_service,
             "scan_project_files": self.file_access_policy_service,
             "read_project_text_file": self.file_access_policy_service,
             "write_project_text_file": self.file_access_policy_service,
@@ -404,9 +412,16 @@ class BlenderMCPServer:
         self.list_verification_snapshots = self.verification_artifact_service.list_verification_snapshots
         self.get_supported_edit_operations = self.scene_edit_service.get_supported_edit_operations
         self.create_primitive_object = self.scene_edit_service.create_primitive_object
+        self.create_box = self.scene_edit_service.create_box
         self.transform_object = self.scene_edit_service.transform_object
+        self.transform_object_dimensions = self.scene_edit_service.transform_object_dimensions
         self.duplicate_object = self.scene_edit_service.duplicate_object
         self.delete_objects = self.scene_edit_service.delete_objects
+        self.clear_scene = self.scene_edit_service.clear_scene
+        self.scene_cleanup_plan = self.scene_edit_service.scene_cleanup_plan
+        self.validate_ground_contact = self.scene_edit_service.validate_ground_contact
+        self.align_object_to_surface = self.scene_edit_service.align_object_to_surface
+        self.validate_scene_composition = self.scene_edit_service.validate_scene_composition
         self.set_object_visibility = self.scene_edit_service.set_object_visibility
         self.create_basic_material = self.material_authoring_service.create_basic_material
         self.assign_material = self.material_authoring_service.assign_material
@@ -526,6 +541,7 @@ class BlenderMCPServer:
         self.set_world_lighting = self.lighting_setup_service.set_world_lighting
         self.get_render_settings = self.render_settings_service.get_render_settings
         self.set_render_settings = self.render_settings_service.set_render_settings
+        self.get_supported_color_management = self.render_settings_service.get_supported_color_management
         self.set_output_path = self.render_settings_service.set_output_path
         self.render_still = self.render_artifact_service.render_still
         self.render_contact_sheet = self.render_artifact_service.render_contact_sheet
@@ -576,6 +592,9 @@ class BlenderMCPServer:
         self.get_task_workspace = self.workspace_safety_diff_service.get_task_workspace
         self.create_workspace_task = self.workspace_safety_diff_service.create_workspace_task
         self.update_workspace_task = self.workspace_safety_diff_service.update_workspace_task
+        self.complete_workspace_task = self.workspace_safety_diff_service.complete_workspace_task
+        self.create_scene_plan = self.workspace_safety_diff_service.create_scene_plan
+        self.list_scene_plan = self.workspace_safety_diff_service.list_scene_plan
         self.list_workspace_tasks = self.workspace_safety_diff_service.list_workspace_tasks
         self.add_workspace_todo = self.workspace_safety_diff_service.add_workspace_todo
         self.update_workspace_todo = self.workspace_safety_diff_service.update_workspace_todo
@@ -863,9 +882,16 @@ class BlenderMCPServer:
             "list_verification_snapshots": self.list_verification_snapshots,
             "get_supported_edit_operations": self.get_supported_edit_operations,
             "create_primitive_object": self.create_primitive_object,
+            "create_box": self.create_box,
             "transform_object": self.transform_object,
+            "transform_object_dimensions": self.transform_object_dimensions,
             "duplicate_object": self.duplicate_object,
             "delete_objects": self.delete_objects,
+            "clear_scene": self.clear_scene,
+            "scene_cleanup_plan": self.scene_cleanup_plan,
+            "validate_ground_contact": self.validate_ground_contact,
+            "align_object_to_surface": self.align_object_to_surface,
+            "validate_scene_composition": self.validate_scene_composition,
             "set_object_visibility": self.set_object_visibility,
             "create_basic_material": self.create_basic_material,
             "assign_material": self.assign_material,
@@ -1106,6 +1132,7 @@ class BlenderMCPServer:
             "set_world_lighting": self.set_world_lighting,
             "get_render_settings": self.get_render_settings,
             "set_render_settings": self.set_render_settings,
+            "get_supported_color_management": self.get_supported_color_management,
             "set_output_path": self.set_output_path,
             "render_still": self.render_still,
             "render_contact_sheet": self.render_contact_sheet,
@@ -1156,6 +1183,9 @@ class BlenderMCPServer:
             "get_task_workspace": self.get_task_workspace,
             "create_workspace_task": self.create_workspace_task,
             "update_workspace_task": self.update_workspace_task,
+            "complete_workspace_task": self.complete_workspace_task,
+            "create_scene_plan": self.create_scene_plan,
+            "list_scene_plan": self.list_scene_plan,
             "list_workspace_tasks": self.list_workspace_tasks,
             "add_workspace_todo": self.add_workspace_todo,
             "update_workspace_todo": self.update_workspace_todo,
@@ -1171,12 +1201,18 @@ class BlenderMCPServer:
             "get_safety_status": self.get_safety_status,
             "get_system_status": self.get_system_status,
             "get_project_status": self.get_project_status,
+            "get_loaded_project_folder": self.get_loaded_project_folder,
             "resolve_project_workspace": self.resolve_project_workspace,
+            "initialize_temp_workspace": self.initialize_temp_workspace,
+            "promote_temp_workspace_to_project": self.promote_temp_workspace_to_project,
             "initialize_project_workspace": self.initialize_project_workspace,
             "validate_project_layout": self.validate_project_layout,
             "repair_project_layout": self.repair_project_layout,
             "register_blend_file": self.register_blend_file,
             "save_project_as": self.save_project_as,
+            "resave_project_folder": self.resave_project_folder,
+            "plan_project_folder_move": self.plan_project_folder_move,
+            "move_project_folder": self.move_project_folder,
             "create_project_backup": self.create_project_backup,
             "restore_project_backup": self.restore_project_backup,
             "collect_project_dependencies": self.collect_project_dependencies,
@@ -1186,6 +1222,8 @@ class BlenderMCPServer:
             "list_approved_roots": self.list_approved_roots,
             "add_approved_root": self.add_approved_root,
             "remove_approved_root": self.remove_approved_root,
+            "detect_drive_roots": self.detect_drive_roots,
+            "approve_drive_roots": self.approve_drive_roots,
             "scan_project_files": self.scan_project_files,
             "read_project_text_file": self.read_project_text_file,
             "write_project_text_file": self.write_project_text_file,
@@ -1262,6 +1300,7 @@ class BlenderMCPServer:
             "approve_operation": self.approve_operation,
             "deny_operation": self.deny_operation,
             "execute_approved_operation": self.execute_approved_operation,
+            "approve_and_execute_operation": self.approve_and_execute_operation,
             "expire_approval": self.expire_approval,
             "get_operation_status": self.get_operation_status,
             "list_recent_operations": self.list_recent_operations,
@@ -1382,7 +1421,7 @@ class BlenderMCPServer:
     def _dispatch_command(self, command):
         """Dispatch a command using the current handler registry."""
         cmd_type = command.get("type")
-        params = command.get("params", {})
+        params = self._strip_transport_metadata(command.get("params", {}))
 
         safety_decision = self.safety_policy_service.evaluate_command(cmd_type, params)
         if not safety_decision["allowed"]:
@@ -1408,7 +1447,7 @@ class BlenderMCPServer:
         if handler:
             try:
                 print(f"Executing handler for {cmd_type}")
-                result = handler(**params)
+                result = self._normalize_handler_result(cmd_type, handler(**params))
                 print(f"Handler execution complete")
                 response = {"status": "success", "result": result}
                 if self.safety_policy_service.mode == SAFETY_MODE_AUDIT:
@@ -1420,6 +1459,30 @@ class BlenderMCPServer:
                 return {"status": "error", "message": str(e)}
         else:
             return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
+
+    @staticmethod
+    def _strip_transport_metadata(params):
+        if not isinstance(params, dict):
+            return {}
+        clean = dict(params)
+        for key in ("ctx", "context", "_ctx", "_context", "request_context", "tool_context"):
+            clean.pop(key, None)
+        return clean
+
+    @staticmethod
+    def _normalize_handler_result(cmd_type, result):
+        if not isinstance(result, dict):
+            return result
+        status = result.get("status")
+        message = str(result.get("message", ""))
+        if status == "error" and ("requires confirm=True" in message or "requires confirmation" in message):
+            normalized = dict(result)
+            normalized["status"] = "requires_approval"
+            normalized["approval_required"] = True
+            normalized.setdefault("command_name", cmd_type)
+            normalized.setdefault("warnings", [])
+            return normalized
+        return result
 
 
 
@@ -1458,20 +1521,84 @@ class BlenderMCPServer:
         return build_operation_response(status="success", tool="get_recommended_tools_for_task", result=runtime_get_recommended_tools_for_task(task, limit=limit))
 
     def prepare_operation(self, command_name, params=None):
-        return build_operation_response(status="requires_approval", tool="prepare_operation", result=DEFAULT_APPROVAL_RUNTIME.prepare_operation(command_name, params or {}, scene_revision=len(getattr(bpy.context.scene, "objects", []))))
+        clean_params = self._strip_transport_metadata(params or {})
+        return build_operation_response(status="requires_approval", tool="prepare_operation", result=DEFAULT_APPROVAL_RUNTIME.prepare_operation(command_name, clean_params, scene_revision=len(getattr(bpy.context.scene, "objects", []))))
 
     def get_pending_approvals(self):
         return build_operation_response(status="success", tool="get_pending_approvals", result=DEFAULT_APPROVAL_RUNTIME.get_pending_approvals())
 
-    def approve_operation(self, approval_id):
+    def approve_operation(self, approval_id, execute_after_approval=True, approve_only=False):
+        if execute_after_approval and not approve_only:
+            return self.approve_and_execute_operation(approval_id, reason="execute_after_approval requested")
         return build_operation_response(status="success", tool="approve_operation", result=DEFAULT_APPROVAL_RUNTIME.approve_operation(approval_id))
 
     def deny_operation(self, approval_id, reason=None):
         return build_operation_response(status="success", tool="deny_operation", result=DEFAULT_APPROVAL_RUNTIME.deny_operation(approval_id, reason=reason))
 
-    def execute_approved_operation(self, approval_id, command_name, params=None):
-        result = DEFAULT_APPROVAL_RUNTIME.execute_approved_operation(approval_id, command_name, params or {})
-        return build_operation_response(status=result.get("status", "not_implemented"), tool="execute_approved_operation", result=result)
+    def execute_approved_operation(self, approval_id, command_name=None, params=None):
+        if not command_name:
+            getter = getattr(DEFAULT_APPROVAL_RUNTIME, "get_approval_record", None)
+            record_result = getter(approval_id) if getter else {"status": "error", "message": "Approval runtime cannot load stored command metadata."}
+            if record_result.get("status") != "success":
+                return build_operation_response(status=record_result.get("status", "error"), tool="execute_approved_operation", result=record_result)
+            approval_record = record_result.get("approval", {})
+            command_name = approval_record.get("command_name")
+            params = approval_record.get("params") if params is None else self._strip_transport_metadata(params)
+            if not command_name:
+                result = {"status": "error", "message": "Approval record does not include a command name.", "approval": approval_record}
+                return build_operation_response(status="error", tool="execute_approved_operation", result=result)
+        if command_name in {
+            "prepare_operation",
+            "approve_operation",
+            "deny_operation",
+            "execute_approved_operation",
+            "approve_and_execute_operation",
+            "expire_approval",
+        }:
+            result = {"status": "error", "message": f"Approval executor cannot dispatch governance command: {command_name}"}
+            return build_operation_response(status="error", tool="execute_approved_operation", result=result)
+        validator = getattr(DEFAULT_APPROVAL_RUNTIME, "validate_approved_operation", None)
+        if validator:
+            params = self._strip_transport_metadata(params or {})
+            validation = validator(approval_id, command_name, params)
+        else:
+            params = self._strip_transport_metadata(params or {})
+            validation = DEFAULT_APPROVAL_RUNTIME.execute_approved_operation(approval_id, command_name, params)
+        if validation.get("status") != "success":
+            return build_operation_response(status=validation.get("status", "error"), tool="execute_approved_operation", result=validation)
+        dispatch_result = self._dispatch_command({"type": command_name, "params": params or {}})
+        if dispatch_result.get("status") == "success":
+            marker = getattr(DEFAULT_APPROVAL_RUNTIME, "mark_executed", None)
+            if marker:
+                marker(approval_id)
+        result = {
+            "status": dispatch_result.get("status", "error"),
+            "approval": validation.get("approval"),
+            "dispatch": dispatch_result,
+        }
+        return build_operation_response(status=result["status"], tool="execute_approved_operation", result=result)
+
+    def approve_and_execute_operation(self, approval_id, expected_command_name=None, expected_params_hash=None, reason=None):
+        validator = getattr(DEFAULT_APPROVAL_RUNTIME, "approve_and_validate_operation", None)
+        if validator:
+            validation = validator(approval_id, expected_command_name, expected_params_hash)
+        else:
+            approved = DEFAULT_APPROVAL_RUNTIME.approve_operation(approval_id)
+            if approved.get("status") != "success":
+                return build_operation_response(status=approved.get("status", "error"), tool="approve_and_execute_operation", result=approved)
+            validation = approved
+        if validation.get("status") != "success":
+            return build_operation_response(status=validation.get("status", "error"), tool="approve_and_execute_operation", result=validation)
+        approval = validation.get("approval", {})
+        command_name = approval.get("command_name")
+        params = approval.get("params") or {}
+        if not command_name:
+            result = {"status": "error", "message": "Approval record does not include a command name.", "approval": approval}
+            return build_operation_response(status="error", tool="approve_and_execute_operation", result=result)
+        executed = self.execute_approved_operation(approval_id, command_name, params)
+        if isinstance(executed, dict):
+            executed.setdefault("result", {}).setdefault("reason", reason)
+        return executed
 
     def expire_approval(self, approval_id=None):
         return build_operation_response(status="success", tool="expire_approval", result=DEFAULT_APPROVAL_RUNTIME.expire_approval(approval_id))
@@ -1587,13 +1714,21 @@ class BlenderMCPServer:
         """List Phase 3 supported edit operations and safety metadata."""
         return self.scene_edit_service.get_supported_edit_operations()
 
-    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False):
+    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False, dimensions=None, anchor="center", origin_mode=None, snap_to=None, clearance=0.0):
         """Create a supported primitive object with explicit parameters."""
-        return self.scene_edit_service.create_primitive_object(primitive_type, name, location, rotation, scale, collection_name, material_name, verify)
+        return self.scene_edit_service.create_primitive_object(primitive_type, name, location, rotation, scale, collection_name, material_name, verify, dimensions, anchor, origin_mode, snap_to, clearance)
 
-    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False):
+    def create_box(self, name=None, dimensions=None, location=None, anchor="bottom_center", collection_name=None, material_name=None, verify=False):
+        """Create a box using final dimensions and anchor semantics."""
+        return self.scene_edit_service.create_box(name, dimensions, location, anchor, collection_name, material_name, verify)
+
+    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False, dimensions=None, anchor=None, preserve_anchor=True):
         """Transform one explicitly named object."""
-        return self.scene_edit_service.transform_object(object_name, location, rotation, scale, relative, verify)
+        return self.scene_edit_service.transform_object(object_name, location, rotation, scale, relative, verify, dimensions, anchor, preserve_anchor)
+
+    def transform_object_dimensions(self, object_name, dimensions, preserve_anchor=True, anchor="bottom_center", verify=False):
+        """Resize an object to final dimensions while preserving an anchor."""
+        return self.scene_edit_service.transform_object_dimensions(object_name, dimensions, preserve_anchor, anchor, verify)
 
     def duplicate_object(self, object_name, new_name=None, linked=False, location_offset=None, collection_name=None, verify=False):
         """Duplicate one explicitly named object."""
@@ -1602,6 +1737,26 @@ class BlenderMCPServer:
     def delete_objects(self, object_names, confirm=False, allow_missing=False, verify=False):
         """Delete only explicitly named objects after confirmation."""
         return self.scene_edit_service.delete_objects(object_names, confirm, allow_missing, verify)
+
+    def clear_scene(self, scope="prefix", prefix="OVERTLI_", collection_name=None, delete_objects=True, delete_empty_collections=True, delete_unused_materials=True, delete_unused_images=False, delete_cameras_lights=False, dry_run=True, confirm=False, create_before_snapshot=True):
+        """Plan or execute a bounded scene cleanup/reset."""
+        return self.scene_edit_service.clear_scene(scope, prefix, collection_name, delete_objects, delete_empty_collections, delete_unused_materials, delete_unused_images, delete_cameras_lights, dry_run, confirm, create_before_snapshot)
+
+    def scene_cleanup_plan(self, scope="prefix", prefix="OVERTLI_", collection_name=None, delete_objects=True, delete_empty_collections=True, delete_unused_materials=True, delete_unused_images=False, delete_cameras_lights=False, create_before_snapshot=True):
+        """Return a dry-run cleanup plan."""
+        return self.scene_edit_service.scene_cleanup_plan(scope=scope, prefix=prefix, collection_name=collection_name, delete_objects=delete_objects, delete_empty_collections=delete_empty_collections, delete_unused_materials=delete_unused_materials, delete_unused_images=delete_unused_images, delete_cameras_lights=delete_cameras_lights, create_before_snapshot=create_before_snapshot)
+
+    def validate_ground_contact(self, object_names, ground_object, expected_relation="on_top", tolerance=0.01):
+        """Validate that objects contact or clear a ground object."""
+        return self.scene_edit_service.validate_ground_contact(object_names, ground_object, expected_relation, tolerance)
+
+    def align_object_to_surface(self, object_name, target_object, target_face="top", anchor="bottom_center", clearance=0.0):
+        """Move an object anchor to a target object surface."""
+        return self.scene_edit_service.align_object_to_surface(object_name, target_object, target_face, anchor, clearance)
+
+    def validate_scene_composition(self, generated_prefix="OVERTLI_", expected_collection=None, ground_object=None, tolerance=0.01, allow_below_ground=False):
+        """Run structural composition checks for generated scene content."""
+        return self.scene_edit_service.validate_scene_composition(generated_prefix, expected_collection, ground_object, tolerance, allow_below_ground)
 
     def set_object_visibility(self, object_name, hide_viewport=None, hide_render=None, verify=False):
         """Set viewport/render visibility on one explicitly named object."""
@@ -1679,8 +1834,11 @@ class BlenderMCPServer:
     def get_render_settings(self):
         return self.render_settings_service.get_render_settings()
 
-    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False):
-        return self.render_settings_service.set_render_settings(engine, resolution_x, resolution_y, resolution_percentage, samples, image_format, transparent, color_management, clamp_for_smoke)
+    def set_render_settings(self, engine=None, resolution_x=None, resolution_y=None, resolution_percentage=None, samples=None, image_format=None, transparent=None, color_management=None, clamp_for_smoke=False, auto_compatible=False):
+        return self.render_settings_service.set_render_settings(engine, resolution_x, resolution_y, resolution_percentage, samples, image_format, transparent, color_management, clamp_for_smoke, auto_compatible)
+
+    def get_supported_color_management(self):
+        return self.render_settings_service.get_supported_color_management()
 
     def set_output_path(self, output_path=None, artifact_root=None, subdir="renders/stills", filename=None):
         return self.render_settings_service.set_output_path(output_path, artifact_root, subdir, filename)
@@ -1736,9 +1894,9 @@ class BlenderMCPServer:
         """Delete one explicitly named collection after confirmation; empty-only by default."""
         return self.collection_organization_service.delete_collection(collection_name, confirm, require_empty)
 
-    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None, prevalidate_only=False, prevalidate_all=True):
         """Run a controlled allowlisted edit batch with before/after verification."""
-        return self.verified_edit_batch_service.run_verified_edit_batch(label, operations, create_before_snapshot, create_after_snapshot, stop_on_error, max_operations, batch_allow_destructive, artifact_root)
+        return self.verified_edit_batch_service.run_verified_edit_batch(label, operations, create_before_snapshot, create_after_snapshot, stop_on_error, max_operations, batch_allow_destructive, artifact_root, prevalidate_only, prevalidate_all)
 
     def get_task_workspace(self, artifact_root=None):
         """Get the persistent Phase 3 task workspace summary."""
@@ -1751,6 +1909,18 @@ class BlenderMCPServer:
     def update_workspace_task(self, task_id, status=None, goal=None, assumptions=None, rollback_status=None, verification=None, artifact_root=None):
         """Update a persistent task workspace entry."""
         return self.workspace_safety_diff_service.update_workspace_task(task_id, status, goal, assumptions, rollback_status, verification, artifact_root)
+
+    def complete_workspace_task(self, task_id, verified=False, evidence=None, artifact_root=None):
+        """Complete a persistent task workspace entry."""
+        return self.workspace_safety_diff_service.complete_workspace_task(task_id, verified, evidence, artifact_root)
+
+    def create_scene_plan(self, title="Scene build plan", goal=None, steps=None, artifact_root=None):
+        """Create a scene build task and todo checklist."""
+        return self.workspace_safety_diff_service.create_scene_plan(title, goal, steps, artifact_root)
+
+    def list_scene_plan(self, task_id=None, artifact_root=None):
+        """List scene build task and todo checklist state."""
+        return self.workspace_safety_diff_service.list_scene_plan(task_id, artifact_root)
 
     def list_workspace_tasks(self, status=None, artifact_root=None):
         """List persistent task workspace entries."""

@@ -15,7 +15,11 @@ def register_render_tools(mcp: Any, get_blender_connection: Callable[[], Any]) -
         return _send(get_blender_connection, "get_render_settings")
 
     @mcp.tool()
-    def set_render_settings(engine: str | None = None, resolution_x: int | None = None, resolution_y: int | None = None, resolution_percentage: int | None = None, samples: int | None = None, image_format: str | None = None, transparent: bool | None = None, color_management: dict[str, Any] | None = None, clamp_for_smoke: bool = False) -> str:
+    def get_supported_color_management() -> str:
+        return _send(get_blender_connection, "get_supported_color_management")
+
+    @mcp.tool()
+    def set_render_settings(engine: str | None = None, resolution_x: int | None = None, resolution_y: int | None = None, resolution_percentage: int | None = None, samples: int | None = None, image_format: str | None = None, transparent: bool | None = None, color_management: dict[str, Any] | None = None, clamp_for_smoke: bool = False, auto_compatible: bool = False) -> str:
         return _send(get_blender_connection, "set_render_settings", locals())
 
     @mcp.tool()

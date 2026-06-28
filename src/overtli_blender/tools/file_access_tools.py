@@ -39,6 +39,14 @@ def register_file_access_tools(mcp: Any, get_blender_connection: Callable[[], An
         return _send(get_blender_connection, "remove_approved_root", locals())
 
     @mcp.tool()
+    def detect_drive_roots(ctx: Any, preferred_drives: list[str] | None = None) -> str:
+        return _send(get_blender_connection, "detect_drive_roots", locals())
+
+    @mcp.tool()
+    def approve_drive_roots(ctx: Any, drives: list[str] | None = None, confirm: bool = False) -> str:
+        return _send(get_blender_connection, "approve_drive_roots", locals())
+
+    @mcp.tool()
     def scan_project_files(ctx: Any, root: str | None = None, limit: int = 200) -> str:
         return _send(get_blender_connection, "scan_project_files", locals())
 

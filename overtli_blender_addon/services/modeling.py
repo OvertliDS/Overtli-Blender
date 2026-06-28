@@ -37,6 +37,68 @@ class SceneEditService:
     def _deep_info(self, object_name):
         return self.server.scene_intelligence_service.get_object_deep_info(object_name=object_name).get("object")
 
+    @staticmethod
+    def _world_bounds(obj):
+        corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in getattr(obj, "bound_box", [])]
+        if not corners:
+            loc = obj.matrix_world.translation
+            corners = [loc]
+        min_corner = [min(corner[i] for corner in corners) for i in range(3)]
+        max_corner = [max(corner[i] for corner in corners) for i in range(3)]
+        center = [(min_corner[i] + max_corner[i]) / 2 for i in range(3)]
+        size = [max_corner[i] - min_corner[i] for i in range(3)]
+        return {
+            "min": [round(float(v), 6) for v in min_corner],
+            "max": [round(float(v), 6) for v in max_corner],
+            "center": [round(float(v), 6) for v in center],
+            "size": [round(float(v), 6) for v in size],
+            "bottom_z": round(float(min_corner[2]), 6),
+            "top_z": round(float(max_corner[2]), 6),
+        }
+
+    @classmethod
+    def _anchor_point(cls, obj, anchor="center"):
+        bounds = cls._world_bounds(obj)
+        point = list(bounds["center"])
+        anchor = str(anchor or "center").lower()
+        if anchor == "bottom_center":
+            point[2] = bounds["min"][2]
+        elif anchor == "top_center":
+            point[2] = bounds["max"][2]
+        elif anchor == "front_center":
+            point[1] = bounds["min"][1]
+        elif anchor == "back_center":
+            point[1] = bounds["max"][1]
+        return point
+
+    @classmethod
+    def _move_anchor_to(cls, obj, anchor, target):
+        current = cls._anchor_point(obj, anchor)
+        delta = [float(target[i]) - current[i] for i in range(3)]
+        obj.location = [obj.location[i] + delta[i] for i in range(3)]
+
+    def _apply_dimensions(self, obj, dimensions):
+        dims = self._vector(dimensions, [1.0, 1.0, 1.0])
+        if any(value <= 0 for value in dims):
+            raise ValueError("dimensions values must be positive")
+        obj.dimensions = dims
+        bpy.context.view_layer.update()
+        return dims
+
+    def _dimension_verification(self, obj, requested_dimensions=None, tolerance=0.001):
+        bounds = self._world_bounds(obj)
+        warnings = []
+        if requested_dimensions:
+            requested = [float(v) for v in requested_dimensions]
+            for index, axis in enumerate("xyz"):
+                if abs(bounds["size"][index] - requested[index]) > float(tolerance):
+                    warnings.append(f"{axis} dimension differs from requested value by more than {tolerance}")
+        return {
+            "final_dimensions": [round(float(v), 6) for v in obj.dimensions],
+            "bounds": bounds,
+            "warnings": warnings,
+        }
+
     def _verification(self, label, verify):
         if not verify:
             return {}
@@ -74,7 +136,7 @@ class SceneEditService:
             "warnings": [],
         }
 
-    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False):
+    def create_primitive_object(self, primitive_type, name=None, location=None, rotation=None, scale=None, collection_name=None, material_name=None, verify=False, dimensions=None, anchor="center", origin_mode=None, snap_to=None, clearance=0.0):
         primitive_key = str(primitive_type or "").strip().lower()
         if primitive_key not in self.SUPPORTED_PRIMITIVES:
             return {"status": "error", "message": f"Unsupported primitive_type: {primitive_type}", "warnings": []}
@@ -87,6 +149,17 @@ class SceneEditService:
         obj.location = self._vector(location, [0.0, 0.0, 0.0])
         obj.rotation_euler = self._vector(rotation, [0.0, 0.0, 0.0])
         obj.scale = self._vector(scale, [1.0, 1.0, 1.0])
+        bpy.context.view_layer.update()
+        if dimensions is not None:
+            self._apply_dimensions(obj, dimensions)
+            target = self._vector(location, [0.0, 0.0, 0.0])
+            if anchor:
+                self._move_anchor_to(obj, anchor, target)
+        if snap_to:
+            target_name = snap_to.get("object") if isinstance(snap_to, dict) else str(snap_to)
+            target_obj = bpy.data.objects.get(target_name)
+            if target_obj:
+                self._move_anchor_to(obj, anchor or "bottom_center", [self._anchor_point(obj, anchor or "bottom_center")[0], self._anchor_point(obj, anchor or "bottom_center")[1], self._world_bounds(target_obj)["max"][2] + float(clearance or 0.0)])
 
         collection = None
         if collection_name:
@@ -108,6 +181,9 @@ class SceneEditService:
             "created": True,
             "collection_name": collection.name if collection else (obj.users_collection[0].name if obj.users_collection else None),
             "transform": {"location": list(obj.location), "rotation": list(obj.rotation_euler), "scale": list(obj.scale)},
+            "dimension_verification": self._dimension_verification(obj, dimensions),
+            "anchor": anchor,
+            "origin_mode": origin_mode,
             "material_name": material_name,
             "object": self._deep_info(obj.name),
             "verification": self._verification(f"edit_{obj.name}", verify),
@@ -116,7 +192,19 @@ class SceneEditService:
         self._operation_record("create_primitive_object", {"primitive_type": primitive_key, "name": name}, result)
         return result
 
-    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False):
+    def create_box(self, name=None, dimensions=None, location=None, anchor="bottom_center", collection_name=None, material_name=None, verify=False):
+        return self.create_primitive_object(
+            "cube",
+            name=name,
+            location=location or [0.0, 0.0, 0.0],
+            dimensions=dimensions or [1.0, 1.0, 1.0],
+            anchor=anchor,
+            collection_name=collection_name,
+            material_name=material_name,
+            verify=verify,
+        )
+
+    def transform_object(self, object_name, location=None, rotation=None, scale=None, relative=False, verify=False, dimensions=None, anchor=None, preserve_anchor=True):
         obj = bpy.data.objects.get(object_name)
         if not obj:
             return {"status": "error", "message": f"Object not found: {object_name}", "warnings": []}
@@ -129,9 +217,16 @@ class SceneEditService:
         if scale is not None:
             vec = self._vector(scale, [1.0, 1.0, 1.0])
             obj.scale = [obj.scale[i] + vec[i] for i in range(3)] if relative else vec
-        result = {"status": "success", "object_name": obj.name, "object": self._deep_info(obj.name), "verification": self._verification(f"transform_{obj.name}", verify), "warnings": []}
+        if dimensions is not None:
+            self._apply_dimensions(obj, dimensions)
+            if preserved_point is not None:
+                self._move_anchor_to(obj, anchor or "center", preserved_point)
+        result = {"status": "success", "object_name": obj.name, "object": self._deep_info(obj.name), "dimension_verification": self._dimension_verification(obj, dimensions), "verification": self._verification(f"transform_{obj.name}", verify), "warnings": []}
         self._operation_record("transform_object", {"object_name": object_name}, result)
         return result
+
+    def transform_object_dimensions(self, object_name, dimensions, preserve_anchor=True, anchor="bottom_center", verify=False):
+        return self.transform_object(object_name, dimensions=dimensions, preserve_anchor=preserve_anchor, anchor=anchor, verify=verify)
 
     def duplicate_object(self, object_name, new_name=None, linked=False, location_offset=None, collection_name=None, verify=False):
         source = bpy.data.objects.get(object_name)
@@ -176,6 +271,138 @@ class SceneEditService:
             result["message"] = message
         self._operation_record("delete_objects", {"object_names": object_names}, result)
         return result
+
+    def clear_scene(self, scope="prefix", prefix="OVERTLI_", collection_name=None, delete_objects=True, delete_empty_collections=True, delete_unused_materials=True, delete_unused_images=False, delete_cameras_lights=False, dry_run=True, confirm=False, create_before_snapshot=True):
+        warnings = []
+        objects = []
+        if scope == "all_scene":
+            objects = list(bpy.context.scene.objects)
+            if not confirm:
+                warnings.append("all_scene cleanup requires confirm=True")
+        elif scope == "selected":
+            objects = list(bpy.context.selected_objects)
+        elif scope == "collection":
+            collection = bpy.data.collections.get(collection_name or "")
+            if not collection:
+                return {"status": "error", "message": f"Collection not found: {collection_name}", "warnings": []}
+            objects = list(collection.objects)
+        else:
+            safe_prefix = str(prefix or "OVERTLI_")
+            objects = [obj for obj in bpy.context.scene.objects if obj.name.startswith(safe_prefix)]
+        if not delete_cameras_lights:
+            objects = [obj for obj in objects if obj.type not in {"CAMERA", "LIGHT"}]
+        if scope == "all_scene" and not confirm:
+            objects = [obj for obj in objects if obj.name.startswith(str(prefix or "OVERTLI_"))]
+            warnings.append("Without confirm=True, all_scene is constrained to generated prefix content")
+        object_names = sorted({obj.name for obj in objects}) if delete_objects else []
+        collection_names = []
+        if delete_empty_collections:
+            for collection in bpy.data.collections:
+                prefix_match = collection.name.startswith(str(prefix or "OVERTLI_"))
+                collection_match = scope == "collection" and collection.name == collection_name
+                if (prefix_match or collection_match) and len(collection.objects) == 0 and len(collection.children) == 0:
+                    collection_names.append(collection.name)
+        material_names = sorted(mat.name for mat in bpy.data.materials if delete_unused_materials and mat.users == 0 and mat.name.startswith(("OVERTLI_", "OVERTLI_MAT_")))
+        image_names = sorted(img.name for img in bpy.data.images if delete_unused_images and img.users == 0 and img.name.startswith("OVERTLI_"))
+        before_snapshot = self.server.workspace_safety_diff_service.create_scene_snapshot(label="clear_scene_before", include_verification_snapshot=False) if create_before_snapshot else None
+        plan = {
+            "objects_to_delete": object_names,
+            "collections_to_delete": collection_names,
+            "materials_to_delete": material_names,
+            "images_to_delete": image_names,
+            "warnings": warnings,
+            "approval_required": bool(object_names or collection_names or material_names or image_names),
+            "destructive": True,
+            "dry_run": bool(dry_run),
+            "before_snapshot": before_snapshot,
+        }
+        if dry_run or not confirm:
+            return {"status": "requires_approval" if plan["approval_required"] else "success", **plan}
+        for name in object_names:
+            obj = bpy.data.objects.get(name)
+            if obj:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        for name in collection_names:
+            collection = bpy.data.collections.get(name)
+            if collection:
+                bpy.data.collections.remove(collection)
+        for name in material_names:
+            material = bpy.data.materials.get(name)
+            if material and material.users == 0:
+                bpy.data.materials.remove(material)
+        for name in image_names:
+            image = bpy.data.images.get(name)
+            if image and image.users == 0:
+                bpy.data.images.remove(image)
+        after_snapshot = self.server.workspace_safety_diff_service.create_scene_snapshot(label="clear_scene_after", include_verification_snapshot=False)
+        return {"status": "success", **plan, "dry_run": False, "after_snapshot": after_snapshot}
+
+    def scene_cleanup_plan(self, **kwargs):
+        kwargs["dry_run"] = True
+        kwargs["confirm"] = False
+        return self.clear_scene(**kwargs)
+
+    def validate_ground_contact(self, object_names, ground_object, expected_relation="on_top", tolerance=0.01):
+        ground = bpy.data.objects.get(ground_object)
+        if not ground:
+            return {"status": "error", "message": f"Ground object not found: {ground_object}", "warnings": []}
+        ground_bounds = self._world_bounds(ground)
+        rows = []
+        warnings = []
+        for name in object_names or []:
+            obj = bpy.data.objects.get(name)
+            if not obj:
+                rows.append({"object_name": name, "status": "missing"})
+                continue
+            bounds = self._world_bounds(obj)
+            gap = bounds["bottom_z"] - ground_bounds["top_z"]
+            ok = abs(gap) <= float(tolerance) if expected_relation == "on_top" else gap >= -float(tolerance)
+            if not ok:
+                warnings.append(f"{name} contact gap/penetration {round(gap, 6)} exceeds tolerance {tolerance}")
+            rows.append({"object_name": name, "bottom_z": bounds["bottom_z"], "ground_top_z": ground_bounds["top_z"], "gap": round(float(gap), 6), "within_tolerance": ok})
+        return {"status": "success" if not warnings else "warning", "ground_object": ground_object, "results": rows, "warnings": warnings}
+
+    def align_object_to_surface(self, object_name, target_object, target_face="top", anchor="bottom_center", clearance=0.0):
+        obj = bpy.data.objects.get(object_name)
+        target = bpy.data.objects.get(target_object)
+        if not obj or not target:
+            return {"status": "error", "message": "object_name and target_object must exist", "warnings": []}
+        target_bounds = self._world_bounds(target)
+        z = target_bounds["max"][2] if str(target_face).lower() == "top" else target_bounds["min"][2]
+        current_anchor = self._anchor_point(obj, anchor)
+        self._move_anchor_to(obj, anchor, [current_anchor[0], current_anchor[1], z + float(clearance or 0.0)])
+        return {"status": "success", "object_name": obj.name, "target_object": target.name, "bounds": self._world_bounds(obj), "warnings": []}
+
+    def validate_scene_composition(self, generated_prefix="OVERTLI_", expected_collection=None, ground_object=None, tolerance=0.01, allow_below_ground=False):
+        objects = [obj for obj in bpy.context.scene.objects if obj.name.startswith(str(generated_prefix or ""))]
+        warnings = []
+        if expected_collection:
+            for obj in objects:
+                if expected_collection not in [collection.name for collection in obj.users_collection]:
+                    warnings.append(f"{obj.name} is not in expected collection {expected_collection}")
+        ground_top = None
+        if ground_object and bpy.data.objects.get(ground_object):
+            ground_top = self._world_bounds(bpy.data.objects[ground_object])["top_z"]
+        below_ground = []
+        if ground_top is not None and not allow_below_ground:
+            for obj in objects:
+                if self._world_bounds(obj)["bottom_z"] < ground_top - float(tolerance):
+                    below_ground.append(obj.name)
+            if below_ground:
+                warnings.append(f"{len(below_ground)} generated object(s) are below ground tolerance")
+        empty_collections = [collection.name for collection in bpy.data.collections if collection.name.startswith(str(generated_prefix or "")) and len(collection.objects) == 0 and len(collection.children) == 0]
+        if empty_collections:
+            warnings.append(f"{len(empty_collections)} empty generated collection(s) found")
+        return {
+            "status": "success" if not warnings else "warning",
+            "generated_object_count": len(objects),
+            "generated_objects": [obj.name for obj in objects],
+            "empty_generated_collections": empty_collections,
+            "below_ground_objects": below_ground,
+            "camera_exists": any(obj.type == "CAMERA" for obj in bpy.context.scene.objects),
+            "lights_exist": any(obj.type == "LIGHT" for obj in bpy.context.scene.objects),
+            "warnings": warnings,
+        }
 
     def set_object_visibility(self, object_name, hide_viewport=None, hide_render=None, verify=False):
         obj = bpy.data.objects.get(object_name)
@@ -494,38 +721,74 @@ class VerifiedEditBatchService:
         "delete_objects",
         "remove_object_modifier",
         "delete_collection",
+        "create_box",
+        "transform_object_dimensions",
+        "clear_scene",
+        "validate_ground_contact",
+        "align_object_to_surface",
+        "validate_scene_composition",
     }
-    DESTRUCTIVE_OPERATIONS = {"delete_objects", "remove_object_modifier", "delete_collection"}
+    DESTRUCTIVE_OPERATIONS = {"delete_objects", "remove_object_modifier", "delete_collection", "clear_scene"}
 
     def __init__(self, server):
         self.server = server
 
-    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None):
+    def _normalize_operation(self, operation):
+        if not isinstance(operation, dict):
+            return None, {}, "Operation must be an object"
+        op_type = operation.get("command_name") or operation.get("type") or operation.get("command")
+        params = dict(operation.get("params") or operation.get("parameters") or {})
+        if not op_type:
+            return None, params, "Expected operation.command_name, operation.type, or operation.command"
+        return str(op_type), params, None
+
+    def _schema_error(self, index, op_type=None, message=None):
+        return {
+            "index": index,
+            "type": op_type,
+            "message": message or "Unsupported batch operation",
+            "expected_schema": {"command_name": "transform_object", "params": {"object_name": "Cube", "location": [0, 0, 1]}},
+            "alternate_schema": {"type": "transform_object", "params": {"object_name": "Cube"}},
+            "supported_operations": sorted(self.SUPPORTED_BATCH_OPERATIONS),
+            "suggested_correction": "Use a public command name in command_name and place command inputs under params.",
+        }
+
+    def _prevalidate(self, operations, batch_allow_destructive):
+        errors = []
+        normalized = []
+        for index, operation in enumerate(operations):
+            op_type, params, error = self._normalize_operation(operation)
+            if error:
+                errors.append(self._schema_error(index, op_type, error))
+                continue
+            if op_type not in self.SUPPORTED_BATCH_OPERATIONS:
+                errors.append(self._schema_error(index, op_type, "Unsupported batch operation"))
+                continue
+            if op_type in self.DESTRUCTIVE_OPERATIONS and not (operation.get("confirm") is True and batch_allow_destructive is True):
+                errors.append(self._schema_error(index, op_type, "Destructive batch operation requires operation.confirm=True and batch_allow_destructive=True"))
+                continue
+            if op_type in self.DESTRUCTIVE_OPERATIONS and "confirm" not in params:
+                params["confirm"] = bool(operation.get("confirm"))
+            normalized.append((index, op_type, params))
+        return normalized, errors
+
+    def run_verified_edit_batch(self, label=None, operations=None, create_before_snapshot=True, create_after_snapshot=True, stop_on_error=True, max_operations=20, batch_allow_destructive=False, artifact_root=None, prevalidate_only=False, prevalidate_all=True):
         operations = operations or []
         max_operations = max(1, min(int(max_operations), 50))
         if len(operations) > max_operations:
             return {"status": "error", "message": f"Batch exceeds max_operations={max_operations}", "operation_results": [], "errors": [], "warnings": []}
+        normalized, validation_errors = self._prevalidate(operations, batch_allow_destructive)
+        if validation_errors and (prevalidate_all or prevalidate_only):
+            return {"status": "error", "message": "Batch prevalidation failed before applying operations", "operation_results": [], "errors": validation_errors, "warnings": []}
+        if prevalidate_only:
+            return {"status": "success", "valid": True, "normalized_operations": [{"index": index, "type": op_type, "params": params} for index, op_type, params in normalized], "warnings": []}
         batch_id = f"batch_{int(time.time())}_{abs(hash(str(operations))) % 100000}"
         batch_label = label or batch_id
         before = self.server.verification_artifact_service.create_verification_snapshot(label=f"{batch_label}_before", include_screenshots=False, artifact_root=artifact_root) if create_before_snapshot else {}
         results, errors, warnings = [], [], []
-        for index, operation in enumerate(operations):
-            op_type = operation.get("type") or operation.get("command")
-            params = dict(operation.get("params") or {})
-            if op_type not in self.SUPPORTED_BATCH_OPERATIONS:
-                error = {"index": index, "type": op_type, "message": "Unsupported batch operation"}
-                errors.append(error)
-                if stop_on_error:
-                    break
-                continue
-            if op_type in self.DESTRUCTIVE_OPERATIONS and not (operation.get("confirm") is True and batch_allow_destructive is True):
-                error = {"index": index, "type": op_type, "message": "Destructive batch operation requires operation.confirm=True and batch_allow_destructive=True"}
-                errors.append(error)
-                if stop_on_error:
-                    break
-                continue
-            if op_type in self.DESTRUCTIVE_OPERATIONS and "confirm" not in params:
-                params["confirm"] = bool(operation.get("confirm"))
+        if validation_errors:
+            errors.extend(validation_errors)
+        for index, op_type, params in normalized:
             handler = self.server._build_command_handlers().get(op_type)
             result = handler(**params)
             results.append({"index": index, "type": op_type, "result": result})
@@ -922,3 +1185,4 @@ class AdvancedModelingWorkflowBatchService(AdvancedModelingServiceBase):
                 break
         after = self.server.create_scene_snapshot(label=f"{workflow_name or 'phase8b'}_after") if create_after_snapshot else None
         return {"status": "success" if all(item["result"].get("status") != "error" for item in results) else "partial", "workflow_name": workflow_name, "before_snapshot": before, "after_snapshot": after, "results": results}
+        preserved_point = self._anchor_point(obj, anchor or "center") if dimensions is not None and preserve_anchor else None

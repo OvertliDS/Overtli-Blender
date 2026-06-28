@@ -7,6 +7,7 @@ import json
 import socket
 
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.transport_security import TransportSecuritySettings
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any
@@ -62,8 +63,8 @@ HTTP_TRANSPORT_ALIASES = {
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 2091
 DEFAULT_HTTP_PATH = "/mcp"
-DEFAULT_CHATGPT_PROFILE = "chatgpt_browser_default"
-DEFAULT_REMOTE_SAFETY = "remote_browser_safe"
+DEFAULT_CHATGPT_PROFILE = "browser_full_standard"
+DEFAULT_REMOTE_SAFETY = "browser_standard"
 
 # Resource endpoints
 
@@ -154,6 +155,77 @@ def _visible_tool_names_for_profile(profile_name: str | None) -> set[str] | None
             "search_tools",
             "get_tool_spec",
             "get_recommended_tools_for_task",
+            "get_runtime_dashboard",
+            "get_approval_queue_summary",
+            "get_recent_operation_summary",
+            "prepare_operation",
+            "get_pending_approvals",
+            "approve_operation",
+            "deny_operation",
+            "execute_approved_operation",
+            "approve_and_execute_operation",
+            "get_scene_info",
+            "get_scene_index",
+            "get_scene_health",
+            "get_selection_info",
+            "get_object_deep_info",
+            "list_materials_deep",
+            "get_material_deep_info",
+            "get_project_status",
+            "get_loaded_project_folder",
+            "resolve_project_workspace",
+            "initialize_project_workspace",
+            "initialize_temp_workspace",
+            "promote_temp_workspace_to_project",
+            "validate_project_layout",
+            "repair_project_layout",
+            "resave_project_folder",
+            "plan_project_folder_move",
+            "move_project_folder",
+            "get_file_access_policy",
+            "list_approved_roots",
+            "detect_drive_roots",
+            "approve_drive_roots",
+            "get_tool_profiles",
+            "get_active_tool_profile",
+            "get_enabled_tool_packs",
+            "get_bundled_skill_pack",
+            "search_bundled_skill_packs",
+            "explain_error",
+            "get_remediation_steps",
+            "create_primitive_object",
+            "create_box",
+            "transform_object",
+            "transform_object_dimensions",
+            "duplicate_object",
+            "scene_cleanup_plan",
+            "validate_ground_contact",
+            "align_object_to_surface",
+            "validate_scene_composition",
+            "create_collection",
+            "move_objects_to_collection",
+            "set_object_visibility",
+            "create_basic_material",
+            "assign_material",
+            "update_material_properties",
+            "create_material_from_template",
+            "create_custom_material",
+            "apply_material_to_objects",
+            "create_camera",
+            "frame_camera_to_objects",
+            "set_active_camera",
+            "create_light",
+            "create_lighting_setup",
+            "update_light",
+            "set_world_lighting",
+            "create_verification_snapshot",
+            "run_verified_edit_batch",
+            "run_presentation_workflow_batch",
+            "get_supported_color_management",
+            "set_render_settings",
+            "create_scene_plan",
+            "list_scene_plan",
+            "complete_workspace_task",
             "get_permission_profile",
             "get_capability_policy",
             "validate_command_capabilities",
@@ -211,7 +283,47 @@ async def _metadata(request):
             "tool_count": len(tools),
             "default_tool_profile": getattr(request.app.state, "overtli_tool_profile", None),
             "remote_safety": getattr(request.app.state, "overtli_remote_safety", None),
-            "recommended_permission": "Always ask",
+            "recommended_permission": "Always allow for trusted local projects; destructive operations stay internally gated",
+        }
+    )
+
+
+def _request_origin(request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
+async def _oauth_protected_resource_metadata(request):
+    from starlette.responses import JSONResponse
+
+    origin = _request_origin(request)
+    resource = f"{origin}{DEFAULT_HTTP_PATH}"
+    return JSONResponse(
+        {
+            "resource": resource,
+            "authorization_servers": [origin],
+            "scopes_supported": ["mcp"],
+            "bearer_methods_supported": ["header"],
+            "resource_name": "Overtli-Blender",
+            "resource_documentation": f"{origin}/metadata",
+        }
+    )
+
+
+async def _oauth_authorization_server_metadata(request):
+    from starlette.responses import JSONResponse
+
+    origin = _request_origin(request)
+    return JSONResponse(
+        {
+            "issuer": origin,
+            "authorization_endpoint": f"{origin}/authorize",
+            "token_endpoint": f"{origin}/token",
+            "scopes_supported": ["mcp"],
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
+            "code_challenge_methods_supported": ["S256"],
+            "service_documentation": f"{origin}/metadata",
         }
     )
 
@@ -230,6 +342,9 @@ def _add_http_routes(server: FastMCP, profile_name: str | None, remote_safety: s
             Route("/health", endpoint=_health, methods=["GET"]),
             Route("/metadata", endpoint=metadata_with_state, methods=["GET"]),
             Route("/status", endpoint=metadata_with_state, methods=["GET"]),
+            Route("/.well-known/oauth-protected-resource/mcp", endpoint=_oauth_protected_resource_metadata, methods=["GET", "OPTIONS"]),
+            Route("/.well-known/oauth-protected-resource", endpoint=_oauth_protected_resource_metadata, methods=["GET", "OPTIONS"]),
+            Route("/.well-known/oauth-authorization-server", endpoint=_oauth_authorization_server_metadata, methods=["GET", "OPTIONS"]),
         ]
     )
 
@@ -240,7 +355,12 @@ def create_mcp_server(
     port: int = DEFAULT_HTTP_PORT,
     profile: str | None = None,
     remote_safety: str | None = None,
+    allow_public_tunnel_hosts: bool = False,
 ) -> FastMCP:
+    transport_security = None
+    if allow_public_tunnel_hosts:
+        transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
     server = FastMCP(
         "Overtli-Blender",
         instructions=(
@@ -251,6 +371,7 @@ def create_mcp_server(
         port=port,
         streamable_http_path=DEFAULT_HTTP_PATH,
         lifespan=server_lifespan,
+        transport_security=transport_security,
     )
     _apply_remote_safety(remote_safety)
     register_all_tools(server, get_blender_connection, image_type=Image)
@@ -338,6 +459,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=DEFAULT_HTTP_PORT, help="HTTP/SSE bind port.")
     parser.add_argument("--profile", help="Optional MCP visible tool profile, for example chatgpt_browser_default.")
     parser.add_argument("--remote-safety", help="Optional remote safety permission profile, for example remote_browser_safe.")
+    parser.add_argument(
+        "--allow-public-tunnel-hosts",
+        action="store_true",
+        help="Allow dynamic public tunnel Host headers for explicit ChatGPT Server URL mode.",
+    )
     parser.add_argument("--status-json", action="store_true", help="Print server mode metadata and exit.")
     return parser.parse_args(argv)
 
@@ -358,6 +484,8 @@ def build_server_status(args: argparse.Namespace) -> dict[str, Any]:
         "profile": profile,
         "remote_safety": remote_safety,
         "visible_tool_budget": profile_obj.max_visible_tools if profile_obj else None,
+        "allow_public_tunnel_hosts": bool(args.allow_public_tunnel_hosts),
+        "dns_rebinding_protection": not bool(args.allow_public_tunnel_hosts),
     }
 
 
@@ -378,10 +506,12 @@ def main(argv: list[str] | None = None):
         port=args.port,
         profile=status["profile"],
         remote_safety=status["remote_safety"],
+        allow_public_tunnel_hosts=status["allow_public_tunnel_hosts"],
     )
     logger.info("Starting Overtli-Blender HTTP MCP bridge at %s", status["mcp_url"])
     logger.info("Health endpoint: %s", status["health_url"])
     logger.info("Tool profile: %s; remote safety: %s", status["profile"], status["remote_safety"])
+    logger.info("DNS rebinding Host protection: %s", "disabled for public tunnel mode" if status["allow_public_tunnel_hosts"] else "enabled")
     server.run(status["transport"])
 
 if __name__ == "__main__":

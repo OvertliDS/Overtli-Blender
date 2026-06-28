@@ -6,4 +6,5 @@
 - Packaged runtime status can be statically verified without Blender. `PACKAGED_RUNTIME_LIVE_VERIFIED` requires the addon zip installed/enabled in Blender and `scripts/smoke_blender_addon_socket.py --timeout 30 --include-addon-package-status`.
 - The final handoff script does not publish, tag, push, upload, or sync Drive mirrors.
 - Review package and Drive mirror tooling are local/private and ignored. Use them only as a manual handoff step after release gates pass.
-- ChatGPT.com browser connector validation is local/tunnel development only. Automated checks verify static readiness and local HTTP health; creating the connector in ChatGPT and running golden prompts remains manual.
+- ChatGPT.com browser connector validation is local/tunnel development only. Automated checks verify static readiness, browser safe structured writes, approval execution visibility, and local HTTP health; creating the connector in ChatGPT and running golden prompts remains manual.
+- Browser mode is not read-only by default. It uses `browser_full_standard`, `browser_standard`, and approval mode `ask_for_destructive_only`; raw Python, provider downloads, file delete execution, addon lifecycle mutation, and third-party addon execution remain gated or hidden.

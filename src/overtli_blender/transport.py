@@ -8,10 +8,52 @@ from typing import Any
 
 logger = logging.getLogger("OvertliBlenderServer")
 DEFAULT_BUFFER_SIZE = 8192
+TRANSPORT_METADATA_KEYS = {
+    "ctx",
+    "context",
+    "_ctx",
+    "_context",
+    "request_context",
+    "tool_context",
+}
+
+
+class _DropValue:
+    pass
+
+
+DROP_VALUE = _DropValue()
+
+
+def sanitize_for_transport(value: Any) -> Any:
+    """Return a JSON-safe command payload without MCP transport internals."""
+    if callable(value):
+        return DROP_VALUE
+    if isinstance(value, dict):
+        clean: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in TRANSPORT_METADATA_KEYS:
+                continue
+            cleaned = sanitize_for_transport(item)
+            if cleaned is not DROP_VALUE:
+                clean[key] = cleaned
+        return clean
+    if isinstance(value, (list, tuple)):
+        clean_items = []
+        for item in value:
+            cleaned = sanitize_for_transport(item)
+            if cleaned is not DROP_VALUE:
+                clean_items.append(cleaned)
+        return clean_items
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def encode_command(command: dict[str, Any]) -> bytes:
-    return json.dumps(command).encode("utf-8")
+    return json.dumps(sanitize_for_transport(command)).encode("utf-8")
 
 
 def decode_response(data: bytes) -> dict[str, Any]:

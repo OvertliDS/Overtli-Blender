@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 
-PERMISSION_PROFILES = {"read_only", "standard", "trusted_project", "developer", "custom"}
+PERMISSION_PROFILES = {"read_only", "browser_standard", "remote_browser_safe", "standard", "trusted_project", "developer", "custom"}
+APPROVAL_MODES = {"always_ask", "ask_for_medium_high", "ask_for_high_destructive", "ask_for_destructive_only", "full_access_developer", "read_only"}
 SENSITIVE_KEY_FRAGMENTS = ("api" + "_key", "api" + "key", "tok" + "en", "sec" + "ret", "pass" + "word", "cred" + "ential")
 
 
@@ -35,6 +36,19 @@ class SecurityPreferenceSection:
     raw_python_enabled: bool = False
     addon_interop_enabled: bool = False
     require_approval_for_permission_expansion: bool = True
+    default_local_tool_profile: str = "full_standard"
+    default_local_permission_profile: str = "standard"
+    default_local_approval_mode: str = "ask_for_high_destructive"
+    default_browser_tool_profile: str = "browser_full_standard"
+    default_browser_permission_profile: str = "browser_standard"
+    default_browser_approval_mode: str = "ask_for_destructive_only"
+    approval_timeout_seconds: int = 900
+    require_approval_for_external_writes: bool = True
+    require_approval_for_file_delete: bool = True
+    require_approval_for_raw_python: bool = True
+    require_approval_for_provider_downloads: bool = True
+    require_approval_for_addon_lifecycle: bool = True
+    browser_connector_write_policy: str = "safe_structured_writes_enabled"
 
 
 @dataclass
@@ -59,7 +73,7 @@ class KnowledgePreferenceSection:
 
 @dataclass
 class ToolProfilePreferenceSection:
-    active_profile: str = "safe_scene"
+    active_profile: str = "full_standard"
     enabled_tool_packs: list[str] = field(default_factory=list)
     active_skill_packs: list[str] = field(default_factory=list)
     max_visible_tools: int = 80
@@ -190,6 +204,11 @@ def validate_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
         errors.append(f"Unknown permission profile: {profile}")
     if security.get("raw_python_enabled"):
         warnings.append("Raw Python is enabled and should remain approval-gated.")
+    for key in ("default_local_approval_mode", "default_browser_approval_mode"):
+        if security.get(key, "") not in APPROVAL_MODES:
+            errors.append(f"Unknown approval mode: {security.get(key)}")
+    if int(security.get("approval_timeout_seconds", 0)) <= 0:
+        errors.append("Approval timeout must be greater than zero.")
     if providers.get("provider_downloads_enabled") and not providers.get("network_providers_enabled"):
         errors.append("Provider downloads require network providers to be enabled.")
     if int(artifacts.get("operation_timeout_seconds", 0)) <= 0:
@@ -213,8 +232,20 @@ def permission_expands(current: dict[str, Any], requested: dict[str, Any]) -> bo
         return True
     if set(requested_fs.get("approved_addon_source_roots", [])) - set(current_fs.get("approved_addon_source_roots", [])):
         return True
-    rank = {"read_only": 0, "standard": 1, "trusted_project": 2, "developer": 3, "custom": 1}
+    rank = {"read_only": 0, "browser_standard": 1, "remote_browser_safe": 1, "standard": 1, "trusted_project": 2, "developer": 3, "custom": 1}
     if rank.get(requested_fs.get("permission_profile", current_fs.get("permission_profile", "standard")), 1) > rank.get(current_fs.get("permission_profile", "standard"), 1):
+        return True
+    approval_rank = {
+        "read_only": 0,
+        "always_ask": 1,
+        "ask_for_medium_high": 2,
+        "ask_for_high_destructive": 3,
+        "ask_for_destructive_only": 4,
+        "full_access_developer": 5,
+    }
+    current_mode = current.get("security", {}).get("default_local_approval_mode", "ask_for_high_destructive")
+    requested_mode = requested.get("security", {}).get("default_local_approval_mode", current_mode)
+    if approval_rank.get(requested_mode, 0) > approval_rank.get(current_mode, 0):
         return True
     for section, key in [("security", "raw_python_enabled"), ("security", "addon_interop_enabled"), ("providers", "network_providers_enabled"), ("providers", "provider_downloads_enabled")]:
         if requested.get(section, {}).get(key) and not current.get(section, {}).get(key):

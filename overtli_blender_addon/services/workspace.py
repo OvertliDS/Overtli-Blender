@@ -3,8 +3,8 @@ from __future__ import annotations
 from ..core import *
 
 class WorkspaceSafetyDiffService:
-    TODO_STATES = {"pending", "in_progress", "done", "blocked", "rejected", "needs_user_selection", "needs_screenshot", "needs_rollback", "needs_manual_check"}
-    TASK_STATES = {"pending", "in_progress", "done", "blocked", "deferred", "superseded"}
+    TODO_STATES = {"pending", "in_progress", "done", "verified", "blocked", "rejected", "needs_user_selection", "needs_screenshot", "needs_rollback", "needs_manual_check"}
+    TASK_STATES = {"pending", "in_progress", "done", "verified", "blocked", "deferred", "superseded"}
 
     def __init__(self, server):
         self.server = server
@@ -22,8 +22,15 @@ class WorkspaceSafetyDiffService:
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or fallback)).strip("._-")
         return safe[:80] or fallback
 
+    def _artifact_project_root(self, artifact_root=None):
+        if artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT"):
+            return os.path.abspath(os.path.expanduser(str(artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT"))))
+        resolved = runtime_resolve_artifact_workspace(self.server.project_workspace_service._blend_info()["filepath"], create_if_missing=True)
+        workspace = resolved.get("workspace", {})
+        return os.path.abspath(workspace.get("project_root") or ADDON_ROOT)
+
     def _workspace_root(self, artifact_root=None):
-        root = artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT") or ADDON_ROOT
+        root = self._artifact_project_root(artifact_root)
         path = os.path.join(os.path.abspath(os.path.expanduser(str(root))), ".overtli_blender", "workspace")
         os.makedirs(path, exist_ok=True)
         for child in ["tasks", "snapshots", "rollback"]:
@@ -99,6 +106,39 @@ class WorkspaceSafetyDiffService:
         self._save_index("tasks", tasks, artifact_root)
         self.record_operation_journal_entry("create_workspace_task", task_id=task_id, target=task_id, summary=f"Created workspace task {title}", risk_level="LOW", rollback_status="not_required", artifact_root=artifact_root)
         return {"status": "success", "task": task, "warnings": []}
+
+    def complete_workspace_task(self, task_id, verified=False, evidence=None, artifact_root=None):
+        state = "verified" if verified else "done"
+        return self.update_workspace_task(task_id, status=state, verification={"evidence": evidence, "verified": bool(verified)}, artifact_root=artifact_root)
+
+    def create_scene_plan(self, title="Scene build plan", goal=None, steps=None, artifact_root=None):
+        default_steps = [
+            "preflight scene",
+            "reset/cleanup",
+            "verify transform contract",
+            "blockout ground",
+            "blockout house body",
+            "verify contact/alignment",
+            "add roof",
+            "verify roof/body alignment",
+            "materials",
+            "lighting/camera",
+            "multi-angle snapshot review",
+            "final corrections",
+        ]
+        task = self.create_workspace_task(title=title, goal=goal, status="in_progress", artifact_root=artifact_root)
+        if task.get("status") != "success":
+            return task
+        task_id = task["task"]["task_id"]
+        todos = [self.add_workspace_todo(text=text, task_id=task_id, artifact_root=artifact_root).get("todo") for text in (steps or default_steps)]
+        return {"status": "success", "task": task["task"], "todos": [todo for todo in todos if todo], "warnings": []}
+
+    def list_scene_plan(self, task_id=None, artifact_root=None):
+        tasks = self.list_workspace_tasks(artifact_root=artifact_root).get("tasks", [])
+        todos = self.list_workspace_todos(task_id=task_id, artifact_root=artifact_root).get("todos", [])
+        if task_id:
+            tasks = [task for task in tasks if task.get("task_id") == task_id]
+        return {"status": "success", "tasks": tasks, "todos": todos, "warnings": []}
 
     def update_workspace_task(self, task_id, status=None, goal=None, assumptions=None, rollback_status=None, verification=None, artifact_root=None):
         tasks = self._load_index("tasks", artifact_root)
@@ -224,6 +264,8 @@ class WorkspaceSafetyDiffService:
             "created_at": self._utc_timestamp(),
             "scene_name": bpy.context.scene.name,
             "state": self._scene_state(),
+            "workspace_tasks": self.list_workspace_tasks(artifact_root=artifact_root).get("tasks", []),
+            "workspace_todos": self.list_workspace_todos(artifact_root=artifact_root).get("todos", []),
             "verification_snapshot": None,
         }
         if include_verification_snapshot:
@@ -341,24 +383,151 @@ class ProjectWorkspaceService:
             return workspace["project_root"]
         return ADDON_ROOT
 
+    def _sync_file_policy_project_root(self, project_root):
+        from pathlib import Path
+        root = Path(os.path.abspath(project_root)).resolve(strict=False)
+        self.server.file_access_policy_service.policy.project_root = root
+        self.server.file_access_policy_service.add_approved_root(str(root), confirm=True)
+        return str(root)
+
+    @staticmethod
+    def _is_relative_to(path, root):
+        try:
+            common = os.path.commonpath([os.path.abspath(path), os.path.abspath(root)])
+            return common == os.path.abspath(root)
+        except Exception:
+            return False
+
+    def _save_blend_with_relative_paths(self, filepath):
+        warnings = []
+        try:
+            bpy.ops.wm.save_as_mainfile(filepath=filepath, relative_remap=True)
+        except TypeError:
+            bpy.ops.wm.save_as_mainfile(filepath=filepath)
+            warnings.append("Blender save_as_mainfile did not accept relative_remap; saved without that parameter.")
+        try:
+            bpy.ops.file.make_paths_relative()
+            try:
+                bpy.ops.wm.save_as_mainfile(filepath=filepath, relative_remap=True)
+            except TypeError:
+                bpy.ops.wm.save_as_mainfile(filepath=filepath)
+        except Exception as exc:
+            warnings.append(f"Could not convert all paths to relative paths after save: {exc}")
+        return {"filepath": filepath, "warnings": warnings}
+
+    def _collect_image_dependencies_to_project(self, project_root, overwrite=False, make_relative=True):
+        target_dir = os.path.join(os.path.abspath(project_root), "textures", "source")
+        os.makedirs(target_dir, exist_ok=True)
+        copied = []
+        relinked = []
+        skipped = []
+        warnings = []
+        for image in bpy.data.images:
+            raw_path = getattr(image, "filepath", "") or getattr(image, "filepath_raw", "") or ""
+            packed = bool(getattr(image, "packed_file", None))
+            if packed:
+                skipped.append({"name": image.name, "reason": "packed_image"})
+                continue
+            abs_path = bpy.path.abspath(raw_path) if raw_path else ""
+            if not abs_path:
+                skipped.append({"name": image.name, "reason": "no_filepath"})
+                continue
+            if not os.path.exists(abs_path):
+                warnings.append(f"Image dependency is missing and was not copied: {image.name} -> {raw_path}")
+                skipped.append({"name": image.name, "source": abs_path, "reason": "missing"})
+                continue
+            if self._is_relative_to(abs_path, project_root):
+                if make_relative:
+                    try:
+                        image.filepath = bpy.path.relpath(abs_path)
+                        relinked.append({"name": image.name, "filepath": image.filepath, "source": abs_path, "copied": False})
+                    except Exception as exc:
+                        warnings.append(f"Could not make project-local image relative: {image.name}: {exc}")
+                continue
+            basename = os.path.basename(abs_path)
+            destination = os.path.join(target_dir, basename)
+            if os.path.exists(destination) and not overwrite:
+                skipped.append({"name": image.name, "source": abs_path, "target": destination, "reason": "target_exists"})
+                if make_relative:
+                    try:
+                        image.filepath = bpy.path.relpath(destination)
+                        relinked.append({"name": image.name, "filepath": image.filepath, "source": abs_path, "target": destination, "copied": False})
+                    except Exception as exc:
+                        warnings.append(f"Could not relink existing project texture: {image.name}: {exc}")
+                continue
+            shutil.copy2(abs_path, destination)
+            copied.append({"name": image.name, "source": abs_path, "target": destination})
+            if make_relative:
+                try:
+                    image.filepath = bpy.path.relpath(destination)
+                    relinked.append({"name": image.name, "filepath": image.filepath, "source": abs_path, "target": destination, "copied": True})
+                except Exception as exc:
+                    warnings.append(f"Copied texture but could not make image path relative: {image.name}: {exc}")
+        return {"status": "success", "target_dir": target_dir, "copied": copied, "relinked": relinked, "skipped": skipped, "warnings": warnings}
+
     def get_project_status(self):
         blend = self._blend_info()
         resolved = runtime_resolve_workspace(blend["filepath"], repo_root=ADDON_ROOT, allow_repo_fallback=True)
+        workspace = resolved.get("workspace", {})
+        if workspace.get("resolved"):
+            self._sync_file_policy_project_root(workspace["project_root"])
         return {
             "status": "success",
             "blend": blend,
-            "workspace": resolved.get("workspace", {}),
+            "project_folder": workspace.get("project_root") if workspace.get("resolved") else None,
+            "workspace": workspace,
+            "layout": runtime_validate_layout(workspace["project_root"]) if workspace.get("resolved") else None,
             "approved_roots": self.server.file_access_policy_service.get_file_access_policy().get("policy", {}),
             "warnings": resolved.get("warnings", []),
         }
 
+    def get_loaded_project_folder(self, preferred_root=None):
+        result = runtime_get_loaded_project_folder(self._blend_info()["filepath"], preferred_root=preferred_root)
+        workspace = result.get("workspace", {})
+        if workspace.get("resolved"):
+            self._sync_file_policy_project_root(workspace["project_root"])
+        return result
+
     def resolve_project_workspace(self, preferred_root=None, allow_repo_fallback=True, create_if_missing=False):
-        result = runtime_resolve_workspace(self._blend_info()["filepath"], preferred_root=preferred_root, repo_root=ADDON_ROOT, allow_repo_fallback=allow_repo_fallback)
+        if not self._blend_info()["filepath"] and not preferred_root:
+            result = runtime_resolve_artifact_workspace(self._blend_info()["filepath"], preferred_root=preferred_root, create_if_missing=True)
+        else:
+            result = runtime_resolve_workspace(self._blend_info()["filepath"], preferred_root=preferred_root, repo_root=ADDON_ROOT, allow_repo_fallback=allow_repo_fallback)
         workspace = result.get("workspace", {})
         if create_if_missing and workspace.get("resolved"):
-            init = runtime_initialize_workspace(workspace["project_root"], overwrite_manifest=False)
+            init = runtime_repair_workspace_layout(workspace["project_root"], blend_filepath=self._blend_info()["filepath"])
             result["initialization"] = init
+        if workspace.get("resolved"):
+            self._sync_file_policy_project_root(workspace["project_root"])
         return result
+
+    def initialize_temp_workspace(self, session_id=None, project_name=None):
+        result = runtime_initialize_temp_workspace(session_id=session_id, project_name=project_name)
+        workspace = result.get("workspace", {})
+        if workspace.get("resolved"):
+            self._sync_file_policy_project_root(workspace["project_root"])
+        return result
+
+    def promote_temp_workspace_to_project(self, temp_workspace_root=None, project_root=None, blend_filename=None, project_name=None, confirm=False, overwrite=False, collect_external_images=True, make_paths_relative=True):
+        if not project_root:
+            return {"status": "error", "message": "project_root is required."}
+        source = temp_workspace_root or self.resolve_project_workspace().get("workspace", {}).get("project_root")
+        if not source:
+            return {"status": "error", "message": "No temp workspace is available to promote."}
+        if not confirm:
+            return {
+                "status": "requires_approval",
+                "message": "Promoting a temp workspace copies artifacts and may save the active .blend.",
+                "source_temp_workspace": source,
+                "target_project_root": os.path.abspath(project_root),
+            }
+        copied = runtime_copy_project_folder(source, project_root, overwrite=overwrite)
+        if copied.get("status") != "success":
+            return copied
+        filename = blend_filename or f"{project_name or os.path.basename(os.path.abspath(project_root))}.blend"
+        saved = self.resave_project_folder(project_root=project_root, blend_filename=filename, project_name=project_name, confirm=True, overwrite=overwrite, collect_external_images=collect_external_images, make_paths_relative=make_paths_relative)
+        layout = runtime_repair_workspace_layout(project_root, project_name=project_name, blend_filepath=saved.get("after"))
+        return {"status": "success", "source_temp_workspace": source, "target_project_root": os.path.abspath(project_root), "copied": copied, "saved": saved, "layout": layout, "warnings": []}
 
     def initialize_project_workspace(self, project_root=None, project_name=None, create_standard_folders=True, save_blend_if_unsaved=False, blend_filename=None, confirm=False):
         blend = self._blend_info()
@@ -368,13 +537,12 @@ class ProjectWorkspaceService:
         if save_blend_if_unsaved and not confirm:
             return {"status": "requires_approval", "message": "Saving an unsaved .blend requires confirmation.", "blend": blend}
         result = runtime_initialize_workspace(root, project_name=project_name, create_standard_folders=create_standard_folders, overwrite_manifest=confirm)
-        self.server.file_access_policy_service.add_approved_root(root, confirm=True)
-        from pathlib import Path
-        self.server.file_access_policy_service.policy.project_root = Path(os.path.abspath(root)).resolve(strict=False)
+        self._sync_file_policy_project_root(root)
         if save_blend_if_unsaved and blend_filename:
             save_path = os.path.join(root, blend_filename)
             bpy.ops.wm.save_as_mainfile(filepath=save_path)
             result["saved_blend"] = save_path
+            result = runtime_repair_workspace_layout(root, project_name=project_name, blend_filepath=save_path)
         return result
 
     def validate_project_layout(self, project_root=None):
@@ -384,7 +552,9 @@ class ProjectWorkspaceService:
     def repair_project_layout(self, project_root=None, confirm=False):
         if not confirm:
             return {"status": "requires_approval", "message": "Repairing project layout writes folders and manifest."}
-        return runtime_initialize_workspace(project_root or self._workspace_base(), overwrite_manifest=False)
+        root = project_root or self._workspace_base()
+        self._sync_file_policy_project_root(root)
+        return runtime_repair_workspace_layout(root, blend_filepath=self._blend_info()["filepath"])
 
     def register_blend_file(self, filepath=None, confirm=False):
         path = filepath or self._blend_info()["filepath"]
@@ -397,7 +567,7 @@ class ProjectWorkspaceService:
         result["blend"] = {"filepath": path, "name": os.path.basename(path)}
         return result
 
-    def save_project_as(self, project_root, blend_filename, confirm=False, overwrite=False):
+    def save_project_as(self, project_root, blend_filename, confirm=False, overwrite=False, collect_external_images=False, make_paths_relative=True):
         if not confirm:
             return {"status": "requires_approval", "message": "Saving a .blend requires confirmation."}
         target = os.path.abspath(os.path.join(project_root, blend_filename))
@@ -407,8 +577,84 @@ class ProjectWorkspaceService:
         os.makedirs(project_root, exist_ok=True)
         if os.path.exists(target) and overwrite:
             self.create_project_backup(confirm=True)
-        bpy.ops.wm.save_as_mainfile(filepath=target)
-        return {"status": "success", "before": before, "after": target}
+        runtime_repair_workspace_layout(project_root, project_name=os.path.splitext(os.path.basename(blend_filename))[0])
+        save_result = self._save_blend_with_relative_paths(target) if make_paths_relative else {"filepath": target, "warnings": []}
+        if not make_paths_relative:
+            bpy.ops.wm.save_as_mainfile(filepath=target)
+        dependency_collection = None
+        if collect_external_images:
+            dependency_collection = self._collect_image_dependencies_to_project(project_root, overwrite=overwrite, make_relative=make_paths_relative)
+            if make_paths_relative:
+                save_result_after_resources = self._save_blend_with_relative_paths(target)
+                save_result["warnings"].extend(save_result_after_resources.get("warnings", []))
+        self._sync_file_policy_project_root(project_root)
+        layout = runtime_repair_workspace_layout(project_root, project_name=os.path.splitext(os.path.basename(blend_filename))[0], blend_filepath=target)
+        return {
+            "status": "success",
+            "before": before,
+            "after": target,
+            "workspace": layout.get("workspace"),
+            "layout": layout,
+            "save": save_result,
+            "dependency_collection": dependency_collection,
+            "storage_backend": "json_files",
+        }
+
+    def resave_project_folder(self, project_root=None, blend_filename=None, project_name=None, create_standard_folders=True, update_manifest=True, confirm=False, overwrite=False, collect_external_images=True, make_paths_relative=True):
+        blend = self._blend_info()
+        root = project_root or (os.path.dirname(blend["filepath"]) if blend["is_saved"] else None)
+        if not root:
+            return {"status": "requires_approval", "message": "Unsaved .blend requires project_root and blend_filename."}
+        filename = blend_filename or blend["name"] or f"{os.path.basename(os.path.abspath(root))}.blend"
+        result = self.save_project_as(root, filename, confirm=confirm, overwrite=overwrite, collect_external_images=collect_external_images, make_paths_relative=make_paths_relative)
+        if result.get("status") != "success":
+            return result
+        if create_standard_folders or update_manifest:
+            result["layout"] = runtime_repair_workspace_layout(root, project_name=project_name, blend_filepath=result["after"])
+        return result
+
+    def plan_project_folder_move(self, destination_root, new_project_name=None, source_project_root=None, copy_mode="copy"):
+        source = source_project_root or self._workspace_base(allow_repo_fallback=False)
+        return runtime_plan_project_folder_move(source, destination_root, new_project_name=new_project_name, blend_filepath=self._blend_info()["filepath"], copy_mode=copy_mode)
+
+    def move_project_folder(self, destination_root, new_project_name=None, source_project_root=None, copy_mode="copy", confirm=False, overwrite=False, save_after_move=True, delete_original=False, collect_external_images=True, make_paths_relative=True):
+        if not confirm:
+            return {"status": "requires_approval", "message": "Moving or copying a project folder requires confirmation.", "plan": self.plan_project_folder_move(destination_root, new_project_name, source_project_root, copy_mode)}
+        blend = self._blend_info()
+        source = os.path.abspath(source_project_root or self._workspace_base(allow_repo_fallback=False))
+        plan = runtime_plan_project_folder_move(source, destination_root, new_project_name=new_project_name, blend_filepath=blend["filepath"], copy_mode=copy_mode)
+        if plan.get("status") == "error":
+            return plan
+        target = plan["target_project_root"]
+        copied = runtime_copy_project_folder(source, target, overwrite=overwrite)
+        if copied.get("status") != "success":
+            return {**copied, "plan": plan}
+        target_blend = plan["target_blend_filepath"]
+        saved = None
+        dependency_collection = None
+        save_result = None
+        if save_after_move:
+            os.makedirs(os.path.dirname(target_blend), exist_ok=True)
+            save_result = self._save_blend_with_relative_paths(target_blend) if make_paths_relative else {"filepath": target_blend, "warnings": []}
+            if not make_paths_relative:
+                bpy.ops.wm.save_as_mainfile(filepath=target_blend)
+            saved = target_blend
+            if collect_external_images:
+                dependency_collection = self._collect_image_dependencies_to_project(target, overwrite=overwrite, make_relative=make_paths_relative)
+                if make_paths_relative:
+                    second_save = self._save_blend_with_relative_paths(target_blend)
+                    save_result["warnings"].extend(second_save.get("warnings", []))
+        layout = runtime_repair_workspace_layout(target, project_name=new_project_name or os.path.basename(target), blend_filepath=saved or target_blend)
+        self._sync_file_policy_project_root(target)
+        deleted_original = False
+        if delete_original:
+            if copy_mode != "move":
+                return {"status": "error", "message": "delete_original requires copy_mode='move'.", "copied": copied, "saved_blend": saved, "layout": layout}
+            if os.path.abspath(source) == os.path.abspath(target):
+                return {"status": "error", "message": "Refusing to delete source because it equals target.", "copied": copied, "saved_blend": saved, "layout": layout}
+            shutil.rmtree(source)
+            deleted_original = True
+        return {"status": "success", "plan": plan, "copied": copied, "saved_blend": saved, "save": save_result, "dependency_collection": dependency_collection, "layout": layout, "deleted_original": deleted_original, "original_retained": not deleted_original}
 
     def create_project_backup(self, confirm=False):
         if not confirm:
@@ -427,34 +673,90 @@ class ProjectWorkspaceService:
     def restore_project_backup(self, backup_id, confirm=False):
         if not confirm:
             return {"status": "requires_approval", "message": "Restoring a backup overwrites the current blend."}
-        return {"status": "requires_approval", "message": "Restore is planned but not executed automatically in Phase 7C.", "backup_id": backup_id}
+        blend = self._blend_info()
+        if not blend["is_saved"]:
+            return {"status": "error", "message": "Cannot restore a backup because the current .blend is unsaved.", "backup_id": backup_id}
+        root = os.path.dirname(blend["filepath"])
+        backup_dir = os.path.join(root, "backups")
+        if not os.path.isdir(backup_dir):
+            return {"status": "error", "message": "Project backup directory does not exist.", "backup_id": backup_id, "backup_dir": backup_dir}
+        candidates = [
+            os.path.join(backup_dir, name)
+            for name in os.listdir(backup_dir)
+            if name.startswith(str(backup_id) + "_") and name.endswith(".blend")
+        ]
+        if not candidates:
+            return {"status": "error", "message": "Backup id was not found.", "backup_id": backup_id, "backup_dir": backup_dir}
+        source = max(candidates, key=os.path.getmtime)
+        target = blend["filepath"]
+        pre_restore = self.create_project_backup(confirm=True)
+        shutil.copy2(source, target)
+        try:
+            bpy.ops.wm.open_mainfile(filepath=target)
+            reopened = True
+        except Exception:
+            reopened = False
+        layout = runtime_repair_workspace_layout(root, blend_filepath=target)
+        return {
+            "status": "success",
+            "backup_id": backup_id,
+            "restored_from": source,
+            "restored_to": target,
+            "pre_restore_backup": pre_restore,
+            "reopened": reopened,
+            "layout": layout,
+            "warnings": [] if reopened else ["Backup file was copied over the active .blend, but Blender did not reopen it automatically."],
+        }
 
-    def collect_project_dependencies(self):
+    def collect_project_dependencies(self, project_root=None, copy_external_images=False, overwrite=False, make_paths_relative=True, confirm=False):
+        if copy_external_images and not confirm:
+            return {"status": "requires_approval", "message": "Copying and relinking project dependencies requires confirmation."}
         deps = []
         for image in bpy.data.images:
             if getattr(image, "filepath", ""):
-                deps.append({"type": "image", "name": image.name, "filepath": bpy.path.abspath(image.filepath)})
-        return {"status": "success", "dependencies": deps}
+                path = bpy.path.abspath(image.filepath)
+                deps.append({"type": "image", "name": image.name, "filepath": path, "raw_filepath": image.filepath, "packed": bool(getattr(image, "packed_file", None)), "missing": bool(path and not os.path.exists(path))})
+        collection = None
+        if copy_external_images:
+            root = project_root or self._workspace_base(allow_repo_fallback=False)
+            collection = self._collect_image_dependencies_to_project(root, overwrite=overwrite, make_relative=make_paths_relative)
+        return {"status": "success", "dependencies": deps, "dependency_collection": collection, "storage_backend": "json_files"}
 
 
 class FileAccessPolicyService:
     def __init__(self, server):
         self.server = server
-        self.policy = FileAccessPolicy(ADDON_ROOT)
+        self.policy = FileAccessPolicy(self._current_project_root())
+
+    def _current_project_root(self):
+        try:
+            return self.server.project_workspace_service._workspace_base(allow_repo_fallback=True)
+        except Exception:
+            return ADDON_ROOT
+
+    def _sync_project_root(self):
+        from pathlib import Path
+        root = Path(os.path.abspath(self._current_project_root())).resolve(strict=False)
+        if str(root) != str(self.policy.project_root):
+            self.policy.project_root = root
+            self.policy.add_root(root)
+        return root
 
     def get_file_access_policy(self):
+        self._sync_project_root()
         return {"status": "success", "policy": self.policy.to_dict()}
 
     def set_file_access_policy(self, approved_roots=None, confirm=False):
         if not confirm:
             return {"status": "requires_approval", "message": "Replacing approved roots requires confirmation."}
-        self.policy = FileAccessPolicy(ADDON_ROOT, approved_roots or [])
+        self.policy = FileAccessPolicy(self._current_project_root(), approved_roots or [])
         return self.get_file_access_policy()
 
     def validate_path_access(self, path, access="read"):
         return self.policy.validate(path, access)
 
     def list_approved_roots(self):
+        self._sync_project_root()
         return {"status": "success", "approved_roots": self.policy.approved_roots}
 
     def add_approved_root(self, root, confirm=False):
@@ -466,6 +768,17 @@ class FileAccessPolicyService:
         if not confirm:
             return {"status": "requires_approval", "message": "Removing approved root requires confirmation.", "root": root}
         return {"status": "success", "policy": self.policy.remove_root(root)}
+
+    def detect_drive_roots(self, preferred_drives=None):
+        return runtime_detect_drive_roots(tuple(preferred_drives or ("C", "D")))
+
+    def approve_drive_roots(self, drives=None, confirm=False):
+        roots = runtime_detect_drive_roots(tuple(drives or ("C", "D"))).get("drive_roots", [])
+        if not confirm:
+            return {"status": "requires_approval", "message": "Approving drive roots grants broad local filesystem access.", "drive_roots": roots}
+        for root in roots:
+            self.policy.add_root(root)
+        return {"status": "success", "policy": self.policy.to_dict(), "drive_roots": roots}
 
     def scan_project_files(self, root=None, limit=200):
         base = root or self.policy.project_root

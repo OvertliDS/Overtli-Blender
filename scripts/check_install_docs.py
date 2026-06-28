@@ -52,7 +52,7 @@ def main() -> int:
     browser_doc = ROOT / "docs" / "chatgpt_browser_connector.md"
     if browser_doc.is_file():
         text = browser_doc.read_text(encoding="utf-8")
-        for required in ["Developer mode", "Settings -> Connectors -> Create", "/mcp", "MCP Inspector", "Always ask"]:
+        for required in ["Developer mode", "Settings -> Connectors -> Create", "/mcp", "MCP Inspector", "Always allow"]:
             if required not in text:
                 failures.append(f"{browser_doc.relative_to(ROOT)} missing {required}")
     mcp_setup = ROOT / "docs" / "mcp_setup.md"

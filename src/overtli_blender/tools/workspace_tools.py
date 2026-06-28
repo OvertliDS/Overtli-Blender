@@ -33,9 +33,24 @@ def register_workspace_tools(mcp: Any, get_blender_connection: Callable[[], Any]
         return _send(get_blender_connection, "update_workspace_task", locals())
 
     @mcp.tool()
+    def complete_workspace_task(ctx: Any, task_id: str, verified: bool = False, evidence: dict | None = None, artifact_root: str | None = None) -> str:
+        """Mark a workspace task completed or verified with supporting evidence."""
+        return _send(get_blender_connection, "complete_workspace_task", locals())
+
+    @mcp.tool()
     def list_workspace_tasks(ctx: Any, status: str | None = None, artifact_root: str | None = None) -> str:
         """List persistent task workspace entries."""
         return _send(get_blender_connection, "list_workspace_tasks", locals())
+
+    @mcp.tool()
+    def create_scene_plan(ctx: Any, title: str, goal: str | None = None, steps: list[str] | None = None, assumptions: list[str] | None = None, task_id: str | None = None, artifact_root: str | None = None) -> str:
+        """Create a task plus ordered todos for a scene-building plan."""
+        return _send(get_blender_connection, "create_scene_plan", locals())
+
+    @mcp.tool()
+    def list_scene_plan(ctx: Any, task_id: str | None = None, artifact_root: str | None = None) -> str:
+        """Return scene-plan tasks, todos, and journal context."""
+        return _send(get_blender_connection, "list_scene_plan", locals())
 
     @mcp.tool()
     def add_workspace_todo(ctx: Any, text: str, task_id: str | None = None, state: str = "pending", todo_id: str | None = None, artifact_root: str | None = None) -> str:

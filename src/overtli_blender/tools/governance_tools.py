@@ -37,16 +37,29 @@ def register_governance_tools(mcp: Any, get_blender_connection: Callable[[], Any
         return _send(get_blender_connection, "get_pending_approvals")
 
     @mcp.tool()
-    def approve_operation(approval_id: str) -> str:
-        return _send(get_blender_connection, "approve_operation", {"approval_id": approval_id})
+    def approve_operation(approval_id: str, execute_after_approval: bool = True, approve_only: bool = False) -> str:
+        return _send(get_blender_connection, "approve_operation", {"approval_id": approval_id, "execute_after_approval": execute_after_approval, "approve_only": approve_only})
 
     @mcp.tool()
     def deny_operation(approval_id: str, reason: str | None = None) -> str:
         return _send(get_blender_connection, "deny_operation", {"approval_id": approval_id, "reason": reason})
 
     @mcp.tool()
-    def execute_approved_operation(approval_id: str, command_name: str, params: dict[str, Any] | None = None) -> str:
-        return _send(get_blender_connection, "execute_approved_operation", {"approval_id": approval_id, "command_name": command_name, "params": params or {}})
+    def execute_approved_operation(approval_id: str, command_name: str | None = None, params: dict[str, Any] | None = None) -> str:
+        return _send(get_blender_connection, "execute_approved_operation", {"approval_id": approval_id, "command_name": command_name, "params": params})
+
+    @mcp.tool()
+    def approve_and_execute_operation(approval_id: str, expected_command_name: str | None = None, expected_params_hash: str | None = None, reason: str | None = None) -> str:
+        return _send(
+            get_blender_connection,
+            "approve_and_execute_operation",
+            {
+                "approval_id": approval_id,
+                "expected_command_name": expected_command_name,
+                "expected_params_hash": expected_params_hash,
+                "reason": reason,
+            },
+        )
 
     @mcp.tool()
     def get_operation_status(operation_id: str | None = None) -> str:

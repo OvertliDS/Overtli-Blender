@@ -14,8 +14,10 @@ def test_chatgpt_connector_metadata_exists_and_uses_mcp_endpoint() -> None:
     assert metadata["name"] == "Overtli-Blender"
     assert metadata["connector_url_placeholder"].endswith("/mcp")
     assert metadata["local_http_url"] == "http://127.0.0.1:2091/mcp"
-    assert metadata["default_tool_profile"] == "chatgpt_browser_default"
-    assert metadata["recommended_permission"] == "Always ask"
+    assert metadata["default_tool_profile"] == "browser_full_standard"
+    assert metadata["default_permission_profile"] == "browser_standard"
+    assert metadata["default_approval_mode"] == "ask_for_destructive_only"
+    assert metadata["recommended_permission"] == "Always allow for trusted local projects; destructive operations stay internally gated"
 
 
 def test_chatgpt_connector_check_script_exists() -> None:

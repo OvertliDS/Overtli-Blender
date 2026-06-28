@@ -25,8 +25,12 @@ class VerificationArtifactService:
         return safe[:60] or "scene"
 
     def _artifact_root(self, artifact_root=None):
-        root = artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT") or ADDON_ROOT
-        return os.path.abspath(os.path.expanduser(str(root)))
+        if artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT"):
+            root = artifact_root or os.environ.get("OVERTLI_BLENDER_ARTIFACT_ROOT")
+            return os.path.abspath(os.path.expanduser(str(root)))
+        resolved = runtime_resolve_artifact_workspace(getattr(bpy.data, "filepath", "") or None, create_if_missing=True)
+        workspace = resolved.get("workspace", {})
+        return os.path.abspath(os.path.expanduser(str(workspace.get("project_root") or ADDON_ROOT)))
 
     def _snapshot_dir(self, snapshot_name=None, label=None, artifact_root=None):
         snapshot_id = f"{self._snapshot_stamp()}_{self._safe_label(snapshot_name or label)}"
@@ -246,6 +250,8 @@ class VerificationArtifactService:
             },
             "artifact_dir": target_dir,
             "artifacts": artifacts,
+            "workspace_tasks": self.server.workspace_safety_diff_service.list_workspace_tasks(artifact_root=artifact_root).get("tasks", []),
+            "workspace_todos": self.server.workspace_safety_diff_service.list_workspace_todos(artifact_root=artifact_root).get("todos", []),
             "warnings": warnings,
         }
         manifest_path = os.path.join(target_dir, "manifest.json")

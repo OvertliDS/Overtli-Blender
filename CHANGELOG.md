@@ -1,5 +1,13 @@
 # Changelog
 
+## Phase 10D - Browser Full Standard and Approval Execution
+
+- Added `browser_full_standard` and `browser_standard` as the default browser connector profile and permission profile; `chatgpt_browser_default` and `remote_browser_safe` remain backward-compatible aliases.
+- Added approval-mode defaults so local addon use defaults to `full_standard` / `standard` / `ask_for_high_destructive`, while browser use defaults to `browser_full_standard` / `browser_standard` / `ask_for_medium_high`.
+- Exposed safe structured writes in browser mode, including primitive, material, collection, camera, light, verified edit batch, presentation batch, and verification snapshot tools.
+- Added `approve_and_execute_operation` and completed approved structured-command dispatch so approval does not dead-end with `object_count` unchanged.
+- Kept raw Python, provider downloads, file delete execution, addon lifecycle mutation, third-party operator execution, and destructive cleanup hidden or approval-gated by default.
+
 ## Phase 10C - ChatGPT Browser Connector and Remote MCP Bridge
 
 - Added Streamable HTTP MCP bridge startup flags while preserving stdio as the default local MCP transport.

@@ -89,6 +89,8 @@ def _risk_value(risk: str) -> int:
 
 def search_tools(query: str, category: str | None = None, tool_pack: str | None = None, risk_max: str | None = None, limit: int = 20) -> dict[str, Any]:
     terms = [term.lower() for term in query.split() if term.strip()]
+    destructive_terms = {"delete", "clear", "reset", "purge", "cleanup", "remove"}
+    destructive_intent = any(term in destructive_terms for term in terms)
     max_value = _risk_value(risk_max) if risk_max else 99
     matches: list[tuple[int, CommandSpec]] = []
     for spec in list_command_specs():
@@ -107,14 +109,22 @@ def search_tools(query: str, category: str | None = None, tool_pack: str | None 
             " ".join(spec.tags),
             " ".join(spec.allowed_capabilities),
         ]).lower()
+        if destructive_intent and spec.name.startswith("create_") and not any(term in spec.name.lower() for term in destructive_terms):
+            continue
+        if destructive_intent and not (spec.destructive or any(term in haystack for term in destructive_terms)):
+            continue
         score = sum(3 if term in spec.name.lower() else 1 for term in terms if term in haystack)
         if not terms or score:
             matches.append((score, spec))
     matches.sort(key=lambda item: (-item[0], item[1].name))
+    warnings = []
+    if destructive_intent and not matches:
+        warnings.append("No matching callable destructive/cleanup tool was found; unrelated mutating create tools were intentionally not returned.")
     return {
         "status": "success",
         "query": query,
         "results": [spec.to_dict() for _, spec in matches[: max(1, min(limit, 50))]],
+        "warnings": warnings,
     }
 
 
@@ -122,7 +132,15 @@ def get_tool_spec(name: str) -> dict[str, Any]:
     spec = get_command_spec(name)
     if not spec:
         return {"status": "error", "message": f"Unknown tool: {name}"}
-    return {"status": "success", "tool": spec.to_dict()}
+    tool = spec.to_dict()
+    if name == "run_verified_edit_batch":
+        tool["accepted_operation_schema"] = {
+            "preferred": {"command_name": "transform_object", "params": {"object_name": "Cube", "location": [0, 0, 1]}},
+            "legacy": {"type": "transform_object", "params": {"object_name": "Cube"}},
+            "destructive_required_fields": {"confirm": True, "batch_allow_destructive": True},
+            "prevalidation": "Set prevalidate_only=true to validate all operations before mutation.",
+        }
+    return {"status": "success", "tool": tool}
 
 
 def get_recommended_tools_for_task(task: str, limit: int = 8) -> dict[str, Any]:

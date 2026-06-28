@@ -52,6 +52,19 @@ SECRET_ALLOWED_FILES = {
     "scripts/export_diagnostic_bundle.py",
 }
 SECRET_RE = re.compile(r"(api[_-]?key|secret|token|password|credential|\\.env)", re.IGNORECASE)
+SECRET_CONTEXT_ALLOWED_MARKERS = (
+    "CONTROL_PLANE_API_KEY",
+    "<runtime-api-key>",
+    "Reset_ChatGPT_Connector_Credentials",
+    "chatgpt_reset_credentials_bat_exists",
+    "missing_credentials",
+    "tunnel credentials",
+    "control_plane_api_key.dpapi",
+    "token_endpoint",
+    "token_endpoint_auth_methods_supported",
+    "OAuth tokens",
+    "oauth_metadata",
+)
 
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -123,7 +136,13 @@ def check_privacy_scan() -> None:
         for match in SECRET_RE.finditer(text):
             line = text.count("\n", 0, match.start()) + 1
             context = text[max(0, match.start() - 80): match.end() + 80]
-            if "subtype=\"PASSWORD\"" in context or "PHASE6B_SECRET_RE" in context or "SECRET_RE" in context or "REDACTION_KEYS" in context:
+            if (
+                "subtype=\"PASSWORD\"" in context
+                or "PHASE6B_SECRET_RE" in context
+                or "SECRET_RE" in context
+                or "REDACTION_KEYS" in context
+                or any(marker in context for marker in SECRET_CONTEXT_ALLOWED_MARKERS)
+            ):
                 continue
             hits.append(f"{rel}:{line}:{match.group(0)}")
     if hits:
@@ -242,18 +261,61 @@ def check_chatgpt_browser_connector_static() -> None:
     from overtli_blender.runtime.tool_profiles import get_profile
     from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
 
-    profile = get_profile("chatgpt_browser_default")
+    profile = get_profile("browser_full_standard")
+    legacy = get_profile("chatgpt_browser_default")
     if profile is None:
-        raise RuntimeError("missing chatgpt_browser_default profile")
-    if profile.max_visible_tools > 100:
-        raise RuntimeError("chatgpt_browser_default visible tool budget is too large")
-    if profile.permission_profile != "remote_browser_safe":
-        raise RuntimeError("chatgpt_browser_default must use remote_browser_safe")
-    if "raw_python" in PROFILE_CAPABILITIES.get("remote_browser_safe", set()):
-        raise RuntimeError("remote_browser_safe must not include raw_python")
+        raise RuntimeError("missing browser_full_standard profile")
+    if legacy is None or legacy.to_dict() != profile.to_dict():
+        raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
+    if profile.max_visible_tools > 160:
+        raise RuntimeError("browser_full_standard visible tool budget is too large")
+    if profile.permission_profile != "browser_standard":
+        raise RuntimeError("browser_full_standard must use browser_standard")
+    browser_caps = PROFILE_CAPABILITIES.get("browser_standard", set())
+    if PROFILE_CAPABILITIES.get("remote_browser_safe", set()) != browser_caps:
+        raise RuntimeError("remote_browser_safe must alias browser_standard")
+    if not {"scene.read", "scene.write", "filesystem.project.write"} <= browser_caps:
+        raise RuntimeError("browser_standard must allow safe structured writes")
+    if {"raw_python", "network.providers", "filesystem.delete", "filesystem.external.write", "addon.manage", "addon.execute", "external_process"} & browser_caps:
+        raise RuntimeError("browser_standard includes blocked high-risk capability")
+    from overtli_blender.server import create_mcp_server
+
+    tools = set(create_mcp_server(profile="browser_full_standard", remote_safety="browser_standard")._tool_manager._tools)  # type: ignore[attr-defined]
+    required_tools = {
+        "execute_approved_operation",
+        "approve_and_execute_operation",
+        "create_primitive_object",
+        "create_basic_material",
+        "assign_material",
+        "create_camera",
+        "create_light",
+        "create_verification_snapshot",
+        "run_verified_edit_batch",
+        "run_presentation_workflow_batch",
+    }
+    if missing_tools := sorted(required_tools - tools):
+        raise RuntimeError(f"browser profile missing safe mutation tools: {missing_tools}")
+    dangerous_tools = {
+        "execute_blender_code",
+        "download_" + "polyhaven_asset",
+        "delete_objects",
+        "execute_approved_file_delete",
+        "execute_approved_addon_operator",
+    }
+    if dangerous_tools & tools:
+        raise RuntimeError("browser profile exposes dangerous tools by default")
+    from overtli_blender.runtime.preferences_schema import default_preferences
+
+    security = default_preferences().get("security", {})
+    if security.get("default_browser_approval_mode") != "ask_for_destructive_only":
+        raise RuntimeError("browser approval mode default missing")
     mcp_setup = (ROOT / "docs" / "mcp_setup.md").read_text(encoding="utf-8")
     if "chatgpt_browser_connector.md" not in mcp_setup or "/mcp" not in mcp_setup:
         raise RuntimeError("docs/mcp_setup.md missing ChatGPT browser connector /mcp reference")
+    browser_doc = (ROOT / "docs" / "chatgpt_browser_connector.md").read_text(encoding="utf-8")
+    for phrase in ["browser_full_standard", "approve_and_execute_operation", "safe structured writes", "Refresh", "object_count remains 0"]:
+        if phrase not in browser_doc:
+            raise RuntimeError(f"docs/chatgpt_browser_connector.md missing {phrase}")
 
 
 def run_full_checks(checks: dict[str, str], args: argparse.Namespace, warnings: list[str]) -> None:

@@ -110,6 +110,7 @@ GOVERNANCE_COMMANDS = {
     "approve_operation",
     "deny_operation",
     "execute_approved_operation",
+    "approve_and_execute_operation",
     "expire_approval",
     "get_operation_status",
     "list_recent_operations",
@@ -242,9 +243,9 @@ def _category(name: str, operation_type: str) -> str:
         return "cache_management"
     if any(marker in lowered for marker in ("task", "revision", "session_time", "recent_operations", "changes_since", "operation_duration")):
         return "task_planning"
-    if any(marker in lowered for marker in ("approved_root", "path_access", "project_text_file", "file_delete", "file_access_policy", "scan_project_files", "copy_file_into_project")):
+    if any(marker in lowered for marker in ("approved_root", "drive_root", "path_access", "project_text_file", "file_delete", "file_access_policy", "scan_project_files", "copy_file_into_project")):
         return "files"
-    if any(marker in lowered for marker in ("project_workspace", "project_layout", "project_backup", "project_dependencies", "blend_file", "save_project_as", "register_blend_file")) or name == "get_project_status":
+    if any(marker in lowered for marker in ("project_workspace", "project_layout", "project_backup", "project_dependencies", "project_folder", "blend_file", "save_project_as", "register_blend_file")) or name == "get_project_status":
         return "project"
     if name in GOVERNANCE_COMMANDS:
         return "core"
@@ -416,14 +417,21 @@ def _from_safety(name: str, metadata: Any) -> CommandSpec:
         output_schema_ref=f"socket:{name}:output",
         smoke_flags=("--phase7b-full",) if name in GOVERNANCE_COMMANDS else (),
         mcp_tool_module=None,
-        tags=tuple(sorted({category, _tool_pack(category), metadata.operation_type.value.lower(), name.replace("_", " "), *(("bake", "baking", "texture baking planned") if category in {"materials", "textures"} else ())})),
+        tags=tuple(sorted({
+            category,
+            _tool_pack(category),
+            metadata.operation_type.value.lower(),
+            name.replace("_", " "),
+            *(("primitive", "cube", "mesh primitive", "add object", "scene creation") if name == "create_primitive_object" else ()),
+            *(("bake", "baking", "texture baking planned") if category in {"materials", "textures"} else ()),
+        })),
     )
 
 
 def _governance_specs() -> dict[str, CommandSpec]:
     specs: dict[str, CommandSpec] = {}
     for name in GOVERNANCE_COMMANDS:
-        destructive = name in {"execute_approved_operation", "set_permission_profile"}
+        destructive = name in {"execute_approved_operation", "approve_and_execute_operation", "set_permission_profile"}
         specs[name] = CommandSpec(
             name=name,
             title=_title(name),
@@ -439,8 +447,8 @@ def _governance_specs() -> dict[str, CommandSpec]:
             idempotent=not destructive,
             requires_approval=name == "set_permission_profile",
             requires_confirmation=name == "set_permission_profile",
-            supports_progress=name in {"execute_approved_operation"},
-            supports_cancel=name in {"execute_approved_operation", "cancel_operation"},
+            supports_progress=name in {"execute_approved_operation", "approve_and_execute_operation"},
+            supports_cancel=name in {"execute_approved_operation", "approve_and_execute_operation", "cancel_operation"},
             timeout_seconds=30,
             rollback_strategy=None,
             allowed_capabilities=("scene.read",) if not destructive else ("scene.write",),

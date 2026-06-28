@@ -38,6 +38,7 @@ except ModuleNotFoundError:
     requests = _MissingRequests()
 import tempfile
 import traceback
+import importlib
 import os
 import shutil
 import zipfile
@@ -108,6 +109,13 @@ try:
     from overtli_blender.runtime.modeling_plan import select_modeling_method as runtime_select_modeling_method
     from overtli_blender.runtime.construction_manifest import new_workflow_id as runtime_new_workflow_id
     from overtli_blender.runtime.project_workspace import initialize_workspace as runtime_initialize_workspace
+    from overtli_blender.runtime.project_workspace import initialize_temp_workspace as runtime_initialize_temp_workspace
+    from overtli_blender.runtime.project_workspace import copy_project_folder as runtime_copy_project_folder
+    from overtli_blender.runtime.project_workspace import detect_drive_roots as runtime_detect_drive_roots
+    from overtli_blender.runtime.project_workspace import get_loaded_project_folder as runtime_get_loaded_project_folder
+    from overtli_blender.runtime.project_workspace import plan_project_folder_move as runtime_plan_project_folder_move
+    from overtli_blender.runtime.project_workspace import repair_workspace_layout as runtime_repair_workspace_layout
+    from overtli_blender.runtime.project_workspace import resolve_artifact_workspace as runtime_resolve_artifact_workspace
     from overtli_blender.runtime.project_workspace import resolve_workspace as runtime_resolve_workspace
     from overtli_blender.runtime.project_workspace import validate_layout as runtime_validate_layout
     from overtli_blender.runtime.spatial import angle_degrees as runtime_angle_degrees
@@ -150,6 +158,34 @@ try:
     from overtli_blender.runtime.ux_status import approval_queue_summary as runtime_approval_queue_summary
     from overtli_blender.runtime.ux_status import recent_operation_summary as runtime_recent_operation_summary
     from overtli_blender.runtime.ux_status import runtime_dashboard as runtime_build_dashboard
+
+    def command_registry_report():
+        module = importlib.import_module("overtli_blender.runtime.command_registry")
+        return module.command_registry_report()
+
+    def get_command_spec(name):
+        module = importlib.import_module("overtli_blender.runtime.command_registry")
+        return module.get_command_spec(name)
+
+    def runtime_discover_tool_packs():
+        module = importlib.import_module("overtli_blender.runtime.tool_packs")
+        return module.discover_tool_packs()
+
+    def runtime_get_tool_pack(name):
+        module = importlib.import_module("overtli_blender.runtime.tool_packs")
+        return module.get_tool_pack(name)
+
+    def runtime_search_tools(query, category=None, tool_pack=None, risk_max=None, limit=20):
+        module = importlib.import_module("overtli_blender.runtime.tool_packs")
+        return module.search_tools(query, category=category, tool_pack=tool_pack, risk_max=risk_max, limit=limit)
+
+    def runtime_get_tool_spec(name):
+        module = importlib.import_module("overtli_blender.runtime.tool_packs")
+        return module.get_tool_spec(name)
+
+    def runtime_get_recommended_tools_for_task(task, limit=8):
+        module = importlib.import_module("overtli_blender.runtime.tool_packs")
+        return module.get_recommended_tools_for_task(task, limit=limit)
 except ModuleNotFoundError:
     class RiskLevel(str, Enum):
         LOW = "LOW"
@@ -176,6 +212,7 @@ except ModuleNotFoundError:
             "get_system_status", "get_project_status", "discover_tool_packs", "get_tool_pack",
             "search_tools", "get_tool_spec", "get_recommended_tools_for_task", "prepare_operation",
             "get_pending_approvals", "approve_operation", "deny_operation", "execute_approved_operation",
+            "approve_and_execute_operation",
             "expire_approval", "get_operation_status", "list_recent_operations", "cancel_operation",
             "get_operation_log", "get_permission_profile", "set_permission_profile",
             "get_capability_policy", "validate_command_capabilities", "get_log_status",
@@ -275,6 +312,7 @@ except ModuleNotFoundError:
                 "approval_id": approval_id,
                 "command_name": command_name,
                 "params_hash": hashlib.sha256(payload).hexdigest(),
+                "params": params or {},
                 "target_summary": [],
                 "path_summary": [],
                 "risk_level": "HIGH",
@@ -292,10 +330,29 @@ except ModuleNotFoundError:
         def get_pending_approvals(self):
             return {"status": "success", "approvals": [record for record in self.records.values() if record["status"] == "pending"]}
 
-        def approve_operation(self, approval_id):
+        def get_approval_record(self, approval_id):
             record = self.records.get(approval_id)
             if not record:
                 return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            return {"status": "success", "approval": record}
+
+        def approve_operation(self, approval_id, execute_after_approval=True, approve_only=False):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            record["status"] = "approved"
+            return {"status": "success", "approval": record}
+
+        def approve_and_validate_operation(self, approval_id, expected_command_name=None, expected_params_hash=None):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            if record.get("status") in {"denied", "expired", "executed"}:
+                return {"status": "error", "message": f"Approval is {record.get('status')}", "approval": record}
+            if expected_command_name and record.get("command_name") != expected_command_name:
+                return {"status": "error", "message": "Approval command changed", "approval": record}
+            if expected_params_hash and record.get("params_hash") != expected_params_hash:
+                return {"status": "error", "message": "Approval parameters changed", "approval": record}
             record["status"] = "approved"
             return {"status": "success", "approval": record}
 
@@ -309,8 +366,35 @@ except ModuleNotFoundError:
         def expire_approval(self, approval_id=None):
             return {"status": "success", "expired": []}
 
-        def execute_approved_operation(self, approval_id, command_name, params=None):
-            return {"status": "not_implemented", "message": "Approved execution dispatch is staged for migrated operations.", "approval_id": approval_id, "command_name": command_name}
+        def execute_approved_operation(self, approval_id, command_name=None, params=None):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            command_name = command_name or record.get("command_name")
+            params = params if params is not None else record.get("params", {})
+            if record.get("status") != "approved":
+                return {"status": "error", "message": f"Approval is {record.get('status')}", "approval": record}
+            if record.get("command_name") != command_name or record.get("params_hash") != canonical_params_hash(command_name, params):
+                return {"status": "error", "message": "Approval parameters changed", "approval": record}
+            record["status"] = "executed"
+            return {"status": "success", "approval": record}
+
+        def validate_approved_operation(self, approval_id, command_name, params=None):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            if record.get("status") != "approved":
+                return {"status": "error", "message": f"Approval is {record.get('status')}", "approval": record}
+            if record.get("command_name") != command_name or record.get("params_hash") != canonical_params_hash(command_name, params):
+                return {"status": "error", "message": "Approval parameters changed", "approval": record}
+            return {"status": "success", "approval": record}
+
+        def mark_executed(self, approval_id):
+            record = self.records.get(approval_id)
+            if not record:
+                return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+            record["status"] = "executed"
+            return {"status": "success", "approval": record}
 
     DEFAULT_APPROVAL_RUNTIME = _FallbackApprovalRuntime()
 
@@ -512,6 +596,7 @@ except ModuleNotFoundError:
     _PHASE7C_STANDARD_FOLDERS = (
         ".overtli", "assets", "textures/source", "textures/working", "textures/baked", "textures/packed",
         os.path.join("references", "images"), "imports", "exports", "renders/previews", "renders/finals", "backups",
+        "blend", "screenshots", "verification", "logs", "tasks", "manifests",
     )
 
     def runtime_resolve_workspace(blend_filepath=None, preferred_root=None, repo_root=None, allow_repo_fallback=True):
@@ -537,10 +622,79 @@ except ModuleNotFoundError:
         manifest.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return {"status": "success", "workspace": {"resolved": True, "project_root": str(root), "workspace_dir": str(root / ".overtli"), "manifest_path": str(manifest), "source": "explicit"}, "manifest": payload}
 
+    def runtime_initialize_temp_workspace(session_id=None, project_name=None):
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or os.environ.get("TEMP") or os.path.expanduser("~")
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session_id or f"session_{int(time.time())}")).strip("._-") or "session"
+        root = _phase7c_canonical_path(Path(base) / "Overtli-Blender" / "temp_workspaces" / safe)
+        result = runtime_repair_workspace_layout(root, project_name=project_name or root.name)
+        result["temporary"] = True
+        result["session_id"] = root.name
+        result["warnings"] = ["Unsaved .blend artifacts are stored in a user-local Overtli-Blender temp workspace, not the addon installation folder."]
+        return result
+
+    def runtime_resolve_artifact_workspace(blend_filepath=None, preferred_root=None, session_id=None, create_if_missing=True):
+        resolved = runtime_resolve_workspace(blend_filepath, preferred_root=preferred_root, allow_repo_fallback=False)
+        workspace = resolved.get("workspace", {})
+        if workspace.get("resolved"):
+            if create_if_missing:
+                runtime_repair_workspace_layout(workspace["project_root"], blend_filepath=blend_filepath)
+            return {**resolved, "temporary": False}
+        temp = runtime_initialize_temp_workspace(session_id=session_id) if create_if_missing else {"workspace": {"resolved": True, "project_root": str(_phase7c_canonical_path(Path(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")) / "Overtli-Blender" / "temp_workspaces" / str(session_id or "session"))), "source": "temporary"}}
+        return {"status": "success", "workspace": temp["workspace"], "temporary": True, "unsaved_blend": True, "warnings": ["Unsaved .blend has no trusted project root; using dedicated temp workspace."]}
+
     def runtime_validate_layout(project_root):
         root = _phase7c_canonical_path(project_root)
         missing = [folder for folder in _PHASE7C_STANDARD_FOLDERS if not (root / folder).exists()]
         return {"status": "success" if not missing else "warning", "project_root": str(root), "missing": missing, "standard_folders": list(_PHASE7C_STANDARD_FOLDERS)}
+
+    def runtime_repair_workspace_layout(project_root, project_name=None, blend_filepath=None):
+        root = _phase7c_canonical_path(project_root)
+        created = []
+        for folder in _PHASE7C_STANDARD_FOLDERS:
+            path = root / folder
+            if not path.exists():
+                created.append(folder)
+            path.mkdir(parents=True, exist_ok=True)
+        manifest = root / ".overtli" / "project.json"
+        payload = {"project_name": project_name or root.name, "project_root": str(root), "standard_folders": list(_PHASE7C_STANDARD_FOLDERS)}
+        if blend_filepath:
+            payload["active_blend_file"] = str(_phase7c_canonical_path(blend_filepath))
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return {"status": "success", "workspace": {"resolved": True, "project_root": str(root), "workspace_dir": str(root / ".overtli"), "manifest_path": str(manifest), "source": "explicit"}, "created_folders": created, "manifest": payload}
+
+    def runtime_get_loaded_project_folder(blend_filepath=None, preferred_root=None):
+        resolved = runtime_resolve_workspace(blend_filepath, preferred_root=preferred_root, allow_repo_fallback=False)
+        workspace = resolved.get("workspace", {})
+        if not workspace.get("resolved"):
+            return {**resolved, "project_folder": None, "layout": None}
+        return {"status": "success", "blend_filepath": blend_filepath, "project_folder": workspace["project_root"], "workspace": workspace, "layout": runtime_validate_layout(workspace["project_root"])}
+
+    def runtime_detect_drive_roots(preferred=("C", "D")):
+        roots = []
+        if os.name == "nt":
+            for drive in preferred:
+                letter = str(drive).rstrip(":\\/").upper()
+                root = Path(f"{letter}:\\")
+                if root.exists():
+                    roots.append(str(root))
+        else:
+            roots.append(str(Path("/")))
+        return {"status": "success", "drive_roots": sorted(set(roots)), "platform": os.name}
+
+    def runtime_plan_project_folder_move(source_project_root, destination_root, new_project_name=None, blend_filepath=None, copy_mode="copy"):
+        source = _phase7c_canonical_path(source_project_root)
+        target = _phase7c_canonical_path(Path(destination_root) / (new_project_name or source.name))
+        blend = _phase7c_canonical_path(blend_filepath) if blend_filepath else None
+        return {"status": "requires_approval", "source_project_root": str(source), "target_project_root": str(target), "target_blend_filepath": str(target / (blend.name if blend else f"{target.name}.blend")), "copy_mode": copy_mode, "conflicts": [{"path": str(target), "type": "directory_exists"}] if target.exists() else []}
+
+    def runtime_copy_project_folder(source_project_root, target_project_root, overwrite=False):
+        source = _phase7c_canonical_path(source_project_root)
+        target = _phase7c_canonical_path(target_project_root)
+        if target.exists() and any(target.iterdir()) and not overwrite:
+            return {"status": "error", "message": "Target project root exists and is not empty.", "target_project_root": str(target)}
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        return {"status": "success", "source_project_root": str(source), "target_project_root": str(target)}
 
     def runtime_get_cache_status(base):
         root = _phase7c_canonical_path(base)
@@ -634,6 +788,8 @@ except ModuleNotFoundError:
         return {"status": "success", "tool_pack": {"name": name, "title": name.replace("_", " ").title()}, "commands": commands}
     def runtime_search_tools(query, category=None, tool_pack=None, risk_max=None, limit=20):
         terms = [term.lower() for term in str(query).split() if term.strip()]
+        destructive_terms = {"delete", "clear", "reset", "purge", "cleanup", "remove"}
+        destructive_intent = any(term in destructive_terms for term in terms)
         risk_order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "DESTRUCTIVE": 4}
         risk_limit = risk_order.get(str(risk_max or "DESTRUCTIVE").upper(), 4)
         results = []
@@ -645,14 +801,22 @@ except ModuleNotFoundError:
             if risk_order.get(spec["risk_level"], 99) > risk_limit:
                 continue
             haystack = " ".join([spec["name"], spec["title"], spec["description"], spec["category"], spec["tool_pack"], " ".join(spec["tags"]), " ".join(spec["allowed_capabilities"])]).lower()
+            if destructive_intent and spec["name"].startswith("create_") and not any(term in spec["name"].lower() for term in destructive_terms):
+                continue
+            if destructive_intent and not (spec.get("destructive") or any(term in haystack for term in destructive_terms)):
+                continue
             if not terms or any(term in haystack for term in terms):
                 results.append(spec)
-        return {"status": "success", "query": query, "results": results[: max(1, min(int(limit), 50))]}
+        warnings = ["No matching callable destructive/cleanup tool was found; unrelated mutating create tools were intentionally not returned."] if destructive_intent and not results else []
+        return {"status": "success", "query": query, "results": results[: max(1, min(int(limit), 50))], "warnings": warnings}
     def runtime_get_tool_spec(name):
         spec = _fallback_command_specs().get(name)
         if not spec:
             return {"status": "error", "message": f"Unknown tool: {name}"}
-        return {"status": "success", "tool": spec}
+        tool = dict(spec)
+        if name == "run_verified_edit_batch":
+            tool["accepted_operation_schema"] = {"preferred": {"command_name": "transform_object", "params": {"object_name": "Cube", "location": [0, 0, 1]}}, "legacy": {"type": "transform_object", "params": {"object_name": "Cube"}}, "prevalidation": "Set prevalidate_only=true to validate before mutation."}
+        return {"status": "success", "tool": tool}
     def runtime_get_recommended_tools_for_task(task, limit=8):
         return runtime_search_tools(task, limit=limit)
 

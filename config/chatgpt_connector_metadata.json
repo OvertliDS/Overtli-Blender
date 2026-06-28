@@ -1,9 +1,11 @@
 {
   "name": "Overtli-Blender",
-  "description": "Inspect, organize, and safely control a local Blender scene through the Overtli-Blender MCP bridge.",
+  "description": "Inspect, organize, and safely create or edit a local Blender scene through structured Overtli-Blender MCP tools.",
   "connector_url_placeholder": "https://<your-tunnel-host>/mcp",
-  "recommended_permission": "Always ask",
-  "default_tool_profile": "chatgpt_browser_default",
+  "recommended_permission": "Always allow for trusted local projects; destructive operations stay internally gated",
+  "default_tool_profile": "browser_full_standard",
+  "default_permission_profile": "browser_standard",
+  "default_approval_mode": "ask_for_destructive_only",
   "local_http_url": "http://127.0.0.1:2091/mcp",
   "blender_socket": "localhost:9876"
 }

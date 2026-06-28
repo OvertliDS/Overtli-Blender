@@ -87,10 +87,43 @@ For MCP clients, register the venv Python module command:
 For ChatGPT.com browser developer-mode connector testing, use the Streamable HTTP bridge:
 
 ```powershell
-.\.venv\Scripts\python -m overtli_blender.server --transport http --host 127.0.0.1 --port 2091 --profile chatgpt_browser_default --remote-safety remote_browser_safe
+.\Start_ChatGPT_MCP_Server.bat
 ```
 
-The local MCP endpoint is `http://127.0.0.1:2091/mcp`; ChatGPT needs an HTTPS tunnel URL ending in `/mcp`. See [docs/chatgpt_browser_connector.md](docs/chatgpt_browser_connector.md) and [docs/chatgpt_connector_prompts.md](docs/chatgpt_connector_prompts.md).
+The BAT keeps the server attached to that window; close the window or press `Ctrl+C` to stop it cleanly. Equivalent manual command:
+
+```powershell
+.\.venv\Scripts\python -m overtli_blender.server --transport http --host 127.0.0.1 --port 2091 --profile browser_full_standard --remote-safety browser_standard
+```
+
+The local MCP endpoint is `http://127.0.0.1:2091/mcp`. Browser mode is not read-only by default: it uses `browser_full_standard`, `browser_standard`, and approval mode `ask_for_destructive_only` so trusted local projects can create primitives, materials, cameras, lights, verification snapshots, and workflow batches without repeated medium-risk approval loops. The old `chatgpt_browser_default` and `remote_browser_safe` names remain aliases.
+
+Tool profile, permission profile, and approval mode are separate settings. Tool profile controls what the model can see, permission profile controls what categories are allowed, and approval mode controls whether safe structured writes ask first. Local addon defaults are `full_standard`, `standard`, and `ask_for_high_destructive`.
+
+ChatGPT also needs a tunnel layer. For OpenAI Secure MCP Tunnel, set `CONTROL_PLANE_API_KEY` and `OVERTLI_TUNNEL_ID` in the tunnel terminal, then run:
+
+```powershell
+.\Start_ChatGPT_Connector.bat
+```
+
+Use `.\Start_OpenAI_MCP_Tunnel.bat` only when you are running the local HTTP bridge separately in another terminal.
+
+For the ChatGPT `Server URL` connection mode, use the Cloudflare quick-tunnel launcher:
+
+```powershell
+.\Start_ChatGPT_Server_URL.bat
+```
+
+It starts/reuses the local HTTP bridge with public tunnel Host headers allowed for this mode, stops stale quick-tunnel processes for this repo/port, starts a local `cloudflared` quick tunnel, prints the public HTTPS URL ending in `/mcp`, and keeps both processes alive until the window is closed. This is a disposable test mode: Cloudflare quick-tunnel hostnames usually change on each run, and ChatGPT may require deleting/recreating the Server URL connector when the URL changes. For a stable ChatGPT connector, use `.\Start_ChatGPT_Connector.bat` with OpenAI Secure MCP Tunnel. See [docs/chatgpt_browser_connector.md](docs/chatgpt_browser_connector.md) and [docs/chatgpt_connector_prompts.md](docs/chatgpt_connector_prompts.md).
+
+If OpenAI Secure MCP Tunnel is blocked but you still need one consistent ChatGPT `Server URL`, use a stable ngrok domain:
+
+```powershell
+$env:OVERTLI_NGROK_URL = "https://your-domain.ngrok-free.dev"
+.\Start_ChatGPT_Ngrok_URL.bat
+```
+
+This runs `ngrok http --url <your-stable-domain> http://127.0.0.1:2091` and prints the stable `/mcp` URL. It requires an ngrok account, local ngrok sign-in already configured, and an assigned static/dev domain. The launcher normalizes copied URL values and cleans up stale local ngrok tunnels for the same stable domain before retrying duplicate-endpoint startup failures.
 
 ## Blender Addon Setup
 

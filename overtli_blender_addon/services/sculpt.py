@@ -14,7 +14,7 @@ class SculptWorkflowService:
 
     def configure_sculpt_brush(self, brush_name="grab", radius=50, strength=0.25, symmetry=None, confirm=False):
         if not confirm:
-            return {"status": "error", "message": "configure_sculpt_brush requires confirm=True", "warnings": []}
+            return {"status": "requires_approval", "message": "configure_sculpt_brush requires confirm=True because it changes the active Blender sculpt brush settings.", "warnings": []}
         brush_key = str(brush_name or "").lower()
         if brush_key not in self.SUPPORTED_BRUSHES:
             return {"status": "error", "message": f"Unsupported sculpt brush: {brush_name}", "warnings": []}
@@ -26,7 +26,7 @@ class SculptWorkflowService:
 
     def create_sculpt_mask_from_vertex_group(self, object_name, vertex_group_name, mask_name=None, confirm=False):
         if not confirm:
-            return {"status": "error", "message": "create_sculpt_mask_from_vertex_group requires confirm=True", "warnings": []}
+            return {"status": "requires_approval", "message": "create_sculpt_mask_from_vertex_group requires confirm=True because it creates sculpt mask intent metadata.", "warnings": []}
         obj = bpy.data.objects.get(object_name)
         if not obj or obj.type != "MESH" or not obj.vertex_groups.get(vertex_group_name):
             return {"status": "error", "message": "Mesh object and vertex group are required", "warnings": []}
@@ -34,7 +34,7 @@ class SculptWorkflowService:
 
     def run_shape_key_sculpt_workflow(self, object_name, vertex_group_name, shape_key_name, brush_action="inflate", amount=0.05, confirm=False, verify=True):
         if not confirm:
-            return {"status": "error", "message": "run_shape_key_sculpt_workflow requires confirm=True", "warnings": []}
+            return {"status": "requires_approval", "message": "run_shape_key_sculpt_workflow requires confirm=True because it creates or replaces a shape key.", "warnings": []}
         if str(brush_action).lower() not in {"inflate", "grab", "elastic_grab", "smooth"}:
             return {"status": "error", "message": f"Unsupported shape-key sculpt action: {brush_action}", "warnings": []}
         shape = self.server.shape_key_service.create_shape_key(object_name, shape_key_name, replace_existing=True, value=1.0)

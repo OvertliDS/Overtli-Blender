@@ -25,6 +25,7 @@ class ApprovalRecord:
     params_hash: str
     target_summary: list[Any] = field(default_factory=list)
     path_summary: list[Any] = field(default_factory=list)
+    params: dict[str, Any] = field(default_factory=dict)
     risk_level: str = "LOW"
     destructive: bool = False
     created_at: float = field(default_factory=time.time)
@@ -54,6 +55,7 @@ class ApprovalRuntime:
             approval_id=f"appr_{uuid4().hex[:16]}",
             command_name=command_name,
             params_hash=canonical_params_hash(command_name, params),
+            params=dict(params or {}),
             risk_level=spec.risk_level,
             destructive=spec.destructive,
             created_at=now,
@@ -69,6 +71,12 @@ class ApprovalRuntime:
         self.expire_approval()
         return {"status": "success", "approvals": [record.to_dict() for record in self._records.values() if record.status == "pending"]}
 
+    def get_approval_record(self, approval_id: str) -> dict[str, Any]:
+        record = self._records.get(approval_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+        return {"status": "success", "approval": record.to_dict()}
+
     def approve_operation(self, approval_id: str) -> dict[str, Any]:
         record = self._records.get(approval_id)
         if not record:
@@ -76,6 +84,27 @@ class ApprovalRuntime:
         if time.time() > record.expires_at:
             record.status = "expired"
             return {"status": "error", "message": "Approval expired", "approval": record.to_dict()}
+        record.status = "approved"
+        return {"status": "success", "approval": record.to_dict()}
+
+    def approve_and_validate_operation(
+        self,
+        approval_id: str,
+        expected_command_name: str | None = None,
+        expected_params_hash: str | None = None,
+    ) -> dict[str, Any]:
+        record = self._records.get(approval_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+        if time.time() > record.expires_at and record.status in {"pending", "approved"}:
+            record.status = "expired"
+            return {"status": "error", "message": "Approval expired", "approval": record.to_dict()}
+        if record.status in {"denied", "expired", "executed"}:
+            return {"status": "error", "message": f"Approval is {record.status}", "approval": record.to_dict()}
+        if expected_command_name and record.command_name != expected_command_name:
+            return {"status": "error", "message": "Approval command changed", "approval": record.to_dict()}
+        if expected_params_hash and record.params_hash != expected_params_hash:
+            return {"status": "error", "message": "Approval parameters changed", "approval": record.to_dict()}
         record.status = "approved"
         return {"status": "success", "approval": record.to_dict()}
 
@@ -100,15 +129,35 @@ class ApprovalRuntime:
         return {"status": "success", "expired": expired}
 
     def execute_approved_operation(self, approval_id: str, command_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        validation = self.validate_approved_operation(approval_id, command_name, params)
+        if validation.get("status") != "success":
+            return validation
+        return {
+            "status": "success",
+            "approval": validation["approval"],
+            "dispatch_required": True,
+            "message": "Approval validated; caller must dispatch the exact approved structured command and then mark_executed.",
+        }
+
+    def validate_approved_operation(self, approval_id: str, command_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         record = self._records.get(approval_id)
         if not record:
             return {"status": "error", "message": f"Unknown approval: {approval_id}"}
+        if time.time() > record.expires_at and record.status in {"pending", "approved"}:
+            record.status = "expired"
+            return {"status": "error", "message": "Approval expired", "approval": record.to_dict()}
         if record.status != "approved":
             return {"status": "error", "message": f"Approval is {record.status}", "approval": record.to_dict()}
         if record.command_name != command_name or record.params_hash != canonical_params_hash(command_name, params):
             return {"status": "error", "message": "Approval parameters changed", "approval": record.to_dict()}
+        return {"status": "success", "approval": record.to_dict()}
+
+    def mark_executed(self, approval_id: str) -> dict[str, Any]:
+        record = self._records.get(approval_id)
+        if not record:
+            return {"status": "error", "message": f"Unknown approval: {approval_id}"}
         record.status = "executed"
-        return {"status": "not_implemented", "message": "Approved execution dispatch is staged for migrated operations.", "approval": record.to_dict()}
+        return {"status": "success", "approval": record.to_dict()}
 
 
 DEFAULT_APPROVAL_RUNTIME = ApprovalRuntime()
