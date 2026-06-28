@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from ..core import *
 
+def overtli_first_socket(sockets, preferred_names=(), socket_type=None):
+    """Return a node socket by preferred name, then by compatible type, then first available."""
+    for name in preferred_names or ():
+        socket = sockets.get(name)
+        if socket is not None:
+            return socket
+    if socket_type:
+        for socket in sockets:
+            if getattr(socket, "type", None) == socket_type:
+                return socket
+    for socket in sockets:
+        return socket
+    raise KeyError("Node has no compatible sockets")
+
+
+def overtli_separate_color_input(node):
+    return overtli_first_socket(node.inputs, ("Color", "Image", "Vector"), "RGBA")
+
+
+def overtli_node_output(node, preferred_names=(), socket_type=None):
+    return overtli_first_socket(node.outputs, preferred_names, socket_type)
+
 class ProviderStatusService:
     def __init__(self, server):
         self.server = server
@@ -325,7 +347,7 @@ class PolyHavenService:
                     if 'arm' in texture_nodes:
                         separate_rgb = nodes.new(type='ShaderNodeSeparateRGB')
                         separate_rgb.location = (-200, -100)
-                        links.new(texture_nodes['arm'].outputs['Color'], separate_rgb.inputs['Image'])
+                        links.new(overtli_node_output(texture_nodes['arm'], ("Color",), "RGBA"), overtli_separate_color_input(separate_rgb))
                         if not any(map_name in texture_nodes for map_name in ['roughness', 'rough']):
                             links.new(separate_rgb.outputs['G'], principled.inputs['Roughness'])
                         if not any(map_name in texture_nodes for map_name in ['metallic', 'metalness', 'metal']):
@@ -563,7 +585,7 @@ class PolyHavenService:
             if 'arm' in texture_nodes:
                 separate_rgb = nodes.new(type='ShaderNodeSeparateRGB')
                 separate_rgb.location = (-200, -100)
-                links.new(texture_nodes['arm'].outputs['Color'], separate_rgb.inputs['Image'])
+                links.new(overtli_node_output(texture_nodes['arm'], ("Color",), "RGBA"), overtli_separate_color_input(separate_rgb))
                 if not any(map_name in texture_nodes for map_name in ['roughness', 'rough']):
                     links.new(separate_rgb.outputs['G'], principled.inputs['Roughness'])
                 if not any(map_name in texture_nodes for map_name in ['metallic', 'metalness', 'metal']):

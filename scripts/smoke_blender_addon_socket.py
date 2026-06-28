@@ -76,21 +76,21 @@ def run_chatgpt_browser_readiness_static() -> None:
         raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
     if profile.permission_profile != "browser_standard":
         raise RuntimeError("browser_full_standard must use browser_standard")
-    if profile.max_visible_tools > 160:
-        raise RuntimeError("browser_full_standard visible tool budget is too large")
+    if profile.max_visible_tools < 500:
+        raise RuntimeError("browser_full_standard must expose the full browser tool surface")
     remote_caps = PROFILE_CAPABILITIES.get("browser_standard", set())
-    for blocked in ["raw_python", "filesystem.external.write", "filesystem.delete", "addon.execute"]:
-        if blocked in remote_caps:
-            raise RuntimeError(f"browser_standard must not include {blocked}")
+    for required_cap in ["raw_python", "filesystem.external.write", "addon.execute", "addon.manage", "external_process"]:
+        if required_cap not in remote_caps:
+            raise RuntimeError(f"browser_standard must include {required_cap}")
     if "scene.write" not in remote_caps:
         raise RuntimeError("browser_standard must allow safe structured scene writes")
     server = create_mcp_server(profile="browser_full_standard", remote_safety="browser_standard")
     visible = set(server._tool_manager._tools)  # type: ignore[attr-defined]
     high_risk_operator_tool = "execute_" + "approved_addon_operator"
-    for hidden in ["execute_code", "execute_blender_code", "download_polyhaven_asset", high_risk_operator_tool]:
-        if hidden in visible:
-            raise RuntimeError(f"{hidden} must not be visible in browser_full_standard")
-    for required in ["search_tools", "get_tool_spec", "discover_tool_packs", "get_permission_profile", "execute_approved_operation", "approve_and_execute_operation", "create_primitive_object", "create_basic_material", "assign_material", "create_verification_snapshot"]:
+    for required_high_risk in ["execute_code", "execute_blender_code", "register_context_script", "execute_context_script", high_risk_operator_tool, "install_local_addon", "enable_blender_addon", "disable_blender_addon", "remove_blender_addon"]:
+        if required_high_risk not in visible:
+            raise RuntimeError(f"{required_high_risk} must be visible in browser_full_standard")
+    for required in ["search_tools", "get_tool_spec", "discover_tool_packs", "get_permission_profile", "execute_approved_operation", "approve_and_execute_operation", "create_primitive_object", "delete_objects", "clear_scene", "delete_collection", "measure_object", "create_basic_material", "assign_material", "create_verification_snapshot"]:
         if required not in visible:
             raise RuntimeError(f"{required} must remain visible in browser_full_standard")
     status = build_server_status(_parse_args(["--transport", "http", "--profile", "browser_full_standard", "--remote-safety", "browser_standard"]))
@@ -113,10 +113,10 @@ def run_remote_mcp_profile_static() -> None:
         raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
     if legacy_caps != remote_caps:
         raise RuntimeError("remote_browser_safe must alias browser_standard")
-    if "execute_code" not in profile.hidden_risky_tools:
-        raise RuntimeError("browser_full_standard profile must hide execute_code")
-    if {"network.providers", "raw_python", "filesystem.delete", "filesystem.external.write"} & set(remote_caps):
-        raise RuntimeError("browser_standard includes a blocked high-risk capability")
+    if profile.hidden_risky_tools:
+        raise RuntimeError("browser_full_standard profile must not hide tools")
+    if not {"raw_python", "filesystem.external.write", "addon.execute", "addon.manage", "external_process"} <= set(remote_caps):
+        raise RuntimeError("browser_standard is missing full-surface capabilities")
     print("PASS remote_mcp_profile browser_full_standard browser_standard")
 
 

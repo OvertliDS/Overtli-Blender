@@ -67,6 +67,7 @@ def test_expanded_phase4b_guards_are_present() -> None:
         "run_shape_key_sculpt_workflow requires confirm=True",
         "create_vertex_group_from_uv_island requires confirm=True",
         "delete_images requires confirm=True",
-        "no island seed supplied; captured all UV-mapped vertices",
+        "island_seed_face_index is required for UV island traversal",
+        "uv_edge_connectivity",
     ]:
         assert text in ADDON_TEXT

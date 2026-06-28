@@ -25,7 +25,7 @@ def test_addon_defines_internal_script_registry_service() -> None:
         "def execute_context_script(",
         "def list_context_scripts(",
         "def clear_context_scripts(",
-        "self.script_registry_service = ScriptRegistryService()",
+        "self.script_registry_service = ScriptRegistryService(self)",
     ]:
         assert name in ADDON_TEXT
 

@@ -29,13 +29,40 @@ class WorkspaceSafetyDiffService:
         workspace = resolved.get("workspace", {})
         return os.path.abspath(workspace.get("project_root") or ADDON_ROOT)
 
+    def _workspace_identity(self):
+        blend = self.server.project_workspace_service._blend_info()
+        filepath = blend.get("filepath") or ""
+        if filepath:
+            stem = os.path.splitext(os.path.basename(filepath))[0] or "blend"
+            digest = hashlib.sha256(os.path.abspath(filepath).encode("utf-8")).hexdigest()[:12]
+            return self._safe_slug(f"{stem}_{digest}", "blend")
+        session_root = runtime_temp_workspace_root(None)
+        digest = hashlib.sha256(str(session_root).encode("utf-8")).hexdigest()[:12]
+        return self._safe_slug(f"unsaved_{digest}", "unsaved")
+
     def _workspace_root(self, artifact_root=None):
         root = self._artifact_project_root(artifact_root)
-        path = os.path.join(os.path.abspath(os.path.expanduser(str(root))), ".overtli_blender", "workspace")
+        base_path = os.path.join(os.path.abspath(os.path.expanduser(str(root))), ".overtli_blender", "workspace")
+        path = os.path.join(base_path, self._workspace_identity())
         os.makedirs(path, exist_ok=True)
         for child in ["tasks", "snapshots", "rollback"]:
             os.makedirs(os.path.join(path, child), exist_ok=True)
+        self._migrate_unscoped_workspace_indexes(base_path, path)
         return path
+
+    def _migrate_unscoped_workspace_indexes(self, base_path, scoped_path):
+        manifest_path = os.path.join(scoped_path, "migration_manifest.json")
+        if os.path.exists(manifest_path):
+            return
+        migrated = []
+        for name in ["tasks", "todos", "operation_journal"]:
+            old_path = os.path.join(base_path, f"{name}.json")
+            new_path = os.path.join(scoped_path, f"{name}.json")
+            if os.path.exists(old_path) and not os.path.exists(new_path):
+                shutil.copy2(old_path, new_path)
+                migrated.append({"from": old_path, "to": new_path})
+        if migrated:
+            self._write_json(manifest_path, {"status": "migrated", "created": self._utc_timestamp(), "workspace_identity": self._workspace_identity(), "copied": migrated})
 
     def _path(self, *parts, artifact_root=None):
         return os.path.join(self._workspace_root(artifact_root), *parts)
@@ -57,10 +84,10 @@ class WorkspaceSafetyDiffService:
         return self._path(f"{name}.json", artifact_root=artifact_root)
 
     def _load_index(self, name, artifact_root=None):
-        return self._read_json(self._index_path(name, artifact_root), [])
+        return self._read_json(self._index_path(name, artifact_root=artifact_root), [])
 
     def _save_index(self, name, data, artifact_root=None):
-        self._write_json(self._index_path(name, artifact_root), data)
+        self._write_json(self._index_path(name, artifact_root=artifact_root), data)
 
     def get_task_workspace(self, artifact_root=None):
         root = self._workspace_root(artifact_root)
@@ -964,7 +991,7 @@ class ReferenceImageService:
             project_path = os.path.join(self._reference_root(), os.path.basename(source))
             shutil.copy2(source, project_path)
         image = bpy.data.images.load(project_path, check_existing=True)
-        record = {"reference_id": ref_id, "name": name or image.name, "source_path": source, "project_copy_path": project_path, "reference_type": reference_type, "dimensions": list(image.size), "opacity": 1.0, "depth": "front", "locked": True, "landmarks": [], "confidence": "uncalibrated"}
+        record = {"reference_id": ref_id, "name": name or image.name, "image_name": image.name, "source_path": source, "project_copy_path": project_path, "reference_type": reference_type, "dimensions": list(image.size), "opacity": 1.0, "depth": "front", "locked": True, "landmarks": [], "confidence": "uncalibrated"}
         self.references[ref_id] = record
         return {"status": "success", "reference": record}
 
@@ -980,7 +1007,10 @@ class ReferenceImageService:
         obj.name = record["name"]
         obj.empty_display_type = "IMAGE"
         obj.empty_display_size = scale
-        obj.data = bpy.data.images.get(record["name"])
+        obj.data = bpy.data.images.get(record.get("image_name") or record["name"])
+        obj.color = (1.0, 1.0, 1.0, float(record.get("opacity", 1.0)))
+        with suppress(Exception):
+            obj.empty_image_depth = str(record.get("depth", "front")).upper()
         obj.lock_location = (True, True, True)
         obj.lock_rotation = (True, True, True)
         obj.lock_scale = (True, True, True)
@@ -1046,6 +1076,35 @@ class ReferenceImageService:
         if not record:
             return {"status": "error", "message": f"Unknown reference: {reference_id}"}
         record.update(updates)
+        obj = bpy.data.objects.get(record.get("object_name", ""))
+        if obj:
+            if "opacity" in updates:
+                rgba = list(getattr(obj, "color", (1.0, 1.0, 1.0, 1.0)))
+                while len(rgba) < 4:
+                    rgba.append(1.0)
+                rgba[3] = float(record["opacity"])
+                obj.color = rgba
+            if "depth" in updates:
+                depth = str(record["depth"]).upper()
+                with suppress(Exception):
+                    obj.empty_image_depth = depth
+            if "locked" in updates:
+                locked = bool(record["locked"])
+                obj.lock_location = (locked, locked, locked)
+                obj.lock_rotation = (locked, locked, locked)
+                obj.lock_scale = (locked, locked, locked)
+            if "visible" in updates:
+                visible = bool(record["visible"])
+                obj.hide_viewport = not visible
+                obj.hide_render = not visible
+            record["viewport_state"] = {
+                "object_name": obj.name,
+                "color_alpha": float(getattr(obj, "color", (1, 1, 1, 1))[3]),
+                "empty_image_depth": getattr(obj, "empty_image_depth", None),
+                "hide_viewport": bool(obj.hide_viewport),
+                "hide_render": bool(obj.hide_render),
+                "locked": all(obj.lock_location) and all(obj.lock_rotation) and all(obj.lock_scale),
+            }
         return {"status": "success", "reference": record}
 
 
@@ -1062,6 +1121,43 @@ class SpatialMeasurementService:
     def _origin(self, name):
         return list(self._obj(name).matrix_world.translation)
 
+    @staticmethod
+    def _bounds(obj):
+        corners = [obj.matrix_world @ mathutils.Vector(corner) for corner in getattr(obj, "bound_box", [])]
+        if not corners:
+            loc = obj.matrix_world.translation
+            corners = [loc]
+        mins = [min(corner[i] for corner in corners) for i in range(3)]
+        maxs = [max(corner[i] for corner in corners) for i in range(3)]
+        center = [(mins[i] + maxs[i]) / 2.0 for i in range(3)]
+        return {"min": mins, "max": maxs, "center": center, "size": [maxs[i] - mins[i] for i in range(3)]}
+
+    @staticmethod
+    def _bounds_clearance(bounds_a, bounds_b):
+        axis_gaps = []
+        penetration_axes = []
+        for axis in range(3):
+            if bounds_a["max"][axis] < bounds_b["min"][axis]:
+                axis_gaps.append(bounds_b["min"][axis] - bounds_a["max"][axis])
+            elif bounds_b["max"][axis] < bounds_a["min"][axis]:
+                axis_gaps.append(bounds_a["min"][axis] - bounds_b["max"][axis])
+            else:
+                axis_gaps.append(0.0)
+                penetration_axes.append(min(bounds_a["max"][axis], bounds_b["max"][axis]) - max(bounds_a["min"][axis], bounds_b["min"][axis]))
+        clearance = math.sqrt(sum(value * value for value in axis_gaps))
+        return clearance, axis_gaps, penetration_axes
+
+    @staticmethod
+    def _bounds_overlap(bounds_a, bounds_b):
+        return all(bounds_a["min"][axis] <= bounds_b["max"][axis] and bounds_b["min"][axis] <= bounds_a["max"][axis] for axis in range(3))
+
+    def _evaluated_mesh_world(self, obj):
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        mesh.transform(evaluated.matrix_world)
+        return evaluated, mesh
+
     def calculate_distance(self, from_object=None, to_object=None, point_a=None, point_b=None):
         a = point_a or self._origin(from_object)
         b = point_b or self._origin(to_object)
@@ -1074,21 +1170,107 @@ class SpatialMeasurementService:
 
     def calculate_area(self, object_name):
         obj = self._obj(object_name)
-        return {"status": "success", "measurement": {"type": "area", "object": object_name, "value": None, "confidence": "estimated", "method": "mesh-evaluation-deferred", "dimensions": list(obj.dimensions)}}
+        if obj.type != "MESH":
+            return {"status": "unsupported", "measurement": {"type": "area", "object": object_name, "method": "mesh_surface_area"}, "message": "calculate_area requires a mesh object"}
+        evaluated = mesh = None
+        try:
+            evaluated, mesh = self._evaluated_mesh_world(obj)
+            area = sum(float(poly.area) for poly in mesh.polygons)
+            return {"status": "success", "measurement": {"type": "area", "object": object_name, "value_blender_units": area, "confidence": "high", "method": "evaluated_mesh_surface_area", "polygon_count": len(mesh.polygons)}, "warnings": []}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "measurement": {"type": "area", "object": object_name, "method": "evaluated_mesh_surface_area"}}
+        finally:
+            if evaluated and mesh:
+                with suppress(Exception):
+                    evaluated.to_mesh_clear()
 
     def calculate_volume(self, object_name):
-        dims = self._obj(object_name).dimensions
-        return {"status": "success", "measurement": {"type": "volume", "object": object_name, "value_blender_units": dims.x * dims.y * dims.z, "confidence": "estimated", "method": "oriented_bounds_product"}}
+        obj = self._obj(object_name)
+        if obj.type != "MESH":
+            return {"status": "unsupported", "measurement": {"type": "volume", "object": object_name, "method": "mesh_volume"}, "message": "calculate_volume requires a mesh object"}
+        evaluated = mesh = None
+        try:
+            import bmesh
+            evaluated, mesh = self._evaluated_mesh_world(obj)
+            bm = bmesh.new()
+            try:
+                bm.from_mesh(mesh)
+                non_manifold_edges = [edge for edge in bm.edges if len(edge.link_faces) != 2]
+                volume = abs(float(bm.calc_volume()))
+            finally:
+                bm.free()
+            warnings = [] if not non_manifold_edges else [f"mesh is not watertight; {len(non_manifold_edges)} non-manifold boundary edges detected"]
+            return {"status": "success" if not warnings else "partial", "measurement": {"type": "volume", "object": object_name, "value_blender_units": volume, "confidence": "high" if not warnings else "medium", "method": "evaluated_bmesh_volume", "non_manifold_edge_count": len(non_manifold_edges)}, "warnings": warnings}
+        except Exception as exc:
+            bounds = self._bounds(obj)
+            estimate = bounds["size"][0] * bounds["size"][1] * bounds["size"][2]
+            return {"status": "partial", "message": str(exc), "measurement": {"type": "volume", "object": object_name, "value_blender_units": estimate, "confidence": "low", "method": "bounds_product_fallback"}, "warnings": ["exact mesh volume unavailable; returned bounds estimate"]}
+        finally:
+            if evaluated and mesh:
+                with suppress(Exception):
+                    evaluated.to_mesh_clear()
 
     def calculate_curve_length(self, object_name):
-        return {"status": "success", "measurement": {"type": "curve_length", "object": object_name, "value": None, "confidence": "estimated"}}
+        obj = self._obj(object_name)
+        if obj.type != "CURVE":
+            return {"status": "unsupported", "measurement": {"type": "curve_length", "object": object_name}, "message": "calculate_curve_length requires a curve object"}
+        total = 0.0
+        samples = 0
+        for spline in obj.data.splines:
+            points = []
+            if spline.type == "BEZIER":
+                bezier_points = list(spline.bezier_points)
+                for index, point in enumerate(bezier_points):
+                    points.append(obj.matrix_world @ point.co)
+                    if index + 1 < len(bezier_points):
+                        start = point.co
+                        control_a = point.handle_right
+                        next_point = bezier_points[index + 1]
+                        control_b = next_point.handle_left
+                        end = next_point.co
+                        previous = obj.matrix_world @ start
+                        for step in range(1, 17):
+                            t = step / 16.0
+                            local = ((1 - t) ** 3 * start) + (3 * (1 - t) ** 2 * t * control_a) + (3 * (1 - t) * t ** 2 * control_b) + (t ** 3 * end)
+                            current = obj.matrix_world @ local
+                            total += (current - previous).length
+                            previous = current
+                            samples += 1
+            else:
+                source_points = getattr(spline, "points", [])
+                for point in source_points:
+                    co = point.co
+                    points.append(obj.matrix_world @ mathutils.Vector((co.x / co.w, co.y / co.w, co.z / co.w)))
+                for first, second in zip(points, points[1:]):
+                    total += (second - first).length
+                    samples += 1
+            if getattr(spline, "use_cyclic_u", False) and len(points) > 1:
+                total += (points[0] - points[-1]).length
+                samples += 1
+        return {"status": "success", "measurement": {"type": "curve_length", "object": object_name, "value_blender_units": float(total), "confidence": "medium" if samples else "low", "method": "spline_sampled_length", "sample_segments": samples}, "warnings": [] if samples else ["curve has no measurable segments"]}
 
     def calculate_clearance(self, object_a, object_b):
-        return self.calculate_distance(from_object=object_a, to_object=object_b)
+        first = self._obj(object_a)
+        second = self._obj(object_b)
+        bounds_a = self._bounds(first)
+        bounds_b = self._bounds(second)
+        clearance, axis_gaps, penetration_axes = self._bounds_clearance(bounds_a, bounds_b)
+        return {"status": "success", "measurement": {"type": "clearance", "object_a": object_a, "object_b": object_b, "value_blender_units": clearance, "axis_gaps": axis_gaps, "penetration_axes": penetration_axes, "method": "world_bounding_box_clearance", "confidence": "medium"}, "warnings": ["bounds overlap; mesh-level penetration refinement not requested"] if penetration_axes and clearance == 0 else []}
 
     def calculate_alignment(self, object_names):
-        centers = [self._origin(name) for name in object_names]
-        return {"status": "success", "alignment": {"objects": object_names, "centers": centers, "confidence": "estimated"}}
+        rows = []
+        centers = []
+        for name in object_names:
+            obj = self._obj(name)
+            bounds = self._bounds(obj)
+            centers.append(bounds["center"])
+            rows.append({"object": name, "center": bounds["center"], "bounds": bounds})
+        if not centers:
+            return {"status": "error", "message": "object_names must contain at least one object"}
+        target = centers[0]
+        offsets = [{"object": row["object"], "offset_to_first_center": [target[axis] - row["center"][axis] for axis in range(3)]} for row in rows]
+        axis_spread = {axis_name: max(center[index] for center in centers) - min(center[index] for center in centers) for index, axis_name in enumerate(("x", "y", "z"))}
+        return {"status": "success", "alignment": {"objects": object_names, "centers": centers, "axis_spread": axis_spread, "offsets_to_first_center": offsets, "method": "world_bounds_center_alignment", "confidence": "medium"}}
 
     def convert_units(self, value, from_unit="BLENDER_UNIT", to_unit="METERS"):
         return runtime_convert_units(value, from_unit=from_unit, to_unit=to_unit, scale_length=bpy.context.scene.unit_settings.scale_length)
@@ -1114,7 +1296,17 @@ class SpatialMeasurementService:
         return {"status": "success", "objects": [{"name": name, "distance": dist} for dist, name in rows[:limit]]}
 
     def detect_object_intersections(self, object_names):
-        return {"status": "success", "intersections": [], "objects": object_names, "confidence": "estimated", "warnings": ["Phase 7C uses bounds-first intersection scaffolding."]}
+        names = list(object_names or [])
+        objects = [(name, self._obj(name)) for name in names]
+        intersections = []
+        for index, (name_a, obj_a) in enumerate(objects):
+            bounds_a = self._bounds(obj_a)
+            for name_b, obj_b in objects[index + 1:]:
+                bounds_b = self._bounds(obj_b)
+                if self._bounds_overlap(bounds_a, bounds_b):
+                    clearance, axis_gaps, penetration_axes = self._bounds_clearance(bounds_a, bounds_b)
+                    intersections.append({"object_a": name_a, "object_b": name_b, "method": "world_bounding_box_overlap", "axis_gaps": axis_gaps, "penetration_axes": penetration_axes, "clearance": clearance})
+        return {"status": "success", "intersections": intersections, "objects": names, "confidence": "medium", "method": "world_bounding_box_overlap", "warnings": ["mesh-level refinement not requested"]}
 
     def measure_object_to_reference(self, object_name, reference_id):
         refs = self.server.reference_image_service.references

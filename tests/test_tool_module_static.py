@@ -128,6 +128,7 @@ def test_code_execution_tools_module_exists_and_registers_tools() -> None:
 
 
 def test_code_execution_tools_contains_expected_tool_name() -> None:
+    assert "def execute_code(" in CODE_EXECUTION_TOOLS_TEXT
     assert "def execute_blender_code(" in CODE_EXECUTION_TOOLS_TEXT
     assert '"execute_code"' in CODE_EXECUTION_TOOLS_TEXT
 
@@ -305,7 +306,7 @@ def test_phase4b_tool_modules_exist_and_register_tools() -> None:
 
 def test_server_imports_and_registers_context_tools() -> None:
     assert "from overtli_blender.tools.registry import register_all_tools" in SERVER_TEXT
-    assert "register_all_tools(server, get_blender_connection, image_type=Image)" in SERVER_TEXT
+    assert "register_all_tools(server, get_blender_connection, image_type=Image, visible_tool_names=visible_tool_names)" in SERVER_TEXT
     assert "mcp = create_mcp_server()" in SERVER_TEXT
 
 

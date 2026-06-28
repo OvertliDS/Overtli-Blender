@@ -139,11 +139,33 @@ class SharedContextService:
 
 
 class ScriptRegistryService:
+    DANGEROUS_CODE_RE = re.compile(r"\b(exec|eval|compile|__import__|subprocess|socket|requests|urllib|open\s*\(|os\.system|shutil\.rmtree|addon_install|addon_remove)\b", re.IGNORECASE)
+
+    def __init__(self, server=None):
+        self.server = server
+
+    def _scan_code(self, code):
+        return sorted(set(match.strip() for match in self.DANGEROUS_CODE_RE.findall(str(code or ""))))
+
+    @staticmethod
+    def _safe_name(value, default="default"):
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or default)).strip("._")
+        return safe or default
+
+    def _base_dir(self):
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or os.environ.get("TEMP") or str(Path.home())
+        port = getattr(self.server, "port", "unknown") if self.server else "unknown"
+        blend_path = ""
+        with suppress(Exception):
+            blend_path = getattr(bpy.data, "filepath", "") or "unsaved"
+        blend_hash = hashlib.sha256(str(blend_path or "unsaved").encode("utf-8")).hexdigest()[:12]
+        root = os.path.join(base, "Overtli-Blender", "script_registry", f"pid_{os.getpid()}_port_{port}", blend_hash)
+        os.makedirs(root, exist_ok=True)
+        return root
+
     def _get_script_directory(self, category):
         """Get the script directory path for a given category"""
-        import tempfile
-        temp_dir = tempfile.gettempdir()
-        script_dir = os.path.join(temp_dir, ".blendermcp", category)
+        script_dir = os.path.join(self._base_dir(), self._safe_name(category))
         os.makedirs(script_dir, exist_ok=True)
         return script_dir
 
@@ -173,12 +195,26 @@ class ScriptRegistryService:
         }
 
         metadata_path = self._get_metadata_path(script_dir)
-        with open(metadata_path, 'w', encoding='utf-8') as f:
+        tmp_path = metadata_path + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2)
+        os.replace(tmp_path, metadata_path)
 
     def register_context_script(self, script_name, script_content, category="default", permanent=False):
         """Register a Python script for later execution"""
         try:
+            script_name = self._safe_name(script_name, "script")
+            category = self._safe_name(category)
+            matches = self._scan_code(script_content)
+            if matches:
+                return {
+                    "status": "blocked",
+                    "executed": False,
+                    "error_type": "DangerousCodePattern",
+                    "message": "Context script registration blocked by static safety scanner.",
+                    "matched_rules": matches,
+                    "remediation_code": "CONTEXT_SCRIPT_STATIC_SCAN_BLOCK",
+                }
             # Validate script syntax
             try:
                 compile(script_content, f"{script_name}.py", 'exec')
@@ -213,6 +249,8 @@ class ScriptRegistryService:
     def execute_context_script(self, script_name, category="default"):
         """Execute a previously registered script"""
         try:
+            script_name = self._safe_name(script_name, "script")
+            category = self._safe_name(category)
             script_dir = self._get_script_directory(category)
             script_path = os.path.join(script_dir, f"{script_name}.py")
 
@@ -225,6 +263,17 @@ class ScriptRegistryService:
             # Read script content
             with open(script_path, 'r', encoding='utf-8') as f:
                 script_content = f.read()
+
+            matches = self._scan_code(script_content)
+            if matches:
+                return {
+                    "status": "blocked",
+                    "executed": False,
+                    "error_type": "DangerousCodePattern",
+                    "message": "Context script execution blocked by static safety scanner.",
+                    "matched_rules": matches,
+                    "remediation_code": "CONTEXT_SCRIPT_STATIC_SCAN_BLOCK",
+                }
 
             # Execute script and capture output
             import io
@@ -239,6 +288,13 @@ class ScriptRegistryService:
                     exec_globals = {
                         'bpy': bpy,
                         'mathutils': mathutils,
+                        'shared': self.server.shared_context['variables'] if self.server else {},
+                        'get_object': (lambda handle: self.server.shared_context['objects'].get(handle)) if self.server else (lambda handle: None),
+                        'get_material': (lambda handle: self.server.shared_context['materials'].get(handle)) if self.server else (lambda handle: None),
+                        'get_operation': (lambda op_id: self.server.shared_context['operations'].get(op_id)) if self.server else (lambda op_id: None),
+                        'store_object': self.server._store_object_handle if self.server else (lambda handle, object_name: None),
+                        'store_material': self.server._store_material_handle if self.server else (lambda handle, material_name: None),
+                        'store_operation': self.server._store_operation_result if self.server else (lambda op_id, result: None),
                         '__name__': '__main__'
                     }
                     exec(script_content, exec_globals)
@@ -274,10 +330,9 @@ class ScriptRegistryService:
     def list_context_scripts(self, category=None):
         """List all registered scripts"""
         try:
-            import tempfile
             import time
 
-            base_dir = os.path.join(tempfile.gettempdir(), ".blendermcp")
+            base_dir = self._base_dir()
 
             if not os.path.exists(base_dir):
                 return {
@@ -288,7 +343,7 @@ class ScriptRegistryService:
             scripts = {}
 
             if category:
-                categories = [category]
+                categories = [self._safe_name(category)]
             else:
                 categories = [d for d in os.listdir(base_dir)
                             if os.path.isdir(os.path.join(base_dir, d))]
@@ -335,10 +390,11 @@ class ScriptRegistryService:
     def clear_context_scripts(self, category=None, script_name=None, clear_permanent=False):
         """Clear scripts from the registry"""
         try:
-            import tempfile
             import shutil
 
-            base_dir = os.path.join(tempfile.gettempdir(), ".blendermcp")
+            base_dir = self._base_dir()
+            category = self._safe_name(category) if category else category
+            script_name = self._safe_name(script_name, "script") if script_name else script_name
 
             if not os.path.exists(base_dir):
                 return {

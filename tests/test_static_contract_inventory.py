@@ -109,6 +109,7 @@ def test_script_registry_tool_module_includes_extracted_wrappers() -> None:
 
 def test_code_execution_tool_module_includes_extracted_wrapper() -> None:
     assert "def register_code_execution_tools" in CODE_EXECUTION_TOOLS_TEXT
+    assert "def execute_code(" in CODE_EXECUTION_TOOLS_TEXT
     assert "def execute_blender_code(" in CODE_EXECUTION_TOOLS_TEXT
     assert '"execute_code"' in CODE_EXECUTION_TOOLS_TEXT
 
@@ -300,7 +301,7 @@ def test_addon_static_surface_includes_internal_service_classes() -> None:
         "class RawCodeExecutionService",
         "class GeometryNodesService",
         "self.shared_context_service = SharedContextService(self.shared_context)",
-        "self.script_registry_service = ScriptRegistryService()",
+        "self.script_registry_service = ScriptRegistryService(self)",
         "self.scene_observation_service = SceneObservationService(self)",
         "self.viewport_screenshot_service = ViewportScreenshotService(self)",
         "self.scene_intelligence_service = SceneIntelligenceService(self)",

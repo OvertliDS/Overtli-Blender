@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .tool_packs import TOOL_PACK_DEFINITIONS
+
 
 @dataclass(frozen=True)
 class ToolProfile:
@@ -28,58 +30,9 @@ class ToolProfile:
 _BROWSER_FULL_STANDARD = ToolProfile(
     "browser_full_standard",
     "Browser Full Standard",
-    (
-        "core",
-        "scene_intelligence",
-        "verified_editing",
-        "materials",
-        "animation_presentation",
-        "project_runtime",
-        "file_access",
-        "task_planning",
-        "references",
-        "spatial_measurement",
-        "product_ux",
-        "preferences",
-        "tool_profiles",
-        "bundled_skills",
-        "advanced_modeling",
-        "reference_construction",
-        "motion_validation",
-        "geometry_nodes",
-        "error_help",
-        "onboarding",
-    ),
+    tuple(TOOL_PACK_DEFINITIONS),
     "browser_standard",
-    (
-        "execute_code",
-        "execute_blender_code",
-        "register_context_script",
-        "execute_context_script",
-        "delete_objects",
-        "delete_materials",
-        "delete_actions",
-        "delete_nla_tracks",
-        "delete_pose_assets",
-        "delete_shape_keys",
-        "delete_skill_packs",
-        "delete_verified_snippets",
-        "download_polyhaven_asset",
-        "download_sketchfab_model",
-        "create_rodin_job",
-        "generate_hyper3d_model_via_images",
-        "generate_hyper3d_model_via_text",
-        "import_generated_asset",
-        "execute_approved_file_delete",
-        "execute_cache_cleanup",
-        "execute_approved_addon_operator",
-        "install_local_addon",
-        "enable_blender_addon",
-        "disable_blender_addon",
-        "remove_blender_addon",
-        "run_verified_snippet_smoke",
-        "run_skill_pack",
-    ),
+    (),
     (
         "diagnostics_review",
         "reference_modeling",
@@ -87,11 +40,11 @@ _BROWSER_FULL_STANDARD = ToolProfile(
         "animation_blocking",
         "texture_baking",
     ),
-    125,
+    600,
     (
-        "Use safe structured tools for scene creation instead of raw Python.",
-        "Approval mode controls when mutations ask; tool profile controls what the model can see.",
-        "Treat tunneled browser use as local development only.",
+        "Use structured tools first, then scoped Blender Python when the structured surface cannot cover the task.",
+        "Approval mode controls when mutations ask; Browser Full Standard exposes the complete callable MCP surface.",
+        "Inspect, plan, snapshot, execute, and verify instead of relying on one-shot scene mutation.",
     ),
     2,
 )

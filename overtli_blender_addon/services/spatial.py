@@ -843,17 +843,44 @@ class UVSelectionMeasurementService:
         mesh = obj.data
         if not mesh.uv_layers:
             return {"status": "error", "message": f"Object has no UV maps: {object_name}", "warnings": []}
+        uv_layer = mesh.uv_layers.get(uv_map_name) if uv_map_name else mesh.uv_layers.active
+        if uv_layer is None:
+            return {"status": "error", "message": f"UV map not found: {uv_map_name}", "warnings": []}
         if island_seed_face_index is None:
-            indices = sorted({vertex for poly in mesh.polygons for vertex in poly.vertices})
-            warnings = ["no island seed supplied; captured all UV-mapped vertices"]
+            return {"status": "error", "message": "island_seed_face_index is required for UV island traversal", "warnings": []}
         else:
             face_index = int(island_seed_face_index)
             if face_index < 0 or face_index >= len(mesh.polygons):
                 return {"status": "error", "message": f"Face index out of range: {face_index}", "warnings": []}
-            indices = list(mesh.polygons[face_index].vertices)
-            warnings = ["single-face UV island approximation used"]
+            edge_to_faces = {}
+            face_vertices = {}
+            for poly in mesh.polygons:
+                loops = list(poly.loop_indices)
+                face_vertices[poly.index] = set(poly.vertices)
+                for offset, loop_index in enumerate(loops):
+                    next_loop_index = loops[(offset + 1) % len(loops)]
+                    uv_a = uv_layer.data[loop_index].uv
+                    uv_b = uv_layer.data[next_loop_index].uv
+                    key = tuple(sorted(((round(float(uv_a.x), 6), round(float(uv_a.y), 6)), (round(float(uv_b.x), 6), round(float(uv_b.y), 6)))))
+                    edge_to_faces.setdefault(key, set()).add(poly.index)
+            adjacency = {poly.index: set() for poly in mesh.polygons}
+            for faces in edge_to_faces.values():
+                if len(faces) > 1:
+                    for face in faces:
+                        adjacency[face].update(other for other in faces if other != face)
+            queue = [face_index]
+            visited = {face_index}
+            while queue:
+                current = queue.pop(0)
+                for neighbor in adjacency.get(current, set()):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+            indices = sorted({vertex for face in visited for vertex in face_vertices.get(face, set())})
+            warnings = []
         result = self.server.vertex_group_service.create_vertex_group(object_name, group_name, selection_mode="indices", indices=indices, weight=weight, replace_existing=True)
         result["warnings"] = result.get("warnings", []) + warnings
+        result["uv_island"] = {"uv_map_name": uv_layer.name, "seed_face_index": int(island_seed_face_index), "face_count": len(visited), "method": "uv_edge_connectivity"}
         return result
 
     def measure_object(self, object_name, include_bounds=True):

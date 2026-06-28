@@ -217,6 +217,8 @@ class SceneEditService:
         if scale is not None:
             vec = self._vector(scale, [1.0, 1.0, 1.0])
             obj.scale = [obj.scale[i] + vec[i] for i in range(3)] if relative else vec
+        bpy.context.view_layer.update()
+        preserved_point = self._anchor_point(obj, anchor or "center") if dimensions is not None and preserve_anchor else None
         if dimensions is not None:
             self._apply_dimensions(obj, dimensions)
             if preserved_point is not None:
@@ -432,7 +434,29 @@ class RiggingSimulationService:
                     rigs.append({"name": obj.name, "type": "MESH", "armature_modifiers": armature_mods, "vertex_groups": [g.name for g in obj.vertex_groups]})
         return {"status": "success", "rigging": rigs, "warnings": []}
 
+    @staticmethod
+    def _normalized_bone_specs(bones, epsilon=1e-6):
+        specs = bones or [{"name": "Root", "head": [0, 0, 0], "tail": [0, 0, 1]}]
+        normalized = []
+        for index, spec in enumerate(specs):
+            name = spec.get("name", "Root" if index == 0 else "Bone")
+            head = [float(value) for value in spec.get("head", [0, 0, 0])]
+            tail = [float(value) for value in spec.get("tail", [0, 0, 1])]
+            if len(head) != 3 or len(tail) != 3:
+                raise ValueError(f"Bone '{name}' head and tail must be 3-item numeric lists")
+            if (mathutils.Vector(tail) - mathutils.Vector(head)).length < float(epsilon):
+                if spec.get("auto_offset_tail") is True:
+                    tail = [head[0], head[1], head[2] + max(float(epsilon), 0.001)]
+                else:
+                    raise ValueError(f"Bone '{name}' has zero or near-zero length; provide a distinct tail or set auto_offset_tail=true")
+            normalized.append({"name": name, "head": head, "tail": tail, "parent": spec.get("parent")})
+        return normalized
+
     def create_armature(self, armature_name=None, bones=None, collection_name=None, location=None):
+        try:
+            bone_specs = self._normalized_bone_specs(bones)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "warnings": []}
         name = armature_name or f"OVERTLI_ARMATURE_{RenderArtifactService.stamp()}"
         arm_data = bpy.data.armatures.new(name)
         arm_obj = bpy.data.objects.new(name, arm_data)
@@ -446,12 +470,12 @@ class RiggingSimulationService:
         arm_obj.select_set(True)
         bpy.ops.object.mode_set(mode="EDIT")
         try:
-            first = (bones or [{"name": "Root", "head": [0, 0, 0], "tail": [0, 0, 1]}])[0]
+            first = bone_specs[0]
             default = arm_data.edit_bones[0] if arm_data.edit_bones else arm_data.edit_bones.new(first.get("name", "Root"))
             default.name = first.get("name", "Root")
             default.head = first.get("head", [0, 0, 0])
             default.tail = first.get("tail", [0, 0, 1])
-            for spec in (bones or [])[1:]:
+            for spec in bone_specs[1:]:
                 bone = arm_data.edit_bones.new(spec.get("name", "Bone"))
                 bone.head = spec.get("head", [0, 0, 0])
                 bone.tail = spec.get("tail", [0, 0, 1])
@@ -481,36 +505,68 @@ class RiggingSimulationService:
         if not arm or arm.type != "ARMATURE" or not arm.pose or bone_name not in arm.pose.bones:
             return {"status": "error", "message": "Armature pose bone not found", "warnings": []}
         bone = arm.pose.bones[bone_name]
+        keyed_channels = []
         if location is not None:
             bone.location = location
             if keyframe_frame is not None:
                 bone.keyframe_insert("location", frame=int(keyframe_frame))
+                keyed_channels.append("location")
         if rotation is not None:
-            bone.rotation_euler = rotation
+            rotation_values = [float(value) for value in rotation]
+            if len(rotation_values) == 4:
+                bone.rotation_mode = "QUATERNION"
+                bone.rotation_quaternion = rotation_values
+                rotation_channel = "rotation_quaternion"
+            elif len(rotation_values) == 3:
+                bone.rotation_mode = "XYZ"
+                bone.rotation_euler = rotation_values
+                rotation_channel = "rotation_euler"
+            else:
+                return {"status": "error", "message": "rotation must be a 3-item Euler list or 4-item quaternion list", "warnings": []}
             if keyframe_frame is not None:
-                bone.keyframe_insert("rotation_euler", frame=int(keyframe_frame))
+                bone.keyframe_insert(rotation_channel, frame=int(keyframe_frame))
+                keyed_channels.append(rotation_channel)
         if scale is not None:
             bone.scale = scale
             if keyframe_frame is not None:
                 bone.keyframe_insert("scale", frame=int(keyframe_frame))
-        return {"status": "success", "armature_name": arm.name, "bone_name": bone.name, "warnings": []}
+                keyed_channels.append("scale")
+        return {"status": "success", "armature_name": arm.name, "bone_name": bone.name, "rotation_mode_used": bone.rotation_mode, "keyed_channels": keyed_channels, "warnings": []}
 
     def add_driver(self, target_type, target_name, data_path, expression="var", variables=None, array_index=-1):
-        target = bpy.data.objects.get(target_name) if target_type == "object" else bpy.data.materials.get(target_name)
+        target_type_key = str(target_type or "").lower()
+        if target_type_key not in {"object", "material"}:
+            return {"status": "error", "message": "target_type must be 'object' or 'material'", "warnings": []}
+        target = bpy.data.objects.get(target_name) if target_type_key == "object" else bpy.data.materials.get(target_name)
         if not target:
             return {"status": "error", "message": "Driver target not found", "warnings": []}
+        resolved_variables = []
+        for spec in variables or []:
+            source = None
+            source_kind = str(spec.get("target_type") or "").lower()
+            if spec.get("object_name"):
+                source = bpy.data.objects.get(spec.get("object_name"))
+                if source is None:
+                    return {"status": "error", "message": f"Driver variable object not found: {spec.get('object_name')}", "warnings": []}
+            elif source_kind == "scene" or spec.get("use_scene"):
+                source = bpy.context.scene
+            elif target_type_key == "object":
+                source = target
+            else:
+                return {"status": "error", "message": "Material driver variables require object_name or target_type='scene'; refusing invalid Material variable target", "warnings": []}
+            resolved_variables.append((spec, source))
         try:
             fcurve = target.driver_add(data_path, int(array_index)) if int(array_index) >= 0 else target.driver_add(data_path)
             fcurves = fcurve if isinstance(fcurve, list) else [fcurve]
             for fc in fcurves:
                 fc.driver.type = "SCRIPTED"
                 fc.driver.expression = str(expression)
-                for spec in variables or []:
+                for spec, source in resolved_variables:
                     var = fc.driver.variables.new()
                     var.name = spec.get("name", "var")
-                    var.targets[0].id = bpy.data.objects.get(spec.get("object_name")) if spec.get("object_name") else target
+                    var.targets[0].id = source
                     var.targets[0].data_path = spec.get("data_path", "location.x")
-            return {"status": "success", "target_type": target_type, "target_name": target.name, "data_path": data_path, "driver_count": len(fcurves), "warnings": []}
+            return {"status": "success", "target_type": target_type_key, "target_name": target.name, "data_path": data_path, "driver_count": len(fcurves), "warnings": []}
         except Exception as exc:
             return {"status": "error", "message": str(exc), "warnings": []}
 
@@ -1185,4 +1241,3 @@ class AdvancedModelingWorkflowBatchService(AdvancedModelingServiceBase):
                 break
         after = self.server.create_scene_snapshot(label=f"{workflow_name or 'phase8b'}_after") if create_after_snapshot else None
         return {"status": "success" if all(item["result"].get("status") != "error" for item in results) else "partial", "workflow_name": workflow_name, "before_snapshot": before, "after_snapshot": after, "results": results}
-        preserved_point = self._anchor_point(obj, anchor or "center") if dimensions is not None and preserve_anchor else None

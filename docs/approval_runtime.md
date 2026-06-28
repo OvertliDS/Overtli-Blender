@@ -18,6 +18,7 @@ Flow:
 Read-only commands do not require approval. High-risk or destructive commands
 require approval in strict governance paths. Approved execution now dispatches
 the exact approved structured command after the command name and canonical
-parameters are validated. Raw Python, addon operator execution, and destructive
-cleanup remain hidden or separately gated by the active profile and safety
-policy.
+parameters are validated. Browser Full Standard does not hide raw Python, addon
+operator execution, or cleanup tools; those paths are governed by the active
+approval mode, exact confirmation fields, approval ids, command allowlists, and
+addon-side safety scanners.

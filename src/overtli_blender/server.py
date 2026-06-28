@@ -134,18 +134,20 @@ def _visible_tool_names_for_profile(profile_name: str | None) -> set[str] | None
 
     hidden = set(profile.hidden_risky_tools)
     allowed_packs = set(profile.enabled_tool_packs)
-    specs = [
-        spec
-        for spec in list_command_specs()
-        if spec.tool_pack in allowed_packs
-        and spec.name not in hidden
-        and spec.risk_level != "HIGH"
-        and not spec.destructive
-        and "raw_python" not in spec.allowed_capabilities
-        and "network.providers" not in spec.allowed_capabilities
-        and "addon.execute" not in spec.allowed_capabilities
-        and "filesystem.delete" not in spec.allowed_capabilities
-    ]
+    specs = []
+    for spec in list_command_specs():
+        if spec.tool_pack not in allowed_packs or spec.name in hidden:
+            continue
+        if profile.name not in {"browser_full_standard", "chatgpt_browser_default"} and (
+            spec.risk_level == "HIGH"
+            or spec.destructive
+            or "raw_python" in spec.allowed_capabilities
+            or "network.providers" in spec.allowed_capabilities
+            or "addon.execute" in spec.allowed_capabilities
+            or "filesystem.delete" in spec.allowed_capabilities
+        ):
+            continue
+        specs.append(spec)
     specs.sort(key=lambda spec: (not spec.read_only, spec.risk_level, spec.tool_pack, spec.name))
     visible = {spec.name for spec in specs[: profile.max_visible_tools]}
     visible.update(
@@ -198,7 +200,11 @@ def _visible_tool_names_for_profile(profile_name: str | None) -> set[str] | None
             "transform_object",
             "transform_object_dimensions",
             "duplicate_object",
+            "delete_objects",
+            "delete_collection",
+            "clear_scene",
             "scene_cleanup_plan",
+            "measure_object",
             "validate_ground_contact",
             "align_object_to_surface",
             "validate_scene_composition",
@@ -235,8 +241,42 @@ def _visible_tool_names_for_profile(profile_name: str | None) -> set[str] | None
     return visible
 
 
-def _apply_tool_profile(server: FastMCP, profile_name: str | None) -> None:
-    visible = _visible_tool_names_for_profile(profile_name)
+def build_mcp_instructions() -> str:
+    """Return client-facing operating guidance injected into the MCP server."""
+
+    return (
+        "Overtli-Blender is a local-first Blender MCP bridge. Treat it as a full Blender control surface, "
+        "not a small curated action list.\n\n"
+        "Operating loop: inspect the current scene and project first with get_scene_info, get_scene_index, "
+        "get_scene_health, get_project_status, and relevant deep-info tools; create or update a structured plan "
+        "with create_scene_plan, workspace tasks, todos, or checklists when the request has multiple steps; take "
+        "create_verification_snapshot before risky or destructive work; execute in small reversible stages; verify "
+        "with measurements, scene health, snapshots, screenshots/renders when available, and final object/material "
+        "state before claiming success.\n\n"
+        "Tool discovery: use discover_tool_packs, get_tool_pack, search_tools, get_tool_spec, "
+        "get_recommended_tools_for_task, search_bundled_skill_packs, and get_bundled_skill_pack to choose the "
+        "right surface. Browser Full Standard intentionally exposes the complete callable MCP tool list. Do not "
+        "treat missing pack activation as missing capability; discover or search for the specific tool.\n\n"
+        "Blender execution strategy: prefer structured tools for common scene, material, spatial, animation, "
+        "workspace, provider, cleanup, and verification work. Use execute_code, execute_blender_code, "
+        "register_context_script, and execute_context_script only when the structured surface cannot express the "
+        "needed Blender API operation. Keep scripts short, scoped to named objects or approved roots, print useful "
+        "evidence, and rely on the addon safety scanner and approval/confirmation gates for high-risk actions.\n\n"
+        "Spatial discipline: reason from object bounds, dimensions, origins, anchors, ground contact, clearance, "
+        "intersection, snapping, cursor placement, transforms, scale, rotation, and parent/collection context. For "
+        "new objects, ensure floor contact and relationship to nearby objects instead of leaving half-buried or "
+        "floating geometry.\n\n"
+        "Workspace and file discipline: resolve the project workspace before writing, prefer approved roots and "
+        "project folders, use temp workspace initialization for unsaved blends, and use planning/approval tools for "
+        "file delete, cache cleanup, addon lifecycle, provider downloads, imports, exports, and external writes.\n\n"
+        "Safety: approval mode controls user prompting; the permission profile controls capability allowance; tool "
+        "schemas and addon services enforce exact confirmation, dry-run defaults, allowlists, and scanner blocks. "
+        "Never invent a successful result after a blocked, unknown, timeout, or error response."
+    )
+
+
+def _apply_tool_profile(server: FastMCP, profile_name: str | None, *, visible_tool_names: set[str] | None = None) -> None:
+    visible = visible_tool_names if visible_tool_names is not None else _visible_tool_names_for_profile(profile_name)
     if visible is None:
         return
     tool_manager = getattr(server, "_tool_manager", None)
@@ -363,10 +403,7 @@ def create_mcp_server(
 
     server = FastMCP(
         "Overtli-Blender",
-        instructions=(
-            "Use Overtli-Blender to inspect local Blender scene state, plan safe workflows, "
-            "request approval before mutations, and avoid raw Python or destructive actions unless explicitly approved."
-        ),
+        instructions=build_mcp_instructions(),
         host=host,
         port=port,
         streamable_http_path=DEFAULT_HTTP_PATH,
@@ -374,8 +411,9 @@ def create_mcp_server(
         transport_security=transport_security,
     )
     _apply_remote_safety(remote_safety)
-    register_all_tools(server, get_blender_connection, image_type=Image)
-    _apply_tool_profile(server, profile)
+    visible_tool_names = _visible_tool_names_for_profile(profile)
+    register_all_tools(server, get_blender_connection, image_type=Image, visible_tool_names=visible_tool_names)
+    _apply_tool_profile(server, profile, visible_tool_names=visible_tool_names)
     _add_http_routes(server, profile, remote_safety)
     return server
 

@@ -21,7 +21,7 @@ def test_connector_check_has_browser_write_modes() -> None:
     assert "--browser-write-profile" in text
     assert "--browser-mutation-smoke" in text
     assert "REQUIRED_BROWSER_TOOLS" in text
-    assert "DANGEROUS_BROWSER_TOOLS" in text
+    assert "FULL_BROWSER_REQUIRED_HIGH_RISK_TOOLS" in text
 
 
 def test_transport_strips_callable_connector_metadata_before_json_encoding() -> None:

@@ -318,25 +318,27 @@ Always allow for trusted local projects; destructive operations stay internally 
 
 or the closest available option that asks before making changes.
 
-The default browser profile is `browser_full_standard`. The legacy `chatgpt_browser_default` name remains a backward-compatible alias. Browser mode is mutation-capable for safe structured writes: primitive creation, transforms, collections, materials, cameras, lights, verification snapshots, verified edit batches, and presentation workflow batches are visible without requiring raw Python.
+The default browser profile is `browser_full_standard`. The legacy `chatgpt_browser_default` name remains a backward-compatible alias. Browser mode exposes the full callable MCP tool surface, including structured tools, bundled skill tools, context scripts, raw Blender Python wrappers, file/delete tools, provider tools, and addon lifecycle/operator tools. Browser safe structured writes for primitive creation, transforms, collections, scoped cleanup, approved file delete, provider assets, object measurement, materials, cameras, lights, verification snapshots, verified edit batches, and presentation workflow batches remain the preferred first path for normal scene work.
 
-Browser permission profile is `browser_standard`. The legacy `remote_browser_safe` name remains an alias. Browser approval mode defaults to `ask_for_destructive_only`, so normal structured scene creation does not loop on approvals while destructive work remains gated.
+Browser permission profile is `browser_standard`. The legacy `remote_browser_safe` name remains an alias. Browser Standard allows the full known capability set so the browser is not artificially handicapped. Browser approval mode defaults to `ask_for_destructive_only`, so normal structured scene creation does not loop on approvals while destructive work remains gated.
 
 Tool profile, permission profile, and approval mode are separate:
 
 - Tool profile controls visible and organized tools.
-- Permission profile controls allowed categories.
+- Permission profile controls allowed capability categories.
 - Approval mode controls when an allowed operation asks before execution.
 
 Browser MCP `approve_operation` executes after approval by default so ChatGPT does not dead-end when it prepares a structured write and then only calls the approval tool. Call it with `execute_after_approval=false` only when you intentionally want approval metadata without dispatch. `execute_approved_operation(approval_id)` can also load the stored command/params from the approval record, and `approve_and_execute_operation` remains the explicit one-step path. All execution paths refuse expired, denied, already executed, changed, hidden, or capability-blocked operations.
 
-`remote_browser_safe` keeps network-exposed mode approval-heavy:
+Browser full mode keeps the network-exposed workflow capable without hiding core Blender surfaces:
 
-- raw Python is not visible in the browser profile
-- external provider downloads are not visible by default
-- file delete execution is hidden
-- addon operator execution is hidden
-- visible tools are bounded
+- raw Python and context scripts are visible because custom Blender API work is a core MCP use case; the addon scanner blocks dangerous call patterns and direct scripts should stay small, scoped, and verified
+- external provider tools are visible, but provider-download approval settings and local provider auth setup still govern actual use
+- file delete execution is visible as an approved structured tool, but it still requires a prior plan/approval and exact confirmation
+- addon lifecycle and third-party addon operator execution are visible in Browser Full Standard but still require exact confirmations/approval ids where their services define them
+- `clear_scene`, `delete_objects`, `delete_collection`, and domain cleanup tools are directly callable but remain internally gated by dry-run, explicit names, empty-target defaults, and/or `confirm=true`
+- visible tools are the full callable MCP surface, not a small curated subset
+- use `discover_tool_packs`, `search_tools`, `get_tool_spec`, `search_bundled_skill_packs`, and `get_bundled_skill_pack` to choose the right tool or workflow guide
 - path/private-value details should stay redacted in logs and docs
 
 ## Manual Browser Smoke
@@ -364,8 +366,9 @@ Record:
 - If using Secure MCP Tunnel, verify the ChatGPT connector is configured with the tunnel ID and that `tunnel-client doctor --profile overtli-blender-http --explain` passes.
 - If tools are missing, restart the HTTP bridge and refresh the connector in ChatGPT settings.
 - If safe write tools are missing in ChatGPT, restart the HTTP bridge with `--profile browser_full_standard --remote-safety browser_standard`, then use `ChatGPT -> Settings -> Connectors -> Overtli-Blender -> Refresh` to refresh connector metadata.
+- If `search_tools` reports a tool but ChatGPT says `Unknown tool`, run `scripts\browser_tool_surface_contract_smoke.py`; browser discovery must only return tools registered in the active MCP profile.
 - If prepare/approve works but nothing changes, the browser MCP wrapper or installed addon is stale. Update the server/addon, refresh connector metadata, reload the Blender addon, and run `scripts\chatgpt_connector_check.py --browser-write-profile --json`.
 - If `object_count remains 0` after approval, the operation was approved but not executed, or the Blender socket is not running. Run `scripts\smoke_blender_addon_socket.py --timeout 30 --include-addon-package-status`, then `--include-browser-mutation-path`, then `--include-browser-approval-execution-path`.
 - If the approval-execution smoke reports `Unknown command type: approve_and_execute_operation`, rebuild and reinstall `.overtli_blender\release\addon_zip\overtli_blender_addon_0.1.0.zip`, restart the addon socket, and rerun the smoke. Refreshing connector metadata alone does not replace Blender's installed addon package.
-- If too many tools appear, verify `--profile browser_full_standard` is in the HTTP bridge command and that dangerous tools remain hidden.
-- If high-risk actions appear directly, stop the bridge and rerun with `--remote-safety browser_standard`.
+- If fewer tools appear than expected, verify `--profile browser_full_standard` is in the HTTP bridge command and rerun `scripts\browser_tool_surface_contract_smoke.py`.
+- If high-risk actions execute without the confirmation you expected, check the Blender addon Runtime UX approval mode and raw/provider/file approval settings.

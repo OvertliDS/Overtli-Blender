@@ -267,8 +267,8 @@ def check_chatgpt_browser_connector_static() -> None:
         raise RuntimeError("missing browser_full_standard profile")
     if legacy is None or legacy.to_dict() != profile.to_dict():
         raise RuntimeError("chatgpt_browser_default must alias browser_full_standard")
-    if profile.max_visible_tools > 160:
-        raise RuntimeError("browser_full_standard visible tool budget is too large")
+    if profile.max_visible_tools < 500:
+        raise RuntimeError("browser_full_standard must expose the full browser tool surface")
     if profile.permission_profile != "browser_standard":
         raise RuntimeError("browser_full_standard must use browser_standard")
     browser_caps = PROFILE_CAPABILITIES.get("browser_standard", set())
@@ -276,8 +276,8 @@ def check_chatgpt_browser_connector_static() -> None:
         raise RuntimeError("remote_browser_safe must alias browser_standard")
     if not {"scene.read", "scene.write", "filesystem.project.write"} <= browser_caps:
         raise RuntimeError("browser_standard must allow safe structured writes")
-    if {"raw_python", "network.providers", "filesystem.delete", "filesystem.external.write", "addon.manage", "addon.execute", "external_process"} & browser_caps:
-        raise RuntimeError("browser_standard includes blocked high-risk capability")
+    if not {"raw_python", "filesystem.external.write", "addon.manage", "addon.execute", "external_process"} <= browser_caps:
+        raise RuntimeError("browser_standard is missing full-surface capability")
     from overtli_blender.server import create_mcp_server
 
     tools = set(create_mcp_server(profile="browser_full_standard", remote_safety="browser_standard")._tool_manager._tools)  # type: ignore[attr-defined]
@@ -285,6 +285,10 @@ def check_chatgpt_browser_connector_static() -> None:
         "execute_approved_operation",
         "approve_and_execute_operation",
         "create_primitive_object",
+        "delete_objects",
+        "clear_scene",
+        "delete_collection",
+        "measure_object",
         "create_basic_material",
         "assign_material",
         "create_camera",
@@ -295,15 +299,21 @@ def check_chatgpt_browser_connector_static() -> None:
     }
     if missing_tools := sorted(required_tools - tools):
         raise RuntimeError(f"browser profile missing safe mutation tools: {missing_tools}")
-    dangerous_tools = {
-        "execute_blender_code",
-        "download_" + "polyhaven_asset",
-        "delete_objects",
-        "execute_approved_file_delete",
+    high_risk_required_tools = {
+        "execute_" + "code",
+        "execute_" + "blender_code",
+        "register_" + "context_script",
+        "execute_" + "context_script",
         "execute_approved_addon_operator",
+        "install_local_addon",
+        "enable_blender_addon",
+        "disable_blender_addon",
+        "remove_blender_addon",
+        "run_skill_pack",
+        "run_verified_snippet_smoke",
     }
-    if dangerous_tools & tools:
-        raise RuntimeError("browser profile exposes dangerous tools by default")
+    if missing_high_risk := sorted(high_risk_required_tools - tools):
+        raise RuntimeError(f"browser profile missing full-surface tools: {missing_high_risk}")
     from overtli_blender.runtime.preferences_schema import default_preferences
 
     security = default_preferences().get("security", {})

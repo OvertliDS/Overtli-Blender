@@ -128,11 +128,28 @@ class SafetyPolicyService:
 
 
 class RawCodeExecutionService:
+    DANGEROUS_CODE_RE = re.compile(r"\b(exec|eval|compile|__import__|subprocess|socket|requests|urllib|open\s*\(|os\.system|shutil\.rmtree|addon_install|addon_remove)\b", re.IGNORECASE)
+
     def __init__(self, server):
         self.server = server
 
+    def _scan_code(self, code):
+        return sorted(set(match.strip() for match in self.DANGEROUS_CODE_RE.findall(str(code or ""))))
+
     def execute_code(self, code):
         """Execute arbitrary Blender Python code with shared context"""
+        matches = self._scan_code(code)
+        if matches:
+            result = {
+                "status": "blocked",
+                "executed": False,
+                "error_type": "DangerousCodePattern",
+                "message": "Raw code execution blocked by static safety scanner.",
+                "matched_rules": matches,
+                "remediation_code": "RAW_CODE_STATIC_SCAN_BLOCK",
+            }
+            self.server._add_to_history("execute_code", "[blocked by scanner]", result)
+            return result
         try:
             namespace = {
                 "bpy": bpy,
@@ -151,10 +168,18 @@ class RawCodeExecutionService:
 
             captured_output = capture_buffer.getvalue()
             self.server._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, captured_output)
-            return {"executed": True, "result": captured_output, "shared_variables": list(self.server.shared_context['variables'].keys())}
-        except Exception as e:
-            error_msg = f"Code execution error: {str(e)}"
-            self.server._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, f"ERROR: {error_msg}")
-            raise Exception(error_msg)
+            return {"status": "success", "executed": True, "result": captured_output, "shared_variables": list(self.server.shared_context['variables'].keys())}
+        except Exception as exc:
+            tb = traceback.format_exc(limit=5)
+            result = {
+                "status": "error",
+                "executed": False,
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+                "traceback_summary": tb,
+                "remediation_code": "RAW_CODE_EXECUTION_ERROR",
+            }
+            self.server._add_to_history("execute_code", code[:100] + "..." if len(code) > 100 else code, result)
+            return result
 
 

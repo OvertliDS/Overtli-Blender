@@ -59,6 +59,8 @@ Use `promote_temp_workspace_to_project(project_root=..., confirm=true)` when the
 
 Artifact-writing tools such as workspace tasks, scene snapshots, and verification manifests should use the saved project root when available, explicit `artifact_root` when supplied, or this temporary workspace for unsaved scenes. They should not infer the addon folder as the scene workspace.
 
+Workspace task, todo, journal, snapshot, and rollback JSON files are scoped beneath `.overtli_blender/workspace/<blend-identity>/`, where saved blends use the blend stem plus a path hash and unsaved scenes use the temporary-session identity. This prevents two `.blend` files in the same project folder from sharing `tasks.json` or `todos.json`. When old unscoped workspace indexes are present, the runtime copies them into the scoped folder and writes a migration manifest; it does not delete the old files.
+
 ## Moving Or Copying Projects
 
 `plan_project_folder_move` is read-only and returns the source project folder, target project folder, target `.blend` path, conflicts, and the exact steps that would run.

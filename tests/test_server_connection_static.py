@@ -93,6 +93,7 @@ def test_server_py_still_defines_key_tool_wrappers() -> None:
 
 
 def test_code_execution_tools_py_contains_extracted_tool_name() -> None:
+    assert _has_def(CODE_EXECUTION_TOOLS_TEXT, "execute_code")
     assert _has_def(CODE_EXECUTION_TOOLS_TEXT, "execute_blender_code")
 
 
@@ -203,5 +204,5 @@ def test_addon_py_contains_internal_service_extraction() -> None:
     assert "class SharedContextService" in ADDON_TEXT
     assert "class ScriptRegistryService" in ADDON_TEXT
     assert "self.shared_context_service = SharedContextService(self.shared_context)" in ADDON_TEXT
-    assert "self.script_registry_service = ScriptRegistryService()" in ADDON_TEXT
+    assert "self.script_registry_service = ScriptRegistryService(self)" in ADDON_TEXT
 

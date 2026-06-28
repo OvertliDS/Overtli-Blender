@@ -94,11 +94,11 @@ from .workflow_intelligence_tools import register_workflow_intelligence_tools
 from .workspace_tools import register_workspace_tools
 
 
-def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | None = None) -> None:
+def register_all_tools(mcp: Any, get_blender_connection, *, image_type: Any | None = None, visible_tool_names: set[str] | None = None) -> None:
     """Register all MCP tool groups."""
 
     register_context_tools(mcp, get_blender_connection)
-    register_governance_tools(mcp, get_blender_connection)
+    register_governance_tools(mcp, get_blender_connection, visible_tool_names=visible_tool_names)
     register_preferences_tools(mcp, get_blender_connection)
     register_tool_profile_tools(mcp, get_blender_connection)
     register_bundled_skill_tools(mcp, get_blender_connection)

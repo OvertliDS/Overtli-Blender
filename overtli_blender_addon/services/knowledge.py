@@ -125,7 +125,7 @@ class SkillPackService:
         if pack.get("status") != "success": return pack
         handlers = self.server._build_command_handlers(); results = []
         for op in pack["skill_pack"].get("operations", [])[:int(max_operations)]:
-            cmd = op.get("command"); results.append({"command": cmd, "result": handlers[cmd](**op.get("params", {})) if cmd in handlers and cmd != "execute_code" else {"status": "blocked", "message": "blocked or unknown command"}})
+            cmd = op.get("command"); results.append({"command": cmd, "result": handlers[cmd](**op.get("params", {})) if cmd in handlers else {"status": "blocked", "message": "blocked or unknown command"}})
         return {"status": "success", "pack_id": pack_id, "results": results}
     def delete_skill_packs(self, pack_ids, confirm=False, artifact_root=None):
         if not confirm: return {"status": "error", "message": "delete_skill_packs requires confirm=True"}

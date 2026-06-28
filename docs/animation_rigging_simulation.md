@@ -39,6 +39,12 @@ Driver creation is also confirmation-gated and uses the structured driver DSL.
 Simulation preview, bake, and cache clearing report approval-required or unsupported
 instead of claiming unverified cache execution.
 
+The audit remediation pass also hardened lower-level rigging service paths:
+
+- Armature bone creation rejects zero-length head/tail pairs unless the caller explicitly opts into `auto_offset_tail`.
+- Pose bone rotation accepts 3-item Euler input by switching/keying `rotation_euler` in `XYZ` mode, and 4-item quaternion input by switching/keying `rotation_quaternion`.
+- Material driver variables must name an object source or explicitly use the scene as the source; the runtime no longer assigns a raw Material datablock as a driver variable target.
+
 ## Smoke
 
 After refreshing or reloading the Blender addon, run:

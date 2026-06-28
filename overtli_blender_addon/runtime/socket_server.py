@@ -34,7 +34,7 @@ class BlenderMCPServer:
             'history': []     # Operation history
         }
         self.shared_context_service = SharedContextService(self.shared_context)
-        self.script_registry_service = ScriptRegistryService()
+        self.script_registry_service = ScriptRegistryService(self)
         self.scene_observation_service = SceneObservationService(self)
         self.viewport_screenshot_service = ViewportScreenshotService(self)
         self.scene_intelligence_service = SceneIntelligenceService(self)
@@ -2598,7 +2598,7 @@ class BlenderMCPServer:
             if 'arm' in texture_nodes:
                 separate_rgb = nodes.new(type='ShaderNodeSeparateRGB')
                 separate_rgb.location = (-200, -100)
-                links.new(texture_nodes['arm'].outputs['Color'], separate_rgb.inputs['Image'])
+                links.new(overtli_node_output(texture_nodes['arm'], ("Color",), "RGBA"), overtli_separate_color_input(separate_rgb))
 
                 # Connect Roughness (G) if no dedicated roughness map
                 if not any(map_name in texture_nodes for map_name in ['roughness', 'rough']):

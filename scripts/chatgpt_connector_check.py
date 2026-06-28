@@ -55,8 +55,12 @@ REQUIRED_BROWSER_TOOLS = {
     "create_primitive_object",
     "transform_object",
     "duplicate_object",
+    "delete_objects",
+    "clear_scene",
     "create_collection",
     "move_objects_to_collection",
+    "delete_collection",
+    "measure_object",
     "set_object_visibility",
     "create_basic_material",
     "assign_material",
@@ -75,16 +79,13 @@ REQUIRED_BROWSER_TOOLS = {
     "run_verified_edit_batch",
     "run_presentation_workflow_batch",
 }
-DANGEROUS_BROWSER_TOOLS = {
+FULL_BROWSER_REQUIRED_HIGH_RISK_TOOLS = {
     "execute_code",
     "execute_blender_code",
-    "download_polyhaven_asset",
-    "download_sketchfab_model",
-    "create_rodin_job",
-    "delete_objects",
-    "execute_approved_file_delete",
-    "execute_cache_cleanup",
+    "register_context_script",
+    "execute_context_script",
     "run_verified_snippet_smoke",
+    "run_skill_pack",
     "execute_approved_addon_operator",
     "install_local_addon",
     "enable_blender_addon",
@@ -199,11 +200,9 @@ def _static_checks() -> list[dict]:
         checks.append(_result("tool_profile_exists", profile is not None))
         checks.append(_result("tool_profile_legacy_alias", legacy is not None and legacy.to_dict() == profile.to_dict() if profile is not None else False))
         if profile is not None:
-            checks.append(_result("tool_profile_bounded", profile.max_visible_tools <= 160, {"max_visible_tools": profile.max_visible_tools}))
+            checks.append(_result("tool_profile_full_structured_surface", profile.max_visible_tools >= 500, {"max_visible_tools": profile.max_visible_tools}))
             checks.append(_result("tool_profile_remote_safe", profile.permission_profile == "browser_standard", profile.permission_profile))
-            hidden = set(profile.hidden_risky_tools)
-            checks.append(_result("tool_profile_hides_raw_python", "execute_code" in hidden and "execute_blender_code" in hidden))
-            checks.append(_result("tool_profile_hides_provider_downloads", {"download_polyhaven_asset", "download_sketchfab_model", "create_rodin_job"} <= hidden))
+            checks.append(_result("tool_profile_exposes_full_surface", profile.hidden_risky_tools == (), {"hidden": list(profile.hidden_risky_tools)}))
 
     from overtli_blender.runtime.capabilities import PROFILE_CAPABILITIES
 
@@ -212,9 +211,9 @@ def _static_checks() -> list[dict]:
     checks.append(_result("remote_safety_profile_exists", bool(remote_caps)))
     checks.append(_result("remote_safety_legacy_alias", legacy_caps == remote_caps))
     checks.append(_result("remote_safety_allows_scene_write", "scene.write" in remote_caps))
-    checks.append(_result("remote_safety_disables_raw_python", "raw_python" not in remote_caps))
-    checks.append(_result("remote_safety_disables_external_write", "filesystem.external.write" not in remote_caps))
-    checks.append(_result("remote_safety_disables_file_delete", "filesystem.delete" not in remote_caps))
+    checks.append(_result("remote_safety_allows_raw_python", "raw_python" in remote_caps))
+    checks.append(_result("remote_safety_allows_external_write", "filesystem.external.write" in remote_caps))
+    checks.append(_result("remote_safety_allows_approved_file_delete", "filesystem.delete" in remote_caps))
 
     return checks
 
@@ -235,7 +234,7 @@ def _browser_write_profile_checks(url: str | None = None) -> list[dict]:
     checks.append(_result("browser_standard_exists", bool(browser_caps)))
     checks.append(_result("remote_browser_safe_aliases_browser_standard", browser_caps == legacy_caps))
     checks.append(_result("browser_standard_allows_safe_scene_write", {"scene.read", "scene.write", "filesystem.project.write"} <= browser_caps, sorted(browser_caps)))
-    checks.append(_result("browser_standard_blocks_danger_caps", not {"raw_python", "network.providers", "filesystem.delete", "addon.manage", "addon.execute", "external_process"}.intersection(browser_caps)))
+    checks.append(_result("browser_standard_allows_escape_hatch_caps", {"raw_python", "addon.manage", "addon.execute", "external_process", "filesystem.external.write"} <= browser_caps))
     prefs = default_preferences()
     security = prefs.get("security", {})
     checks.append(_result("approval_modes_exist", {"always_ask", "ask_for_medium_high", "ask_for_high_destructive", "ask_for_destructive_only", "full_access_developer", "read_only"} <= APPROVAL_MODES))
@@ -246,9 +245,9 @@ def _browser_write_profile_checks(url: str | None = None) -> list[dict]:
     server = create_mcp_server(profile="browser_full_standard", remote_safety="browser_standard")
     tools = set(server._tool_manager._tools)  # type: ignore[attr-defined]
     missing = sorted(REQUIRED_BROWSER_TOOLS - tools)
-    dangerous_visible = sorted(DANGEROUS_BROWSER_TOOLS.intersection(tools))
+    high_risk_missing = sorted(FULL_BROWSER_REQUIRED_HIGH_RISK_TOOLS - tools)
     checks.append(_result("browser_required_tools_visible", not missing, {"missing": missing, "visible_count": len(tools)}))
-    checks.append(_result("browser_danger_tools_hidden", not dangerous_visible, {"visible": dangerous_visible}))
+    checks.append(_result("browser_high_risk_tools_visible", not high_risk_missing, {"missing": high_risk_missing}))
     checks.append(_result("browser_execute_approved_visible", "execute_approved_operation" in tools))
     checks.append(_result("browser_approve_and_execute_visible", "approve_and_execute_operation" in tools))
     if url:

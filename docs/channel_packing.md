@@ -13,3 +13,5 @@ Supported layouts:
 Packed outputs are classified as `derived`, not native bake passes. They use `Non-Color` color-space intent and default to `textures/packed/`.
 
 `validate_packed_texture` checks whether the packed image or file exists, reports layout channel metadata, and returns file hash information when a file is available. Overwriting packed outputs requires approval.
+
+Packed ARM material assembly uses node-socket introspection for Separate RGB/Separate Color inputs. It prefers `Color`, falls back through compatible sockets, and does not assume the legacy `Image` input name. This is required for Blender 4.x/5.x compatibility.

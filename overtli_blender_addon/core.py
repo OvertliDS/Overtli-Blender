@@ -117,6 +117,7 @@ try:
     from overtli_blender.runtime.project_workspace import repair_workspace_layout as runtime_repair_workspace_layout
     from overtli_blender.runtime.project_workspace import resolve_artifact_workspace as runtime_resolve_artifact_workspace
     from overtli_blender.runtime.project_workspace import resolve_workspace as runtime_resolve_workspace
+    from overtli_blender.runtime.project_workspace import temp_workspace_root as runtime_temp_workspace_root
     from overtli_blender.runtime.project_workspace import validate_layout as runtime_validate_layout
     from overtli_blender.runtime.spatial import angle_degrees as runtime_angle_degrees
     from overtli_blender.runtime.spatial import convert_units as runtime_convert_units
@@ -631,6 +632,11 @@ except ModuleNotFoundError:
         result["session_id"] = root.name
         result["warnings"] = ["Unsaved .blend artifacts are stored in a user-local Overtli-Blender temp workspace, not the addon installation folder."]
         return result
+
+    def runtime_temp_workspace_root(session_id=None):
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("TMP") or os.environ.get("TEMP") or os.path.expanduser("~")
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(session_id or "session")).strip("._-") or "session"
+        return _phase7c_canonical_path(Path(base) / "Overtli-Blender" / "temp_workspaces" / safe)
 
     def runtime_resolve_artifact_workspace(blend_filepath=None, preferred_root=None, session_id=None, create_if_missing=True):
         resolved = runtime_resolve_workspace(blend_filepath, preferred_root=preferred_root, allow_repo_fallback=False)

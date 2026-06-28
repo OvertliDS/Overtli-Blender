@@ -25,12 +25,15 @@ def test_server_status_can_allow_public_tunnel_hosts() -> None:
     assert server.settings.transport_security.enable_dns_rebinding_protection is False
 
 
-def test_chatgpt_profile_filters_http_visible_tools() -> None:
+def test_chatgpt_profile_exposes_full_http_visible_tools() -> None:
     from overtli_blender.server import create_mcp_server
 
+    full_server = create_mcp_server(profile=None, remote_safety=None)
     server = create_mcp_server(profile="chatgpt_browser_default", remote_safety="remote_browser_safe")
+    full_tools = set(full_server._tool_manager._tools)  # type: ignore[attr-defined]
     tools = set(server._tool_manager._tools)  # type: ignore[attr-defined]
-    assert len(tools) <= 160
+    assert tools == full_tools
+    assert len(tools) >= 500
     assert "search_tools" in tools
     assert "get_tool_spec" in tools
     assert "prepare_operation" in tools
@@ -38,12 +41,18 @@ def test_chatgpt_profile_filters_http_visible_tools() -> None:
     assert "execute_approved_operation" in tools
     assert "approve_and_execute_operation" in tools
     assert "create_primitive_object" in tools
+    assert "clear_scene" in tools
+    assert "delete_objects" in tools
+    assert "delete_collection" in tools
+    assert "measure_object" in tools
     assert "create_basic_material" in tools
     assert "assign_material" in tools
     assert "create_camera" in tools
-    assert "execute_code" not in tools
-    assert "execute_approved_addon_operator" not in tools
-    assert "download_polyhaven_asset" not in tools
+    assert "execute_code" in tools
+    assert "execute_blender_code" in tools
+    assert "execute_approved_addon_operator" in tools
+    assert "download_polyhaven_asset" in tools
+    assert "execute_approved_file_delete" in tools
 
 
 def test_http_bridge_exposes_tunnel_client_oauth_discovery_routes() -> None:

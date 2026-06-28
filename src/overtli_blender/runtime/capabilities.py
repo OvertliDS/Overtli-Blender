@@ -63,30 +63,13 @@ CAPABILITIES = {
 
 PROFILE_CAPABILITIES = {
     "read_only": {"scene.read", "filesystem.project.read", "addon.inspect", "knowledge.read", "animation.read", "drivers.read", "rigging.read", "pose.read", "shots.read", "simulation.read", "motion.validate", "product.ux", "skills.read"},
-    "browser_standard": {
-        "scene.read", "scene.write", "scene.write.safe_structured",
-        "filesystem.project.read", "filesystem.project.write", "project.read", "project.write.safe_workspace",
-        "addon.inspect", "knowledge.read", "knowledge.write",
-        "texture.bake", "texture.pack", "materials.write", "camera.write", "lighting.write",
-        "verification.write", "workflow.safe_batch",
-        "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth",
-        "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write",
-        "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write",
-        "motion.validate", "product.ux", "skills.read", "skills.manage",
-        "approval.prepare", "approval.approve", "approval.execute",
-    },
-    "remote_browser_safe": {
-        "scene.read", "scene.write", "scene.write.safe_structured",
-        "filesystem.project.read", "filesystem.project.write", "project.read", "project.write.safe_workspace",
-        "addon.inspect", "knowledge.read", "knowledge.write",
-        "texture.bake", "texture.pack", "materials.write", "camera.write", "lighting.write",
-        "verification.write", "workflow.safe_batch",
-        "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth",
-        "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write",
-        "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write",
-        "motion.validate", "product.ux", "skills.read", "skills.manage",
-        "approval.prepare", "approval.approve", "approval.execute",
-    },
+    # Browser Standard is the trusted local browser connector capability set.
+    # Tool visibility and approval prompts are separate concerns: this profile
+    # lets Browser Full Standard expose the complete callable MCP surface while
+    # the approval mode, per-tool confirmation flags, and addon safety scanner
+    # decide when a request must pause or be blocked.
+    "browser_standard": set(CAPABILITIES),
+    "remote_browser_safe": set(CAPABILITIES),
     "standard": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "addon.inspect", "knowledge.read", "knowledge.write", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth", "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write", "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write", "motion.validate", "product.ux", "skills.read", "skills.manage"},
     "trusted_project": {"scene.read", "scene.write", "filesystem.project.read", "filesystem.project.write", "scene.destructive", "addon.inspect", "knowledge.read", "knowledge.write", "release.export", "texture.bake", "texture.pack", "modeling.advanced", "references.construct", "sculpt.workflow", "simulation.cloth", "animation.read", "animation.write", "drivers.read", "drivers.write", "rigging.read", "rigging.write", "pose.read", "pose.write", "shots.read", "shots.write", "simulation.read", "simulation.write", "motion.validate", "product.ux", "skills.read", "skills.manage"},
     "developer": set(CAPABILITIES),
